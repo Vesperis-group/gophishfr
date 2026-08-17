@@ -96,11 +96,6 @@ Keep PRs incremental. Never hide a major migration inside a
   ./scripts/verify.sh
   ```
 
-  > **Bootstrap note.** `scripts/verify.sh` and part of the CI described in
-  > this file are being added incrementally by the bootstrap PR sequence. Until
-  > it exists, run `gofmt -l .`, `go vet ./...` and `go test ./...` by hand.
-  > Remove this note once the script is in place.
-
 - Never claim a check was run if it was not.
 - Behaviour changes require tests. Bug fixes require a regression test.
 - Security, auth, session and parser code is **high priority** for tests.

@@ -32,10 +32,10 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          # Toolchain used to build the linters, not to build GophishFR:
-          # deliberately decoupled from the project matrix below. actionlint
-          # v1.7.12 requires Go >= 1.25, and setup-go pins GOTOOLCHAIN=local.
-          go-version: '1.25'
+          # go.mod is the single source of truth for the toolchain, here as
+          # everywhere else in this pipeline.
+          go-version-file: go.mod
+          check-latest: true
 
       # go install verifies the module against the Go checksum database, so the
       # pinned version is tamper-evident.
@@ -79,7 +79,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.23'
+          go-version-file: go.mod
+          check-latest: true
 
       - name: gofmt
         run: |
@@ -105,7 +106,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.23'
+          go-version-file: go.mod
+          check-latest: true
 
       - name: go vet
         run: go vet ./...
@@ -114,22 +116,17 @@ jobs:
     name: Go build
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        # Mirrors the versions upstream tested at the baseline commit.
-        # Modernising this matrix belongs to build/modernize-go-toolchain.
-        go: ['1.21', '1.22', '1.23']
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up Go ${{ matrix.go }}
+      - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ matrix.go }}
+          go-version-file: go.mod
+          check-latest: true
 
       # No `go get` here, unlike the upstream workflow: dependencies come from
       # the committed go.mod/go.sum only, so CI can never silently resolve a
@@ -144,20 +141,17 @@ jobs:
     name: Go test
     runs-on: ubuntu-24.04
     timeout-minutes: 20
-    strategy:
-      fail-fast: false
-      matrix:
-        go: ['1.21', '1.22', '1.23']
     steps:
       - name: Checkout
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
 
-      - name: Set up Go ${{ matrix.go }}
+      - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: ${{ matrix.go }}
+          go-version-file: go.mod
+          check-latest: true
 
       - name: Test
         run: go test -coverprofile=coverage.out -covermode=atomic ./...
@@ -166,7 +160,7 @@ jobs:
         run: |
           total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
           echo "Total coverage: ${total}"
-          echo "Go ${{ matrix.go }} total coverage: ${total}" >> "${GITHUB_STEP_SUMMARY}"
+          echo "Total coverage: ${total}" >> "${GITHUB_STEP_SUMMARY}"
 
   go-race:
     name: Go test (race)
@@ -181,7 +175,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
-          go-version: '1.23'
+          go-version-file: go.mod
+          check-latest: true
 
       # GophishFR is a concurrent mail sender with background workers. Data
       # races here are real bugs, not theoretical ones.
