@@ -10,11 +10,14 @@ RUN gulp
 
 
 # Build Golang binary
-FROM golang:1.15.2 AS build-golang
+FROM golang:1.25.13-bookworm@sha256:e401dae1bf814e29204a8cb7915682e1780951e609ca0dd8865ee1937f510c48 AS build-golang
 
 WORKDIR /go/src/github.com/gophish/gophish
 COPY . .
-RUN go get -v && go build -v
+# No `go get`: dependencies come from the committed go.mod/go.sum only, and
+# their checksums are verified before anything is compiled.
+RUN go mod download && go mod verify
+RUN go build -v
 
 
 # Runtime container

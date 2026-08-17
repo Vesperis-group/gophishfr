@@ -62,8 +62,7 @@ Run the same gates CI runs, locally:
 ./scripts/verify.sh
 ```
 
-> **Bootstrap note.** This script is being added by the bootstrap PR sequence.
-> Until it lands, run `gofmt -l .`, `go vet ./...` and `go test ./...`.
+`--quick` skips the race detector when iterating; CI always runs it.
 
 ## Submitting a pull request
 
