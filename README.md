@@ -1,3 +1,25 @@
+GophishFR
+=========
+
+**GophishFR is a derivative of [Gophish](https://github.com/gophish/gophish), the
+open-source phishing framework by Jordan Wright.** See [NOTICE](NOTICE) for
+attribution and [LICENSE](LICENSE) for the MIT license that governs this code.
+
+> **Status: bootstrap.** This repository currently tracks upstream Gophish
+> behaviour as closely as possible while a DevSecOps foundation is put in
+> place. No GophishFR functional or visual change has been made yet.
+>
+> Baseline: upstream `master` @ `9561846`. Upstream history is preserved in
+> this repository; see `docs/UPSTREAM_SYNC.md` for the synchronisation
+> procedure.
+
+GophishFR is **not** affiliated with or endorsed by the Gophish project. Do not
+report GophishFR issues upstream.
+
+---
+
+The upstream Gophish README follows, unchanged.
+
 ![gophish logo](https://raw.github.com/gophish/gophish/master/static/images/gophish_purple.png)
 
 Gophish
