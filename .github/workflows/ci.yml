@@ -187,3 +187,44 @@ jobs:
       # races here are real bugs, not theoretical ones.
       - name: Test with race detector
         run: go test -race ./...
+  # --------------------------------------------------------------------------
+  # Single aggregating gate.
+  #
+  # Branch protection references status checks by name. Naming the matrix legs
+  # directly ("Go build (1.21)", ...) couples the ruleset to the build matrix:
+  # the day the matrix changes, the required contexts stop reporting and main
+  # becomes permanently unmergeable, with no signal explaining why.
+  #
+  # This job is the only required context. The matrix can then evolve freely,
+  # and adding a new gate to the pipeline is a one-line change to `needs`
+  # instead of an out-of-band ruleset edit that is easy to forget.
+  # --------------------------------------------------------------------------
+  ci-success:
+    name: CI success
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    # Must run even when a dependency failed, otherwise the required check
+    # would simply never report and the PR would hang instead of failing.
+    if: always()
+    needs:
+      - workflow-lint
+      - go-format
+      - go-vet
+      - go-build
+      - go-test
+      - go-race
+    steps:
+      # "not failed" is not the same as "succeeded": a skipped or cancelled job
+      # must not be able to pass as a green gate.
+      - name: Require every gate to have succeeded
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Upstream job results: ${RESULTS}"
+          for result in ${RESULTS}; do
+            if [ "${result}" != "success" ]; then
+              echo "::error::A required CI job did not succeed (${result})."
+              exit 1
+            fi
+          done
+          echo "All required CI jobs succeeded."

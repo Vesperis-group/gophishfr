@@ -101,31 +101,68 @@ gh api repos/Vesperis-group/gophishfr/rulesets/<ID> --jq '.rules[].type'
 
 ## 3. Required status checks
 
-Status checks are added to the ruleset once their job names are stable, so the
-ruleset never references a check that no longer exists (which would block every
-merge).
+**Applied.** The ruleset requires exactly one status check:
 
-```bash
-# Read the current ruleset, add the required_status_checks rule, PUT it back.
-gh api repos/Vesperis-group/gophishfr/rulesets/<ID> -X PUT --input - <<'JSON'
-{
-  "rules": [
-    {
-      "type": "required_status_checks",
-      "parameters": {
-        "strict_required_status_checks_policy": true,
-        "required_status_checks": [
-          { "context": "<job name>" }
-        ]
-      }
-    }
-  ]
-}
-JSON
-```
+| Required context | Source |
+|---|---|
+| `CI success` | job `ci-success` in `.github/workflows/ci.yml` |
+
+`ci-success` is an aggregating gate: it `needs` every other CI job and fails
+unless all of them reported `success`. It is the only context in the ruleset,
+on purpose.
+
+Naming individual jobs here — `Go build (1.21)`, `Go test (1.23)`, ... — would
+couple the ruleset to the build matrix. The first PR that changes the matrix
+would leave the ruleset waiting forever on contexts that no longer report, and
+`main` would become permanently unmergeable with no signal explaining why.
+With the aggregating gate, the matrix and the job list can evolve inside a
+normal PR, reviewed with the code that motivates them, and protection follows
+automatically.
 
 `strict_required_status_checks_policy: true` requires the branch to be up to
-date with `main` before merging.
+date with `main` before merging, so a PR cannot be merged on the strength of a
+CI run that never saw the current state of `main`.
+
+### Reproduce
+
+```bash
+# Read the current ruleset, replace the required_status_checks rule, PUT it back.
+gh api repos/Vesperis-group/gophishfr/rulesets/20960512 > /tmp/rs.json
+jq '{name, target, enforcement, conditions, bypass_actors, rules}' /tmp/rs.json > /tmp/rs-base.json
+
+cat > /tmp/checks.json <<'JSON'
+{
+  "type": "required_status_checks",
+  "parameters": {
+    "strict_required_status_checks_policy": true,
+    "do_not_enforce_on_create": false,
+    "required_status_checks": [
+      { "context": "CI success" }
+    ]
+  }
+}
+JSON
+
+jq --slurpfile new /tmp/checks.json \
+  '.rules = ((.rules | map(select(.type != "required_status_checks"))) + $new)' \
+  /tmp/rs-base.json > /tmp/rs-new.json
+
+gh api repos/Vesperis-group/gophishfr/rulesets/20960512 -X PUT --input /tmp/rs-new.json
+```
+
+### Verify
+
+```bash
+gh api repos/Vesperis-group/gophishfr/rulesets/20960512 \
+  --jq '.rules[] | select(.type=="required_status_checks") | .parameters
+        | {strict: .strict_required_status_checks_policy,
+           checks: [.required_status_checks[].context]}'
+```
+
+### Rule
+
+Adding a CI gate means adding it to `needs:` of `ci-success`, **not** adding a
+context to the ruleset. The ruleset should not need to change again.
 
 ---
 
