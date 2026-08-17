@@ -1,0 +1,97 @@
+name: Bug report
+description: Something in GophishFR does not work as expected
+labels: ["bug", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not report security vulnerabilities here.**
+        Use [private vulnerability reporting](https://github.com/Vesperis-group/gophishfr/security/advisories/new) instead — see [SECURITY.md](../blob/main/SECURITY.md).
+
+        If the bug also exists in unmodified upstream Gophish, please consider reporting it to [the Gophish project](https://github.com/gophish/gophish/issues) as well.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you start
+      options:
+        - label: This is not a security vulnerability
+          required: true
+        - label: I searched existing issues and did not find a duplicate
+          required: true
+
+  - type: input
+    id: version
+    attributes:
+      label: GophishFR version or commit SHA
+      placeholder: "main @ 9561846, or v0.1.0"
+    validations:
+      required: true
+
+  - type: dropdown
+    id: component
+    attributes:
+      label: Component
+      options:
+        - Admin interface
+        - API
+        - Phishing / campaign server
+        - Email sending (SMTP)
+        - IMAP monitor
+        - Webhooks
+        - Import (site / email / CSV)
+        - Templates and landing pages
+        - Database / migrations
+        - Docker image
+        - Build / CI
+        - Other or unsure
+    validations:
+      required: true
+
+  - type: input
+    id: environment
+    attributes:
+      label: Environment
+      description: OS, architecture, database, install method
+      placeholder: "Ubuntu 24.04 amd64, SQLite, Docker image"
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: What did you expect to happen?
+    validations:
+      required: true
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: What actually happened?
+    validations:
+      required: true
+
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Relevant logs or output
+      description: Redact any real recipient address, credential or token before pasting.
+      render: text
+
+  - type: textarea
+    id: template
+    attributes:
+      label: Email template or landing page (if relevant)
+      description: Use clearly fake data only.
+      render: html

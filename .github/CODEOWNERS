@@ -1,1 +1,54 @@
-* @Vesperis-group/gophishfr-maintainers
+# CODEOWNERS — GophishFR
+#
+# Review ownership for GophishFR. Paths listed later win over earlier ones,
+# so the sensitive surfaces at the bottom take precedence over the catch-all.
+#
+# This file only requests reviewers. It is NOT an access control mechanism on
+# its own: it is only enforced when the `main` ruleset requires Code Owner
+# review. See docs/GITHUB_RULESETS.md.
+
+# Default owner for everything
+*                               @Vesperis-group/gophishfr-maintainers
+
+# --- Supply chain and CI/CD -------------------------------------------------
+# Workflows are executable, secret-adjacent code.
+/.github/                       @Vesperis-group/gophishfr-maintainers
+/.github/workflows/             @Vesperis-group/gophishfr-maintainers
+/.github/dependabot.yml         @Vesperis-group/gophishfr-maintainers
+/.github/CODEOWNERS             @Vesperis-group/gophishfr-maintainers
+
+# --- Dependencies and build reproducibility ---------------------------------
+/go.mod                         @Vesperis-group/gophishfr-maintainers
+/go.sum                         @Vesperis-group/gophishfr-maintainers
+/package.json                   @Vesperis-group/gophishfr-maintainers
+/package-lock.json              @Vesperis-group/gophishfr-maintainers
+/yarn.lock                      @Vesperis-group/gophishfr-maintainers
+/Dockerfile                     @Vesperis-group/gophishfr-maintainers
+/docker/                        @Vesperis-group/gophishfr-maintainers
+/scripts/                       @Vesperis-group/gophishfr-maintainers
+
+# --- Security-sensitive application surfaces --------------------------------
+# Authentication, sessions and password handling
+/auth/                          @Vesperis-group/gophishfr-maintainers
+# CSRF, rate limiting, security headers, request pipeline
+/middleware/                    @Vesperis-group/gophishfr-maintainers
+# HTTP handlers and API, including untrusted input handling
+/controllers/                   @Vesperis-group/gophishfr-maintainers
+# Persistence, queries and migrations
+/db/                            @Vesperis-group/gophishfr-maintainers
+/models/                        @Vesperis-group/gophishfr-maintainers
+# Configuration and TLS surface
+/config/                        @Vesperis-group/gophishfr-maintainers
+/config.json                    @Vesperis-group/gophishfr-maintainers
+# Outbound email, IMAP ingestion, outbound webhooks
+/mailer/                        @Vesperis-group/gophishfr-maintainers
+/imap/                          @Vesperis-group/gophishfr-maintainers
+/webhook/                       @Vesperis-group/gophishfr-maintainers
+/dialer/                        @Vesperis-group/gophishfr-maintainers
+
+# --- Licensing, governance and security policy ------------------------------
+/LICENSE                        @Vesperis-group/gophishfr-maintainers
+/NOTICE                         @Vesperis-group/gophishfr-maintainers
+/SECURITY.md                    @Vesperis-group/gophishfr-maintainers
+/CLAUDE.md                      @Vesperis-group/gophishfr-maintainers
+/docs/                          @Vesperis-group/gophishfr-maintainers

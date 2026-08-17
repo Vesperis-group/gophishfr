@@ -1,44 +1,96 @@
-# Contribute to gophish
+# Contributing to GophishFR
 
-Thank you for your interest in contributing to gophish! It is our goal to make the best simulated phishing framework possible, and we are excited you want to help out.
+Thanks for your interest in GophishFR!
 
-This guide details how to contribute to gophish in a way that is efficient for everyone involved.
+GophishFR is a derivative of [Gophish](https://github.com/gophish/gophish).
+Before contributing, please read [NOTICE](NOTICE) and [LICENSE](LICENSE).
 
-Gophish currently only comes in one flavor, gophish Community Edition (CE), which is our free and open source edition. In the future, we reserve the right to create an Enterprise Edition, though we're currently pouring our effort into create a rock-solid open source platform. This document will be updated if an EE edition is created.
+> **Contributing upstream instead.** If your change is a general Gophish
+> improvement rather than a GophishFR-specific one, please consider sending it
+> to [the Gophish project](https://github.com/gophish/gophish) so every
+> downstream user benefits. We will pick it up on our next upstream sync.
 
-## Contributor license agreement
+## Security issues
 
-By submitting code as an individual you agree to the
-[individual contributor license agreement](doc/individual_contributor_license_agreement.md).
-By submitting code as an entity you agree to the
-[corporate contributor license agreement](doc/corporate_contributor_license_agreement.md).
+**Do not open a public issue for a suspected vulnerability.** Follow
+[SECURITY.md](SECURITY.md) and use GitHub Private Vulnerability Reporting.
 
-## Security vulnerability disclosure
+## Licensing of contributions
 
-Please report suspected security vulnerabilities in private to
-`security@getgophish.com`.
-Please do **NOT** create publicly viewable issues for suspected security
-vulnerabilities.
+By submitting a contribution you agree that it is licensed under the MIT
+license of this repository (see [LICENSE](LICENSE)), and that you have the
+right to submit it.
 
-## Closing policy for issues and merge requests
+The upstream Gophish contributor license agreements under `doc/` are kept for
+historical attribution. **They do not apply to GophishFR contributions.**
 
-It is our goal that gophish will become a popular tool for the infosec community. If this were to happen, we may begin receiving more issues and merge requests than we can keep up with.
+## Ground rules
 
-Out of respect for our volunteers, issues and merge requests not in line with the guidelines listed in this document may be closed without notice. It will always be our goal to try and provide at least a reason why the issue is closed as much as possible.
+The full, binding engineering rules live in [CLAUDE.md](CLAUDE.md). They apply
+to humans and AI agents alike. The essentials:
 
-Please treat our volunteers with courtesy and respect, it will go a long way
-towards getting your issue resolved.
+- Never work directly on `main`. One change = one branch = one pull request.
+- **Every commit must be signed** (`git commit -S`) and verified.
+- Use [Conventional Commits](https://www.conventionalcommits.org/):
+  `feat:`, `fix:`, `security:`, `ci:`, `build:`, `test:`, `refactor:`,
+  `docs:`, `chore:`.
+- No secrets, anywhere. Examples must be obviously fake.
+- Behaviour changes need tests. Bug fixes need a regression test.
+- New dependencies must be justified (need, alternative, security impact,
+  maintenance impact) and pinned.
+- Never disable or blanket-ignore a security check to make CI pass.
 
-Issues and merge requests should be in English and contain appropriate language
-for audiences of all ages.
+## Getting started
 
-## I want to contribute!
+```bash
+git clone git@github.com:Vesperis-group/gophishfr.git
+cd gophishfr
+git remote add upstream https://github.com/gophish/gophish.git
+git remote set-url --push upstream DISABLED-NO-PUSH-UPSTREAM
+```
 
-**Awesome!** We're excited to have your help. If you want to contribute to gophish, but are not sure where to start,
-look for [issues with the label `contributor-friendly`][contributor-friendly]. These issues
-will be of reasonable size and challenge, as well as not requiring a ton of internal plumbing on the gophish source code.
+Build and test:
 
-## Have Questions?
-If you ever have questions, please don't hesitate to reach out to us directly at `support@getgophish.com`
+```bash
+go build ./...
+go test ./...
+```
 
-[contributor-friendly]: https://github.com/gophish/gophish/labels/contributor-friendly
+Run the same gates CI runs, locally:
+
+```bash
+./scripts/verify.sh
+```
+
+> **Bootstrap note.** This script is being added by the bootstrap PR sequence.
+> Until it lands, run `gofmt -l .`, `go vet ./...` and `go test ./...`.
+
+## Submitting a pull request
+
+```bash
+git switch main
+git pull --ff-only origin main
+git switch -c feat/short-description
+# ... work ...
+git commit -S -m "feat: short description"
+git log -1 --show-signature      # confirm the signature
+git push -u origin feat/short-description
+```
+
+Then open a PR and fill in the template. A PR is ready to merge only when:
+
+- CI is fully green
+- every commit is signed and verified
+- the diff has been reviewed and no conversation is left unresolved
+- there are no merge conflicts
+
+## Responsible use
+
+GophishFR is a phishing simulation tool for **authorised** security awareness
+training and penetration testing. Contributions that exist only to make abuse
+easier, or to evade detection by the people being protected, will be declined.
+
+## Questions
+
+Open a [GitHub issue](https://github.com/Vesperis-group/gophishfr/issues) or a
+discussion. Please keep exchanges in English or French, and courteous.
