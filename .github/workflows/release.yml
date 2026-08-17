@@ -1,13 +1,29 @@
 name: Build Gophish Release
+
+# Least privilege by default: only the upload job may write to the release.
+permissions:
+  contents: read
+
 on:
     release:
         types: [created]
 
+concurrency:
+    group: release-${{ github.event.release.tag_name }}
+    cancel-in-progress: false
+
 jobs:
     build:
         name: Build Binary
+        # Runner labels are deliberately left floating for the build matrix.
+        # Pinning macOS/Windows images here would silently change which
+        # toolchain produces the published binaries, and CGO_ENABLED=1 makes
+        # that a real compatibility risk. Revisit in the release-pipeline PR,
+        # with artifact comparison. See docs/DEVSECOPS.md.
         runs-on: ${{ matrix.os }}
+        timeout-minutes: 30
         strategy:
+            fail-fast: false
             matrix:
                 os: [windows-latest, ubuntu-latest, macos-latest]
                 arch: ['386', amd64]
@@ -36,50 +52,86 @@ jobs:
                       arch: '386'
         steps:
             - name: Set up Go
-              uses: actions/setup-go@v2
+              uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
               with:
-                go-version: 1.22
+                go-version: '1.22'
+                # Release binaries must not be built from a mutable, shared
+                # cache: a poisoned module cache would end up inside published
+                # artifacts. Cost is a slower release build, which is fine.
+                cache: false
+
             - if: matrix.os == 'ubuntu-latest'
               run: sudo apt-get update && sudo apt-get install -y gcc-multilib
-            - if: matrix.arch == '386'
-              run: echo "RELEASE=gophish-${{ github.event.release.tag_name }}-${{ matrix.releaseos }}-32bit" >> $GITHUB_ENV
-            - if: matrix.arch == 'amd64'
-              run: echo "RELEASE=gophish-${{ github.event.release.tag_name }}-${{ matrix.releaseos }}-64bit" >> $GITHUB_ENV
+
+            # The release tag is interpolated through the environment rather
+            # than directly into the shell, so a crafted tag name cannot be
+            # executed as a command.
+            - if: matrix.arch == '386' && matrix.os != 'windows-latest'
+              env:
+                TAG_NAME: ${{ github.event.release.tag_name }}
+                RELEASE_OS: ${{ matrix.releaseos }}
+              run: echo "RELEASE=gophish-${TAG_NAME}-${RELEASE_OS}-32bit" >> "$GITHUB_ENV"
+
+            - if: matrix.arch == 'amd64' && matrix.os != 'windows-latest'
+              env:
+                TAG_NAME: ${{ github.event.release.tag_name }}
+                RELEASE_OS: ${{ matrix.releaseos }}
+              run: echo "RELEASE=gophish-${TAG_NAME}-${RELEASE_OS}-64bit" >> "$GITHUB_ENV"
+
+            # https://github.com/actions/runner/issues/1636
             - if: matrix.os == 'windows-latest'
-              run: echo "RELEASE=gophish-${{ github.event.release.tag_name }}-${{ matrix.releaseos }}-64bit" | Out-File -FilePath $env:GITHUB_ENV -Append # https://github.com/actions/runner/issues/1636
-            - uses: actions/checkout@v4
+              shell: pwsh
+              env:
+                TAG_NAME: ${{ github.event.release.tag_name }}
+                RELEASE_OS: ${{ matrix.releaseos }}
+              run: echo "RELEASE=gophish-$env:TAG_NAME-$env:RELEASE_OS-64bit" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                persist-credentials: false
+
+            # Dependencies come from the committed go.mod/go.sum only.
+            - name: Verify module checksums
+              run: go mod verify
+
             - name: Build ${{ matrix.goos }}/${{ matrix.arch }}
               run: go build -o ${{ matrix.bin }}
               env:
                 GOOS: ${{ matrix.goos }}
                 GOARCH: ${{ matrix.arch }}
                 CGO_ENABLED: 1
+
             - name: Upload to artifacts
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
               with:
                 name: ${{ env.RELEASE }}
                 path: ${{ matrix.bin }}
 
     package:
         name: Package Assets
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
+        timeout-minutes: 20
         needs: build
         steps:
-            - uses: actions/checkout@v4
-            - uses: actions/download-artifact@v4
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                persist-credentials: false
+
+            - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
               with:
                 path: bin
+
             - name: Package Releases
               run: |
                 mkdir releases;
                 for RELEASE_DIR in bin/*
                 do
-                  echo "Creating release $RELEASE_DIR"
-                  for BINARY in $RELEASE_DIR/*
+                  echo "Creating release ${RELEASE_DIR}"
+                  for BINARY in "${RELEASE_DIR}"/*
                   do
-                    cp $BINARY .;
-                    zip -r releases/$(basename $RELEASE_DIR).zip \
-                      $(basename ${BINARY}) \
+                    cp "${BINARY}" .;
+                    zip -r "releases/$(basename "${RELEASE_DIR}").zip" \
+                      "$(basename "${BINARY}")" \
                       static/js/dist \
                       static/js/src/vendor/ckeditor \
                       static/css/dist \
@@ -91,25 +143,32 @@ jobs:
                       README.md \
                       VERSION \
                       LICENSE \
+                      NOTICE \
                       config.json;
-                    rm $BINARY;
+                    rm "${BINARY}";
                   done
                 done
+
             - name: Upload to artifacts
-              uses: actions/upload-artifact@v4
+              uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
               with:
                 name: releases
                 path: releases/*.zip
-    
+
     upload:
         name: Upload to the Release
-        runs-on: ubuntu-latest
+        runs-on: ubuntu-24.04
+        timeout-minutes: 20
         needs: package
+        # Only this job writes, and only to releases.
+        permissions:
+            contents: write
         steps:
-            - uses: actions/download-artifact@v4
+            - uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7.0.0
               with:
                 name: releases
                 path: releases/
+
             # I would love to use @actions/upload-release-asset, but they don't
             # support wildcards in the asset path. Ref #9, #24, and #47
             - name: Upload Archives to Release
@@ -118,17 +177,18 @@ jobs:
                 API_HEADER: "Accept: application/vnd.github.v3+json"
                 AUTH_HEADER: "Authorization: token ${{ secrets.GITHUB_TOKEN }}"
               run: |
-                UPLOAD_URL=$(echo -n $UPLOAD_URL | sed s/\{.*//g)
+                UPLOAD_URL=$(echo -n "${UPLOAD_URL}" | sed s/\{.*//g)
                 for FILE in releases/*
                 do
                   echo "Uploading ${FILE}";
                   curl \
                     -H "${API_HEADER}" \
                     -H "${AUTH_HEADER}" \
-                    -H "Content-Type: $(file -b --mime-type ${FILE})" \
+                    -H "Content-Type: $(file -b --mime-type "${FILE}")" \
                     --data-binary "@${FILE}" \
-                    "${UPLOAD_URL}?name=$(basename ${FILE})";
+                    "${UPLOAD_URL}?name=$(basename "${FILE}")";
                 done
+
             - name: Generate SHA256 Hashes
               env:
                 API_HEADER: "Accept: application/vnd.github.v3+json"
@@ -139,8 +199,8 @@ jobs:
                 HASH_TABLE="${HASH_TABLE}\n|-----|-----|\n"
                 for FILE in releases/*
                 do
-                  FILENAME=$(basename ${FILE})
-                  HASH=$(sha256sum ${FILE} | cut -d ' ' -f 1)
+                  FILENAME=$(basename "${FILE}")
+                  HASH=$(sha256sum "${FILE}" | cut -d ' ' -f 1)
                   HASH_TABLE="${HASH_TABLE}|${HASH}|${FILENAME}|\n"
                 done
                 echo "${HASH_TABLE}"

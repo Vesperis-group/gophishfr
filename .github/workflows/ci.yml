@@ -1,36 +1,189 @@
 name: CI
+
+# Least privilege by default. Individual jobs elevate only if they must.
+permissions:
+  contents: read
+
 on:
-  - pull_request
-  - push
+  pull_request:
+  push:
+    branches:
+      - main
+
+# Cancel superseded runs on pull requests, but never cancel a run on main.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
-
-  build:
-    name: Build
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        goVer: [1.21, 1.22, 1.23]
-
+  # --------------------------------------------------------------------------
+  # Workflows are executable, secret-adjacent code. Lint them like source.
+  # --------------------------------------------------------------------------
+  workflow-lint:
+    name: Workflow lint
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
     steps:
-    - name: Set up Go ${{ matrix.goVer }}
-      uses: actions/setup-go@v5
-      with:
-        go-version: ${{ matrix.goVer }}
-      id: go
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
 
-    - name: Check out code into the Go module directory
-      uses: actions/checkout@v4
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          # Toolchain used to build the linters, not to build GophishFR:
+          # deliberately decoupled from the project matrix below. actionlint
+          # v1.7.12 requires Go >= 1.25, and setup-go pins GOTOOLCHAIN=local.
+          go-version: '1.25'
 
-    - name: Get dependencies
-      run: |
-        go get -v -t -d ./...
-        go get gopkg.in/check.v1
+      # go install verifies the module against the Go checksum database, so the
+      # pinned version is tamper-evident.
+      - name: Install actionlint
+        run: go install github.com/rhysd/actionlint/cmd/actionlint@v1.7.12
 
-    - name: Build
-      run: go build -v .
-    
-    - name: Format
-      run: diff -u <(echo -n) <(gofmt -d .)
-    
-    - name: Test
-      run: go test ./...
+      - name: Run actionlint
+        run: actionlint -color
+
+      - name: Install zizmor
+        run: pipx install zizmor==1.29.0
+
+      # Fails on any finding at or above "low", so an unpinned action, an
+      # over-broad permission or a template injection cannot reach main.
+      - name: Run zizmor
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: zizmor --min-severity=low .github/workflows/
+
+      # actionlint and zizmor verify that actions are pinned to a SHA, but not
+      # that the SHA is the version the trailing comment claims. This closes
+      # that gap. See scripts/verify-action-pins.sh.
+      - name: Verify action pins match their claimed versions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: ./scripts/verify-action-pins.sh
+
+  # --------------------------------------------------------------------------
+  # Go gates: one job per independent control, so a failure is readable.
+  # --------------------------------------------------------------------------
+  go-format:
+    name: Go format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.23'
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "${unformatted}" ]; then
+            echo "::error::These files are not gofmt-formatted:"
+            echo "${unformatted}"
+            gofmt -d .
+            exit 1
+          fi
+          echo "gofmt: clean"
+
+  go-vet:
+    name: Go vet
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.23'
+
+      - name: go vet
+        run: go vet ./...
+
+  go-build:
+    name: Go build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        # Mirrors the versions upstream tested at the baseline commit.
+        # Modernising this matrix belongs to build/modernize-go-toolchain.
+        go: ['1.21', '1.22', '1.23']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go ${{ matrix.go }}
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go }}
+
+      # No `go get` here, unlike the upstream workflow: dependencies come from
+      # the committed go.mod/go.sum only, so CI can never silently resolve a
+      # different version than the one that was reviewed.
+      - name: Verify module checksums
+        run: go mod verify
+
+      - name: Build
+        run: go build ./...
+
+  go-test:
+    name: Go test
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.21', '1.22', '1.23']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go ${{ matrix.go }}
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: ${{ matrix.go }}
+
+      - name: Test
+        run: go test -coverprofile=coverage.out -covermode=atomic ./...
+
+      - name: Coverage summary
+        run: |
+          total=$(go tool cover -func=coverage.out | awk '/^total:/ {print $3}')
+          echo "Total coverage: ${total}"
+          echo "Go ${{ matrix.go }} total coverage: ${total}" >> "${GITHUB_STEP_SUMMARY}"
+
+  go-race:
+    name: Go test (race)
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version: '1.23'
+
+      # GophishFR is a concurrent mail sender with background workers. Data
+      # races here are real bugs, not theoretical ones.
+      - name: Test with race detector
+        run: go test -race ./...
