@@ -1,0 +1,23 @@
+GophishFR
+=========
+
+Copyright (c) 2026 Vesperis Group
+
+This product includes and is derived from Gophish, the open-source phishing
+framework:
+
+    Gophish - Open-Source Phishing Framework
+    Copyright (c) 2013-2020 Jordan Wright
+    https://github.com/gophish/gophish
+
+Gophish is distributed under the MIT License, reproduced in the LICENSE file
+at the root of this repository. That license and its copyright notice apply to
+all Gophish-derived code contained here and must be preserved in any
+redistribution, in whole or in part.
+
+GophishFR is an independent derivative work. It is not affiliated with,
+endorsed by, sponsored by, or supported by the Gophish project or its authors.
+Please do not report GophishFR issues to the upstream Gophish project.
+
+The upstream history is preserved in this repository. The GophishFR baseline
+corresponds to upstream `master` at commit 9561846 (version 0.12.1+).
