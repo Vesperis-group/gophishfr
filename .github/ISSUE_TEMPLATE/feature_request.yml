@@ -1,0 +1,58 @@
+name: Feature request
+description: Suggest an improvement for GophishFR
+labels: ["enhancement", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Do not report security vulnerabilities here.**
+        Use [private vulnerability reporting](https://github.com/Vesperis-group/gophishfr/security/advisories/new) instead.
+
+        If your idea is a general Gophish improvement rather than a GophishFR-specific one, consider proposing it to [the Gophish project](https://github.com/gophish/gophish/issues) so every downstream user benefits.
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Before you start
+      options:
+        - label: This is not a security vulnerability
+          required: true
+        - label: I searched existing issues and did not find a duplicate
+          required: true
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do that is hard or impossible today?
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives considered
+
+  - type: textarea
+    id: security
+    attributes:
+      label: Security considerations
+      description: |
+        GophishFR handles untrusted input, credentials and email. Does this
+        proposal add an attack surface, a new dependency, or a new way to
+        reach the network?
+
+  - type: checkboxes
+    id: responsible-use
+    attributes:
+      label: Responsible use
+      options:
+        - label: This request is for authorised security awareness training or penetration testing, and does not exist primarily to make abuse easier or to evade detection by the people being protected
+          required: true
