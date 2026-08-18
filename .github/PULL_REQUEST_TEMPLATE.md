@@ -53,7 +53,7 @@
 - [ ] Workflow `permissions:` are minimal
 - [ ] New behaviour and bug fixes are covered by tests
 - [ ] Documentation updated if this change affects it
-- [ ] Upstream attribution (`LICENSE`, `NOTICE`) preserved
+- [ ] Historical attribution (`LICENSE`, `NOTICE`) preserved
 
 ## Risks and follow-ups
 

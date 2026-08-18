@@ -8,8 +8,6 @@ body:
         **Do not report security vulnerabilities here.**
         Use [private vulnerability reporting](https://github.com/Vesperis-group/gophishfr/security/advisories/new) instead — see [SECURITY.md](../blob/main/SECURITY.md).
 
-        If the bug also exists in unmodified upstream Gophish, please consider reporting it to [the Gophish project](https://github.com/gophish/gophish/issues) as well.
-
   - type: checkboxes
     id: preflight
     attributes:

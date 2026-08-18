@@ -8,8 +8,6 @@ body:
         **Do not report security vulnerabilities here.**
         Use [private vulnerability reporting](https://github.com/Vesperis-group/gophishfr/security/advisories/new) instead.
 
-        If your idea is a general Gophish improvement rather than a GophishFR-specific one, consider proposing it to [the Gophish project](https://github.com/gophish/gophish/issues) so every downstream user benefits.
-
   - type: checkboxes
     id: preflight
     attributes:

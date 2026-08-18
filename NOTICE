@@ -21,3 +21,7 @@ Please do not report GophishFR issues to the upstream Gophish project.
 
 The upstream history is preserved in this repository. The GophishFR baseline
 corresponds to upstream `master` at commit 9561846 (version 0.12.1+).
+
+Current GophishFR development is maintained independently in
+https://github.com/Vesperis-group/gophishfr. No synchronization with the
+historical Gophish project is planned.

@@ -5,13 +5,12 @@ GophishFR
 open-source phishing framework by Jordan Wright.** See [NOTICE](NOTICE) for
 attribution and [LICENSE](LICENSE) for the MIT license that governs this code.
 
-> **Status: bootstrap.** This repository currently tracks upstream Gophish
-> behaviour as closely as possible while a DevSecOps foundation is put in
-> place. No GophishFR functional or visual change has been made yet.
+> **Status: independently maintained.** `Vesperis-group/gophishfr` is the sole
+> source of truth and `main` is the stable branch. No synchronization with the
+> historical Gophish project is planned.
 >
-> Baseline: upstream `master` @ `9561846`. Upstream history is preserved in
-> this repository; see `docs/UPSTREAM_SYNC.md` for the synchronisation
-> procedure.
+> Historical baseline: Gophish `master` @ `9561846`. Its history and attribution
+> remain preserved in this repository.
 
 GophishFR is **not** affiliated with or endorsed by the Gophish project. Do not
 report GophishFR issues upstream.
