@@ -1,0 +1,167 @@
+//go:build browser && linux
+
+package controllers
+
+import (
+	"context"
+	"net/http/httptest"
+	"os"
+	"os/exec"
+	"path/filepath"
+	"syscall"
+	"testing"
+	"time"
+
+	"github.com/Vesperis-group/gophishfr/config"
+	"github.com/Vesperis-group/gophishfr/models"
+)
+
+const (
+	browserTestUsername = "browser-admin"
+	browserTestPassword = "browser-test-password"
+)
+
+func TestBrowserSmoke(t *testing.T) {
+	root := browserProjectRoot(t)
+	originalWorkingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	if err := os.Chdir(root); err != nil {
+		t.Fatalf("change to project root: %v", err)
+	}
+	t.Cleanup(func() {
+		if err := os.Chdir(originalWorkingDirectory); err != nil {
+			t.Errorf("restore working directory: %v", err)
+		}
+	})
+
+	t.Setenv(models.InitialAdminPassword, browserTestPassword)
+	t.Setenv(models.InitialAdminApiToken, "browser-test-api-token-not-a-secret")
+
+	databaseDirectory := t.TempDir()
+	conf := &config.Config{
+		DBName:         "sqlite3",
+		DBPath:         filepath.Join(databaseDirectory, "browser-smoke.db"),
+		MigrationsPath: filepath.Join(root, "db", "db_sqlite3", "migrations"),
+	}
+	if err := models.Setup(conf); err != nil {
+		t.Fatalf("set up browser test database: %v", err)
+	}
+
+	user, err := models.GetUser(1)
+	if err != nil {
+		t.Fatalf("get browser test user: %v", err)
+	}
+	user.Username = browserTestUsername
+	user.PasswordChangeRequired = false
+	if err := models.PutUser(&user); err != nil {
+		t.Fatalf("configure browser test user: %v", err)
+	}
+
+	seedBrowserFixtures(t, user.Id)
+
+	adminServer := NewAdminServer(config.AdminServer{})
+	server := httptest.NewServer(adminServer.server.Handler)
+	t.Cleanup(server.Close)
+
+	deadline, ok := t.Deadline()
+	if !ok {
+		deadline = time.Now().Add(2 * time.Minute)
+	}
+	commandContext, cancelCommand := context.WithDeadline(
+		context.Background(),
+		deadline.Add(-5*time.Second),
+	)
+	defer cancelCommand()
+
+	outputDirectory := t.TempDir()
+	command := exec.CommandContext(
+		commandContext,
+		"corepack",
+		"yarn",
+		"playwright",
+		"test",
+		"--config=tests/browser/playwright.config.ts",
+	)
+	command.Dir = root
+	command.Env = append(os.Environ(),
+		"GOPHISHFR_BROWSER_BASE_URL="+server.URL,
+		"GOPHISHFR_BROWSER_USERNAME="+browserTestUsername,
+		"GOPHISHFR_BROWSER_PASSWORD="+browserTestPassword,
+		"GOPHISHFR_BROWSER_OUTPUT_DIR="+outputDirectory,
+	)
+	command.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	command.Cancel = func() error {
+		return terminateBrowserProcessTree(command.Process.Pid)
+	}
+	command.WaitDelay = 2 * time.Second
+	command.Stdout = os.Stdout
+	command.Stderr = os.Stderr
+	if err := command.Run(); err != nil {
+		t.Fatalf("run browser smoke tests: %v", err)
+	}
+}
+
+func browserProjectRoot(t *testing.T) string {
+	t.Helper()
+
+	workingDirectory, err := os.Getwd()
+	if err != nil {
+		t.Fatalf("get working directory: %v", err)
+	}
+	root, err := filepath.Abs(filepath.Join(workingDirectory, ".."))
+	if err != nil {
+		t.Fatalf("resolve project root: %v", err)
+	}
+	return root
+}
+
+func seedBrowserFixtures(t *testing.T, userID int64) {
+	t.Helper()
+
+	group := models.Group{
+		Name:   "Browser Fixture Group",
+		UserId: userID,
+		Targets: []models.Target{{
+			BaseRecipient: models.BaseRecipient{
+				Email:     "fixture@localhost.invalid",
+				FirstName: "Browser",
+				LastName:  "Fixture",
+			},
+		}},
+	}
+	if err := models.PostGroup(&group); err != nil {
+		t.Fatalf("create browser test group: %v", err)
+	}
+
+	emailTemplate := models.Template{
+		Name:    "Browser Fixture Template",
+		Subject: "Synthetic browser fixture",
+		Text:    "Synthetic browser fixture",
+		HTML:    "<html><body>Synthetic browser fixture</body></html>",
+		UserId:  userID,
+	}
+	if err := models.PostTemplate(&emailTemplate); err != nil {
+		t.Fatalf("create browser test template: %v", err)
+	}
+
+	landingPage := models.Page{
+		Name:   "Browser Fixture Landing Page",
+		HTML:   "<html><body>Synthetic browser fixture</body></html>",
+		UserId: userID,
+	}
+	if err := models.PostPage(&landingPage); err != nil {
+		t.Fatalf("create browser test landing page: %v", err)
+	}
+
+	sendingProfile := models.SMTP{
+		Name:        "Browser Fixture Sending Profile",
+		FromAddress: "browser@localhost.invalid",
+		Host:        "127.0.0.1:1",
+		UserId:      userID,
+	}
+	if err := models.PostSMTP(&sendingProfile); err != nil {
+		t.Fatalf("create browser test sending profile: %v", err)
+	}
+}

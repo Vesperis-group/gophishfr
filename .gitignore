@@ -9,6 +9,8 @@ _test
 
 # Node Modules
 node_modules
+playwright-report
+test-results
 
 # Architecture specific extensions/prefixes
 *.[568vq]

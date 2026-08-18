@@ -73,6 +73,10 @@ yarn install --frozen-lockfile --non-interactive
 yarn build
 ```
 
+The frontend browser smoke baseline has a separate explicit command because it
+installs and launches Chromium. See
+[`docs/FRONTEND_BROWSER_TESTS.md`](docs/FRONTEND_BROWSER_TESTS.md).
+
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements and
 [SECURITY.md](SECURITY.md) for responsible vulnerability reporting.
 

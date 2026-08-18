@@ -13,11 +13,13 @@
   },
   "homepage": "https://github.com/Vesperis-group/gophishfr",
   "scripts": {
-    "build": "node -e \"const fs = require('fs'); for (const path of ['static/js/dist', 'static/css/dist']) fs.rmSync(path, { recursive: true, force: true });\" && gulp"
+    "build": "node -e \"const fs = require('fs'); for (const path of ['static/js/dist', 'static/css/dist']) fs.rmSync(path, { recursive: true, force: true });\" && gulp",
+    "test:browser": "./scripts/test-browser.sh"
   },
   "devDependencies": {
     "@babel/core": "^7.29.7",
     "@babel/preset-env": "^7.4.5",
+    "@playwright/test": "1.62.1",
     "babel-loader": "^8.0.6",
     "clean-css": "^4.2.1",
     "gulp": "^4.0.0",
