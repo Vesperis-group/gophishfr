@@ -19,8 +19,8 @@ import (
 
 	"github.com/jordan-wright/email"
 
-	log "github.com/gophish/gophish/logger"
-	"github.com/gophish/gophish/models"
+	log "github.com/Vesperis-group/gophishfr/logger"
+	"github.com/Vesperis-group/gophishfr/models"
 )
 
 var (
