@@ -161,7 +161,6 @@ func (as *AdminServer) registerRoutes() {
 	// https only. That is what closes GO-2025-3884, in which trusting
 	// example.net also trusted http://example.net.
 	csrfHandler := csrf.Protect(csrfKey,
-		csrf.FieldName("csrf_token"),
 		csrf.TrustedOrigins(as.config.TrustedOrigins))
 	adminHandler := csrfHandler(router)
 	adminHandler = mid.Use(adminHandler.ServeHTTP, mid.CSRFExceptions, mid.GetContext, mid.ApplySecurityHeaders)
@@ -188,6 +187,19 @@ type templateParams struct {
 	ModifySystem bool
 }
 
+// csrfToken returns the value rendered into the hidden csrf_token form field.
+//
+// The field no longer protects anything: protection is same-origin enforcement
+// (see registerRoutes). It is still emitted so the shipped templates and
+// static/js/src/app/users.js keep working unchanged. Removing it means editing
+// templates and JavaScript, which belongs to the frontend modernisation rather
+// than here.
+//
+//nolint:staticcheck // csrf.Token is deprecated by design in filippo.io/csrf; the reason is above.
+func csrfToken(r *http.Request) string {
+	return csrf.Token(r)
+}
+
 // newTemplateParams returns the default template parameters for a user and
 // the CSRF token.
 func newTemplateParams(r *http.Request) templateParams {
@@ -195,7 +207,7 @@ func newTemplateParams(r *http.Request) templateParams {
 	session := ctx.Get(r, "session").(*sessions.Session)
 	modifySystem, _ := user.HasPermission(models.PermissionModifySystem)
 	return templateParams{
-		Token:        csrf.Token(r),
+		Token:        csrfToken(r),
 		User:         user,
 		ModifySystem: modifySystem,
 		Version:      config.Version,
@@ -207,49 +219,49 @@ func newTemplateParams(r *http.Request) templateParams {
 func (as *AdminServer) Base(w http.ResponseWriter, r *http.Request) {
 	params := newTemplateParams(r)
 	params.Title = "Dashboard"
-	getTemplate(w, "dashboard").ExecuteTemplate(w, "base", params)
+	renderPage(w, "dashboard", params)
 }
 
 // Campaigns handles the default path and template execution
 func (as *AdminServer) Campaigns(w http.ResponseWriter, r *http.Request) {
 	params := newTemplateParams(r)
 	params.Title = "Campaigns"
-	getTemplate(w, "campaigns").ExecuteTemplate(w, "base", params)
+	renderPage(w, "campaigns", params)
 }
 
 // CampaignID handles the default path and template execution
 func (as *AdminServer) CampaignID(w http.ResponseWriter, r *http.Request) {
 	params := newTemplateParams(r)
 	params.Title = "Campaign Results"
-	getTemplate(w, "campaign_results").ExecuteTemplate(w, "base", params)
+	renderPage(w, "campaign_results", params)
 }
 
 // Templates handles the default path and template execution
 func (as *AdminServer) Templates(w http.ResponseWriter, r *http.Request) {
 	params := newTemplateParams(r)
 	params.Title = "Email Templates"
-	getTemplate(w, "templates").ExecuteTemplate(w, "base", params)
+	renderPage(w, "templates", params)
 }
 
 // Groups handles the default path and template execution
 func (as *AdminServer) Groups(w http.ResponseWriter, r *http.Request) {
 	params := newTemplateParams(r)
 	params.Title = "Users & Groups"
-	getTemplate(w, "groups").ExecuteTemplate(w, "base", params)
+	renderPage(w, "groups", params)
 }
 
 // LandingPages handles the default path and template execution
 func (as *AdminServer) LandingPages(w http.ResponseWriter, r *http.Request) {
 	params := newTemplateParams(r)
 	params.Title = "Landing Pages"
-	getTemplate(w, "landing_pages").ExecuteTemplate(w, "base", params)
+	renderPage(w, "landing_pages", params)
 }
 
 // SendingProfiles handles the default path and template execution
 func (as *AdminServer) SendingProfiles(w http.ResponseWriter, r *http.Request) {
 	params := newTemplateParams(r)
 	params.Title = "Sending Profiles"
-	getTemplate(w, "sending_profiles").ExecuteTemplate(w, "base", params)
+	renderPage(w, "sending_profiles", params)
 }
 
 // Settings handles the changing of settings
@@ -259,8 +271,8 @@ func (as *AdminServer) Settings(w http.ResponseWriter, r *http.Request) {
 		params := newTemplateParams(r)
 		params.Title = "Settings"
 		session := ctx.Get(r, "session").(*sessions.Session)
-		session.Save(r, w)
-		getTemplate(w, "settings").ExecuteTemplate(w, "base", params)
+		saveSession(w, r, session)
+		renderPage(w, "settings", params)
 	case r.Method == "POST":
 		u := ctx.Get(r, "user").(models.User)
 		currentPw := r.FormValue("current_password")
@@ -298,7 +310,7 @@ func (as *AdminServer) Settings(w http.ResponseWriter, r *http.Request) {
 func (as *AdminServer) UserManagement(w http.ResponseWriter, r *http.Request) {
 	params := newTemplateParams(r)
 	params.Title = "User Management"
-	getTemplate(w, "users").ExecuteTemplate(w, "base", params)
+	renderPage(w, "users", params)
 }
 
 func (as *AdminServer) nextOrIndex(w http.ResponseWriter, r *http.Request) {
@@ -321,24 +333,18 @@ func (as *AdminServer) handleInvalidLogin(w http.ResponseWriter, r *http.Request
 		Title   string
 		Flashes []interface{}
 		Token   string
-	}{Title: "Login", Token: csrf.Token(r)}
+	}{Title: "Login", Token: csrfToken(r)}
 	params.Flashes = session.Flashes()
-	session.Save(r, w)
-	templates := template.New("template")
-	_, err := templates.ParseFiles("templates/login.html", "templates/flashes.html")
-	if err != nil {
-		log.Error(err)
-	}
-	// w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	saveSession(w, r, session)
 	w.WriteHeader(http.StatusUnauthorized)
-	template.Must(templates, err).ExecuteTemplate(w, "base", params)
+	renderLoginPage(w, params)
 }
 
 // Webhooks is an admin-only handler that handles webhooks
 func (as *AdminServer) Webhooks(w http.ResponseWriter, r *http.Request) {
 	params := newTemplateParams(r)
 	params.Title = "Webhooks"
-	getTemplate(w, "webhooks").ExecuteTemplate(w, "base", params)
+	renderPage(w, "webhooks", params)
 }
 
 // Impersonate allows an admin to login to a user account without needing the password
@@ -354,7 +360,7 @@ func (as *AdminServer) Impersonate(w http.ResponseWriter, r *http.Request) {
 		}
 		session := ctx.Get(r, "session").(*sessions.Session)
 		session.Values["id"] = u.Id
-		session.Save(r, w)
+		saveSession(w, r, session)
 	}
 	http.Redirect(w, r, "/", http.StatusFound)
 }
@@ -367,18 +373,13 @@ func (as *AdminServer) Login(w http.ResponseWriter, r *http.Request) {
 		Title   string
 		Flashes []interface{}
 		Token   string
-	}{Title: "Login", Token: csrf.Token(r)}
+	}{Title: "Login", Token: csrfToken(r)}
 	session := ctx.Get(r, "session").(*sessions.Session)
 	switch {
 	case r.Method == "GET":
 		params.Flashes = session.Flashes()
-		session.Save(r, w)
-		templates := template.New("template")
-		_, err := templates.ParseFiles("templates/login.html", "templates/flashes.html")
-		if err != nil {
-			log.Error(err)
-		}
-		template.Must(templates, err).ExecuteTemplate(w, "base", params)
+		saveSession(w, r, session)
+		renderLoginPage(w, params)
 	case r.Method == "POST":
 		// Find the user with the provided username
 		username, password := r.FormValue("username"), r.FormValue("password")
@@ -406,7 +407,7 @@ func (as *AdminServer) Login(w http.ResponseWriter, r *http.Request) {
 		}
 		// If we've logged in, save the session and redirect to the dashboard
 		session.Values["id"] = u.Id
-		session.Save(r, w)
+		saveSession(w, r, session)
 		as.nextOrIndex(w, r)
 	}
 }
@@ -416,7 +417,7 @@ func (as *AdminServer) Logout(w http.ResponseWriter, r *http.Request) {
 	session := ctx.Get(r, "session").(*sessions.Session)
 	delete(session.Values, "id")
 	Flash(w, r, "success", "You have successfully logged out")
-	session.Save(r, w)
+	saveSession(w, r, session)
 	http.Redirect(w, r, "/login", http.StatusFound)
 }
 
@@ -437,7 +438,7 @@ func (as *AdminServer) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	session := ctx.Get(r, "session").(*sessions.Session)
 	if !u.PasswordChangeRequired {
 		Flash(w, r, "info", "Please reset your password through the settings page")
-		session.Save(r, w)
+		saveSession(w, r, session)
 		http.Redirect(w, r, "/settings", http.StatusTemporaryRedirect)
 		return
 	}
@@ -446,8 +447,8 @@ func (as *AdminServer) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == http.MethodGet:
 		params.Flashes = session.Flashes()
-		session.Save(r, w)
-		getTemplate(w, "reset_password").ExecuteTemplate(w, "base", params)
+		saveSession(w, r, session)
+		renderPage(w, "reset_password", params)
 		return
 	case r.Method == http.MethodPost:
 		newPassword := r.FormValue("password")
@@ -456,9 +457,9 @@ func (as *AdminServer) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			Flash(w, r, "danger", err.Error())
 			params.Flashes = session.Flashes()
-			session.Save(r, w)
+			saveSession(w, r, session)
 			w.WriteHeader(http.StatusBadRequest)
-			getTemplate(w, "reset_password").ExecuteTemplate(w, "base", params)
+			renderPage(w, "reset_password", params)
 			return
 		}
 		u.PasswordChangeRequired = false
@@ -466,9 +467,9 @@ func (as *AdminServer) ResetPassword(w http.ResponseWriter, r *http.Request) {
 		if err = models.PutUser(&u); err != nil {
 			Flash(w, r, "danger", err.Error())
 			params.Flashes = session.Flashes()
-			session.Save(r, w)
+			saveSession(w, r, session)
 			w.WriteHeader(http.StatusInternalServerError)
-			getTemplate(w, "reset_password").ExecuteTemplate(w, "base", params)
+			renderPage(w, "reset_password", params)
 			return
 		}
 		// TODO: We probably want to flash a message here that the password was
@@ -482,14 +483,57 @@ func (as *AdminServer) ResetPassword(w http.ResponseWriter, r *http.Request) {
 	}
 }
 
-// TODO: Make this execute the template, too
-func getTemplate(w http.ResponseWriter, tmpl string) *template.Template {
-	templates := template.New("template")
-	_, err := templates.ParseFiles("templates/base.html", "templates/nav.html", "templates/"+tmpl+".html", "templates/flashes.html")
+// parseTemplates builds a template set from the given files.
+//
+// A parse failure is a packaging or deployment problem, not a request-level
+// one: the templates ship with the binary and are identical for every request.
+// template.Must therefore fails loudly at first use instead of serving a blank
+// admin interface.
+func parseTemplates(files ...string) *template.Template {
+	templates, err := template.New("template").ParseFiles(files...)
 	if err != nil {
 		log.Error(err)
 	}
 	return template.Must(templates, err)
+}
+
+// renderPage writes the named admin page to the response.
+//
+// The status line is committed as soon as the template starts writing, so a
+// mid-render failure cannot be turned into an error page. It is logged instead,
+// so that a broken template shows up in the logs rather than silently
+// truncating the page.
+func renderPage(w http.ResponseWriter, tmpl string, params interface{}) {
+	page := parseTemplates(
+		"templates/base.html",
+		"templates/nav.html",
+		"templates/"+tmpl+".html",
+		"templates/flashes.html",
+	)
+	if err := page.ExecuteTemplate(w, "base", params); err != nil {
+		log.Error(err)
+	}
+}
+
+// renderLoginPage writes the login page, which has its own layout and is the
+// only admin page rendered without a navigation bar or an authenticated user.
+func renderLoginPage(w http.ResponseWriter, params interface{}) {
+	page := parseTemplates("templates/login.html", "templates/flashes.html")
+	if err := page.ExecuteTemplate(w, "base", params); err != nil {
+		log.Error(err)
+	}
+}
+
+// saveSession persists the session cookie, logging rather than aborting.
+//
+// Every caller has already decided what the response should be. A failure here
+// means the browser keeps its previous session, which fails closed: the user is
+// not logged in, not impersonating, and sees the page they were being sent to
+// without the new state.
+func saveSession(w http.ResponseWriter, r *http.Request, session *sessions.Session) {
+	if err := session.Save(r, w); err != nil {
+		log.Error(err)
+	}
 }
 
 // Flash handles the rendering flash messages

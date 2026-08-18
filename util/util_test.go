@@ -19,8 +19,8 @@ func buildCSVRequest(csvPayload string) (*http.Request, error) {
 	if err != nil {
 		return nil, err
 	}
-	part.Write([]byte(csvHeader))
-	part.Write([]byte(csvPayload))
+	_, _ = part.Write([]byte(csvHeader))
+	_, _ = part.Write([]byte(csvPayload))
 	err = writer.Close()
 	if err != nil {
 		return nil, err

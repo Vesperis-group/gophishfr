@@ -63,6 +63,7 @@ gate_gofmt() {
 echo "Go toolchain: $(go version)"
 
 run_gate "gofmt"          gate_gofmt
+run_gate "golangci-lint"  golangci-lint run
 run_gate "go mod verify"  go mod verify
 run_gate "go vet"         go vet ./...
 run_gate "go build"       go build ./...

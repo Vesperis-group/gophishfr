@@ -5,7 +5,6 @@ import (
 	"bytes"
 	"encoding/base64"
 	"io"
-	"io/ioutil"
 	"net/url"
 	"path/filepath"
 	"regexp"
@@ -52,7 +51,7 @@ func (a *Attachment) ApplyTemplate(ptx PhishingTemplateContext) (io.Reader, erro
 	decodedAttachment := base64.NewDecoder(base64.StdEncoding, strings.NewReader(a.Content))
 
 	// If we've already determined there are no template variables in this attachment return it immediately
-	if a.vanillaFile == true {
+	if a.vanillaFile {
 		return decodedAttachment, nil
 	}
 
@@ -70,7 +69,9 @@ func (a *Attachment) ApplyTemplate(ptx PhishingTemplateContext) (io.Reader, erro
 		// Zip archives require random access for reading, so it's hard to stream bytes. Solution seems to be to use a buffer.
 		// See https://stackoverflow.com/questions/16946978/how-to-unzip-io-readcloser
 		b := new(bytes.Buffer)
-		b.ReadFrom(decodedAttachment)
+		if _, err := b.ReadFrom(decodedAttachment); err != nil {
+			return nil, err
+		}
 		zipReader, err := zip.NewReader(bytes.NewReader(b.Bytes()), int64(b.Len())) // Create a new zip reader from the file
 
 		if err != nil {
@@ -89,8 +90,9 @@ func (a *Attachment) ApplyTemplate(ptx PhishingTemplateContext) (io.Reader, erro
 			if err != nil {
 				return nil, err
 			}
-			defer ff.Close()
-			contents, err := ioutil.ReadAll(ff)
+			// Read-only: closing cannot lose data.
+			defer func() { _ = ff.Close() }()
+			contents, err := io.ReadAll(ff)
 			if err != nil {
 				return nil, err
 			}
@@ -111,7 +113,7 @@ func (a *Attachment) ApplyTemplate(ptx PhishingTemplateContext) (io.Reader, erro
 				// For each file apply the template.
 				tFile, err = ExecuteTemplate(string(contents), ptx)
 				if err != nil {
-					zipWriter.Close() // Don't use defer when writing files https://www.joeshaw.org/dont-defer-close-on-writable-files/
+					_ = zipWriter.Close() // Don't use defer when writing files https://www.joeshaw.org/dont-defer-close-on-writable-files/
 					return nil, err
 				}
 				// Check if the subfile changed. We only need this to be set once to know in the future to check the 'parent' file
@@ -124,20 +126,24 @@ func (a *Attachment) ApplyTemplate(ptx PhishingTemplateContext) (io.Reader, erro
 			// Write new Word archive
 			newZipFile, err := zipWriter.Create(zipFile.Name)
 			if err != nil {
-				zipWriter.Close() // Don't use defer when writing files https://www.joeshaw.org/dont-defer-close-on-writable-files/
+				_ = zipWriter.Close() // Don't use defer when writing files https://www.joeshaw.org/dont-defer-close-on-writable-files/
 				return nil, err
 			}
 			_, err = newZipFile.Write([]byte(tFile))
 			if err != nil {
-				zipWriter.Close()
+				_ = zipWriter.Close()
 				return nil, err
 			}
 		}
-		zipWriter.Close()
-		return bytes.NewReader(newZipArchive.Bytes()), err
+		// Success path: Close flushes the central directory, so a failure here
+		// means the archive is truncated and must not be handed back.
+		if err := zipWriter.Close(); err != nil {
+			return nil, err
+		}
+		return bytes.NewReader(newZipArchive.Bytes()), nil
 
 	case ".txt", ".html", ".ics":
-		b, err := ioutil.ReadAll(decodedAttachment)
+		b, err := io.ReadAll(decodedAttachment)
 		if err != nil {
 			return nil, err
 		}

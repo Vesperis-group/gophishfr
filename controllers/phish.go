@@ -290,12 +290,16 @@ func renderPhishResponse(w http.ResponseWriter, r *http.Request, ptx models.Phis
 		http.NotFound(w, r)
 		return
 	}
-	w.Write([]byte(html))
+	// The response headers are already committed, so a write failure can only
+	// be a broken client connection.
+	_, _ = w.Write([]byte(html))
 }
 
 // RobotsHandler prevents search engines, etc. from indexing phishing materials
 func (ps *PhishingServer) RobotsHandler(w http.ResponseWriter, r *http.Request) {
-	fmt.Fprintln(w, "User-agent: *\nDisallow: /")
+	// Headers are committed on the first write: a failure here means the
+	// client went away.
+	_, _ = fmt.Fprintln(w, "User-agent: *\nDisallow: /")
 }
 
 // TransparencyHandler returns a TransparencyResponse for the provided result

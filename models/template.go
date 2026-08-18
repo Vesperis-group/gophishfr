@@ -156,9 +156,6 @@ func PutTemplate(t *Template) error {
 		log.Error(err)
 		return err
 	}
-	if err == gorm.ErrRecordNotFound {
-		err = nil
-	}
 	for i := range t.Attachments {
 		t.Attachments[i].TemplateId = t.Id
 		err := db.Save(&t.Attachments[i]).Error

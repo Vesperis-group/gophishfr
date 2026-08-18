@@ -102,10 +102,15 @@ func (s *SMTP) Validate() error {
 	return err
 }
 
+// fromAddressRegex matches the addr-spec accepted in a sending profile's From
+// header. Compiled once at package level: the pattern is a constant, so a
+// per-call regexp.Compile could only ever produce the same result, and its
+// ignored error hid the fact that a failure would have left a nil matcher.
+var fromAddressRegex = regexp.MustCompile(`^([a-zA-Z0-9_\-\.]+)@([a-zA-Z0-9_\-\.]+)\.([a-zA-Z]{2,18})$`)
+
 // validateFromAddress validates
 func validateFromAddress(email string) bool {
-	r, _ := regexp.Compile("^([a-zA-Z0-9_\\-\\.]+)@([a-zA-Z0-9_\\-\\.]+)\\.([a-zA-Z]{2,18})$")
-	return r.MatchString(email)
+	return fromAddressRegex.MatchString(email)
 }
 
 // GetDialer returns a dialer for the given SMTP profile

@@ -86,8 +86,9 @@ func (im *IMAP) Validate() error {
 		return ErrInvalidIMAPHost
 	}
 
-	// Make sure 1 >= port <= 65535
-	if im.Port < 1 || im.Port > 65535 {
+	// Make sure the port is usable. Port is a uint16, so the upper bound is
+	// enforced by the type itself.
+	if im.Port < 1 {
 		return ErrInvalidIMAPPort
 	}
 

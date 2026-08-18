@@ -38,7 +38,12 @@ var ErrPasswordTooShort = fmt.Errorf("Password must be at least %d characters", 
 // random bytes
 func GenerateSecureKey(n int) string {
 	k := make([]byte, n)
-	io.ReadFull(rand.Reader, k)
+	// crypto/rand.Reader never fails on any supported platform, but a silent
+	// short read here would hand out a predictable API key, so refuse to
+	// continue rather than return one.
+	if _, err := io.ReadFull(rand.Reader, k); err != nil {
+		panic(fmt.Sprintf("auth: unable to read from the system CSPRNG: %v", err))
+	}
 	return fmt.Sprintf("%x", k)
 }
 

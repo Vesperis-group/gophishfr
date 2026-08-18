@@ -1,0 +1,76 @@
+# golangci-lint configuration for GophishFR.
+#
+# Curation principle: every enabled check must be one whose findings we are
+# prepared to fix, because the job is blocking. A linter that is enabled and
+# then routinely suppressed teaches the team to ignore it.
+version: "2"
+
+run:
+  timeout: 10m
+  # Test files are code. A silently discarded error in test setup turns into a
+  # confusing cascade of unrelated failures instead of a clear message.
+  tests: true
+
+linters:
+  default: none
+  enable:
+    # Unchecked errors. This is the single highest-value check in a code base
+    # that sends mail, writes archives and persists campaign state.
+    - errcheck
+    # The standard vet suite: printf mismatches, lost struct tags, copied locks.
+    - govet
+    # Assignments that are never read, which usually means a check was skipped.
+    - ineffassign
+    # Bug patterns, deprecations and simplifications.
+    - staticcheck
+    # Dead code.
+    - unused
+    # HTTP response bodies that are never closed leak connections; the phishing
+    # server and the site importer both talk to untrusted hosts.
+    - bodyclose
+
+  settings:
+    staticcheck:
+      # Start from staticcheck's own default selection rather than "all": the
+      # checks it disables by default are naming and documentation conventions,
+      # not correctness.
+      checks:
+        - all
+        # ST1003 wants Id -> ID, ApiKey -> APIKey, GetSmtpFrom -> GetSMTPFrom.
+        # These are exported struct fields serialised into the public API and
+        # consumed by the shipped JavaScript. Renaming them is a breaking API
+        # change, not a lint fix.
+        - -ST1003
+        # ST1000 requires a package comment in every package. Worth doing, but
+        # it is documentation work rather than a correctness gate, and adding
+        # 16 comments here would bury the fixes this change is actually about.
+        - -ST1000
+        - -ST1016
+        - -ST1020
+        - -ST1021
+        - -ST1022
+        - -ST1023
+        # QF* are editor quick-fix suggestions (tagged switches, De Morgan
+        # rewrites, embedded-field elision). They express taste rather than
+        # correctness, and acting on them would churn code we still want to
+        # merge cleanly from upstream.
+        - -QF1001
+        - -QF1002
+        - -QF1003
+        - -QF1008
+        # ST1005 forbids capitalised error strings. Several of ours are
+        # rendered verbatim in the admin UI ("Invalid Password"), so obeying it
+        # would silently change user-visible text. Revisit when the UI is
+        # reworked for GophishFR and those strings are translated anyway.
+        - -ST1005
+
+formatters:
+  enable:
+    - gofmt
+
+issues:
+  # Report everything. The defaults cap output at 50 issues per linter and 3
+  # occurrences of the same issue, which quietly hides work and makes a green
+  # local run mean less than it appears to.
+  max-issues-per-linter: 0
+  max-same-issues: 0

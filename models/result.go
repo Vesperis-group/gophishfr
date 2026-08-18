@@ -47,7 +47,15 @@ func (r *Result) createEvent(status string, details interface{}) (*Event, error)
 		}
 		e.Details = string(dj)
 	}
-	AddEvent(e, r.CampaignId)
+	// Deliberately not propagated. Every caller uses createEvent to record
+	// something that has already happened to the recipient (the mail was sent,
+	// the link was clicked). Turning a failed timeline write into a returned
+	// error would make the mailer treat a delivered email as a failure and
+	// retry it, sending the message twice. Losing a timeline row is the lesser
+	// of those two outcomes, so it is logged instead.
+	if err := AddEvent(e, r.CampaignId); err != nil {
+		log.Error(err)
+	}
 	return e, nil
 }
 
@@ -155,7 +163,8 @@ func (r *Result) UpdateGeo(addr string) error {
 	if err != nil {
 		log.Fatal(err)
 	}
-	defer mmdb.Close()
+	// Read-only lookups: closing cannot lose data.
+	defer func() { _ = mmdb.Close() }()
 	ip := net.ParseIP(addr)
 	var city mmCity
 	// Get the record
