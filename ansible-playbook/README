@@ -1,10 +1,16 @@
 Tested on Ubuntu 20.04 LTS.
 
-Installs Postfix (to listen on localhost only) and the latest Linux gophish binary.  setcap is used to allow the gophish binary to listen on privileged ports without running as root.
+Installs Postfix (to listen on localhost only) and a pinned Linux GophishFR binary. setcap is used to allow the GophishFR binary to listen on privileged ports without running as root.
 
 1) Edit hosts file with the Gophish server IP.
 
-2) Edit vars/main.yml with any changes:
+2) Edit vars/main.yml with any changes. Set `gophishfr_release_tag` and the
+SHA-256 digest of its Linux 64-bit release archive in
+`gophishfr_release_sha256`; deployment stops if either pin is missing:
+
+Existing deployments keep the `gophish_deploy` working directory so relative
+database and log paths continue to use the current data. The role replaces the
+legacy `gophish.service` unit with `gophishfr.service`.
 
 3) Modify files/config.json with any changes.
 

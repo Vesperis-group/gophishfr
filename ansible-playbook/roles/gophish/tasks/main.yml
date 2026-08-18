@@ -13,13 +13,13 @@
     port: "22"
     proto: tcp
 
-- name: Allow TCP 80 for Gophish.
+- name: Allow TCP 80 for GophishFR.
   ufw:
     rule: allow
     port: "80"
     proto: tcp
 
-- name: Allow TCP 443 for Gophish.
+- name: Allow TCP 443 for GophishFR.
   ufw:
     rule: allow
     port: "443"
@@ -109,17 +109,19 @@
     state: started
     enabled: yes
 
-- name: get latest release info
-  uri:
-    url: "https://api.github.com/repos/gophish/gophish/releases/latest"
-    return_content: true
-  register: latest_json_reponse
+- name: Ensure the GophishFR release is pinned.
+  assert:
+    that:
+      - gophishfr_release_tag | length > 0
+      - gophishfr_release_sha256 | length == 64
+    fail_msg: Set gophishfr_release_tag and gophishfr_release_sha256 before deploying.
 
-- name: Download latest Gophish .zip file.
+- name: Download the pinned GophishFR archive.
   get_url:
     validate_certs: True
-    url: "https://github.com/gophish/gophish/releases/download/{{ latest_json_reponse.json.tag_name }}/gophish-{{ latest_json_reponse.json.tag_name }}-linux-64bit.zip"
-    dest: "/home/{{ gophish_user }}/gophish.zip"
+    url: "https://github.com/Vesperis-group/gophishfr/releases/download/{{ gophishfr_release_tag }}/gophishfr-{{ gophishfr_release_tag }}-linux-64bit.zip"
+    dest: "/home/{{ gophish_user }}/gophishfr.zip"
+    checksum: "sha256:{{ gophishfr_release_sha256 }}"
     mode: 0755
     owner: "{{ gophish_user }}"
     group: "{{ gophish_user }}"
@@ -138,7 +140,7 @@
     owner: "{{ gophish_user }}"
     group: "{{ gophish_user }}"
 
-- name: Create directory for gophish.
+- name: Create directory for GophishFR.
   file:
     path: "/home/{{ gophish_user }}/gophish_deploy"
     state: directory
@@ -146,29 +148,29 @@
     owner: "{{ gophish_user }}"
     group: "{{ gophish_user }}"
 
-- name: Unzip gophish file.
+- name: Unzip GophishFR archive.
   unarchive:
-    src: "/home/{{ gophish_user }}/gophish.zip"
+    src: "/home/{{ gophish_user }}/gophishfr.zip"
     dest: "/home/{{ gophish_user }}/gophish_deploy"
     remote_src: True # File is on target server and not locally.
     owner: "{{ gophish_user }}"
     group: "{{ gophish_user }}"
 
-- name: Change ownership of Gophish folder and files.
+- name: Change ownership of GophishFR folder and files.
   file:
     path: /home/{{ gophish_user }}/gophish_deploy
     owner: "{{ gophish_user }}"
     group: "{{ gophish_user }}"
     recurse: True
 
-- name: Ensure gophish binary is executable
+- name: Ensure GophishFR binary is executable
   file:
-    path: /home/{{ gophish_user }}/gophish_deploy/gophish
+    path: /home/{{ gophish_user }}/gophish_deploy/gophishfr
     mode: 744
 
-- name: Ensure gophish binary is allowed to bind to privileged ports using setcap
+- name: Ensure GophishFR binary can bind to privileged ports using setcap
   capabilities:
-    path: /home/{{ gophish_user }}/gophish_deploy/gophish
+    path: /home/{{ gophish_user }}/gophish_deploy/gophishfr
     capability: cap_net_bind_service+eip
     state: present
 
@@ -180,19 +182,34 @@
     group: "{{ gophish_user }}"
     mode: 0644
 
-- name: Ensure gophish service file is properly set
+- name: Gather service facts before migrating the unit.
+  service_facts:
+
+- name: Stop and disable the legacy Gophish service.
+  service:
+    name: gophish.service
+    state: stopped
+    enabled: no
+  when: "'gophish.service' in ansible_facts.services"
+
+- name: Remove the legacy Gophish service unit.
+  file:
+    path: /etc/systemd/system/gophish.service
+    state: absent
+
+- name: Ensure GophishFR service file is properly set
   template:
     src: gophish.service.j2
-    dest: /etc/systemd/system/gophish.service
+    dest: /etc/systemd/system/gophishfr.service
     mode: 644
 
 - name: Ensure systemd to reread configs
   systemd:
     daemon_reload: yes
 
-- name: Ensure gophish is properly started
+- name: Ensure GophishFR is properly started
   service:
-    name: gophish.service
+    name: gophishfr.service
     state: started
     enabled: yes
 
@@ -213,7 +230,7 @@
     state: reloaded
     enabled: yes
 
-- name: get Gophish log file which contain initial password
+- name: Get GophishFR log file containing the initial password
   command: cat /home/{{ gophish_user }}/gophish_deploy/gophish.log
   register: gophish_log
 

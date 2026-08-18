@@ -15,5 +15,7 @@ gophish_domain: gophish.local
 gophish_ssl_cert_path: /etc/ssl/private/gophish.pem
 gophish_csr_path: /etc/ssl/csr/gophish.csr
 gophish_crt_path: /etc/ssl/crt/gophish.crt
+gophishfr_release_tag: ""
+gophishfr_release_sha256: ""
 # Required if changing /etc/hostname to something different.
 reboot_box: true
