@@ -21,7 +21,7 @@ import (
 	"github.com/Vesperis-group/gophishfr/models"
 )
 
-// Pattern for GoPhish emails e.g ?rid=AbC1234
+// Pattern for GophishFR campaign emails, for example ?rid=AbC1234.
 // We include the optional quoted-printable 3D at the front, just in case decoding fails. e.g ?rid=3DAbC1234
 // We also include alternative URL encoded representations of '=' and '?' to handle Microsoft ATP URLs e.g %3Frid%3DAbC1234
 var goPhishRegex = regexp.MustCompile(`((\?|%3F)rid(=|%3D)(3D)?([A-Za-z0-9]{7}))`)
@@ -161,20 +161,20 @@ func checkForNewEmails(im models.IMAP) {
 				continue
 			}
 			if len(rids) < 1 {
-				// In the future this should be an alert in Gophish
-				log.Infof("User '%s' reported email with subject '%s'. This is not a GoPhish campaign; you should investigate it.", m.Email.From, m.Email.Subject)
+				// In the future this should be an alert in GophishFR.
+				log.Infof("User '%s' reported email with subject '%s'. This is not a GophishFR campaign; you should investigate it.", m.Email.From, m.Email.Subject)
 			}
 			for rid := range rids {
 				log.Infof("User '%s' reported email with rid %s", m.Email.From, rid)
 				result, err := models.GetResult(rid)
 				if err != nil {
-					log.Error("Error reporting GoPhish email with rid ", rid, ": ", err.Error())
+					log.Error("Error reporting GophishFR email with rid ", rid, ": ", err.Error())
 					reportingFailed = append(reportingFailed, m.SeqNum)
 					continue
 				}
 				err = result.HandleEmailReport(models.EventDetails{})
 				if err != nil {
-					log.Error("Error updating GoPhish email with rid ", rid, ": ", err.Error())
+					log.Error("Error updating GophishFR email with rid ", rid, ": ", err.Error())
 					continue
 				}
 				if im.DeleteReportedCampaignEmail {
@@ -186,15 +186,15 @@ func checkForNewEmails(im models.IMAP) {
 		// Check if any emails were unable to be reported, so we can mark them as unread
 		if len(reportingFailed) > 0 {
 			log.Debugf("Marking %d emails as unread as failed to report", len(reportingFailed))
-			err := mailServer.MarkAsUnread(reportingFailed) // Set emails as unread that we failed to report to GoPhish
+			err := mailServer.MarkAsUnread(reportingFailed) // Keep messages unread when GophishFR cannot process their reports.
 			if err != nil {
 				log.Error("Unable to mark emails as unread: ", err.Error())
 			}
 		}
-		// If the DeleteReportedCampaignEmail flag is set, delete reported Gophish campaign emails
+		// If DeleteReportedCampaignEmail is set, delete reported GophishFR campaign emails.
 		if len(deleteEmails) > 0 {
 			log.Debugf("Deleting %d campaign emails", len(deleteEmails))
-			err := mailServer.DeleteEmails(deleteEmails) // Delete GoPhish campaign emails.
+			err := mailServer.DeleteEmails(deleteEmails) // Delete GophishFR campaign emails.
 			if err != nil {
 				log.Error("Failed to delete emails: ", err.Error())
 			}
@@ -216,7 +216,7 @@ func checkRIDs(em *email.Email, rids map[string]bool) {
 	}
 }
 
-// returns a slice of gophish rid paramters found in the email HTML, Text, and attachments
+// matchEmail returns GophishFR result IDs found in the email HTML, text, and attachments.
 func matchEmail(em *email.Email) (map[string]bool, error) {
 	rids := make(map[string]bool)
 	checkRIDs(em, rids)
