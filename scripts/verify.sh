@@ -82,6 +82,26 @@ else
     printf '\n\033[33mskipped\033[0m  action pins (gh not available or not authenticated; CI enforces it)\n'
 fi
 
+# Pinned to the toolchain declared in go.mod, which is the one CI scans. Run
+# against a different local Go and the standard-library findings would differ
+# from CI in both directions, which is worse than not running it at all.
+gate_govulncheck() {
+    local toolchain
+    toolchain="$(awk '/^toolchain /{print $2}' go.mod)"
+    if [ -z "${toolchain}" ]; then
+        echo "No toolchain directive in go.mod." >&2
+        return 1
+    fi
+    echo "Scanning with ${toolchain} (may download it on first run)."
+    GOTOOLCHAIN="${toolchain}" govulncheck ./...
+}
+
+if command -v govulncheck >/dev/null 2>&1; then
+    run_gate "govulncheck" gate_govulncheck
+else
+    printf '\n\033[33mskipped\033[0m  govulncheck (install: go install golang.org/x/vuln/cmd/govulncheck@v1.7.0)\n'
+fi
+
 echo
 if [ ${#FAILED[@]} -ne 0 ]; then
     printf '\033[31m%s gate(s) failed:\033[0m %s\n' "${#FAILED[@]}" "${FAILED[*]}"

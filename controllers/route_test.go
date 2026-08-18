@@ -53,23 +53,73 @@ func attemptLogin(t *testing.T, ctx *testContext, client *http.Client, username,
 	return resp
 }
 
+// TestLoginCSRF asserts that cross-site form submissions to /login are
+// rejected, and that same-origin ones are not.
+//
+// CSRF protection is same-origin enforcement driven by Fetch metadata headers
+// rather than by tokens, so these headers are what has to be exercised. The
+// previous version of this test posted without a token and expected 403; under
+// this model a request carrying neither Sec-Fetch-Site nor Origin is not a
+// browser request at all, and is allowed. Asserting on the token would have
+// tested a mechanism that no longer defends anything.
 func TestLoginCSRF(t *testing.T) {
-	ctx := setupTest(t)
-	defer tearDown(t, ctx)
-	resp, err := http.PostForm(fmt.Sprintf("%s/login", ctx.adminServer.URL),
-		url.Values{
-			"username": {"admin"},
-			"password": {"gophish"},
-		})
-
-	if err != nil {
-		t.Fatalf("error requesting the /login endpoint: %v", err)
+	tests := []struct {
+		name     string
+		headers  map[string]string
+		expected int
+	}{
+		{
+			name:     "cross-site submission is rejected",
+			headers:  map[string]string{"Sec-Fetch-Site": "cross-site"},
+			expected: http.StatusForbidden,
+		},
+		{
+			name:     "same-site submission is rejected",
+			headers:  map[string]string{"Sec-Fetch-Site": "same-site"},
+			expected: http.StatusForbidden,
+		},
+		{
+			name:     "same-origin submission is allowed",
+			headers:  map[string]string{"Sec-Fetch-Site": "same-origin"},
+			expected: http.StatusOK,
+		},
+		{
+			// Browsers predating Sec-Fetch-Site still send Origin on POST.
+			name:     "foreign Origin is rejected",
+			headers:  map[string]string{"Origin": "https://evil.example.com"},
+			expected: http.StatusForbidden,
+		},
 	}
 
-	got := resp.StatusCode
-	expected := http.StatusForbidden
-	if got != expected {
-		t.Fatalf("invalid status code received. expected %d got %d", expected, got)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := setupTest(t)
+			defer tearDown(t, ctx)
+
+			req, err := http.NewRequest(http.MethodPost,
+				fmt.Sprintf("%s/login", ctx.adminServer.URL),
+				strings.NewReader(url.Values{
+					"username": {"admin"},
+					"password": {"gophish"},
+				}.Encode()))
+			if err != nil {
+				t.Fatalf("error creating new /login request: %v", err)
+			}
+			req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			for name, value := range tt.headers {
+				req.Header.Set(name, value)
+			}
+
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("error requesting the /login endpoint: %v", err)
+			}
+			defer resp.Body.Close()
+
+			if got := resp.StatusCode; got != tt.expected {
+				t.Fatalf("invalid status code received. expected %d got %d", tt.expected, got)
+			}
+		})
 	}
 }
 
