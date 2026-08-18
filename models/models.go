@@ -3,18 +3,27 @@ package models
 import (
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql"
+	"errors"
+	"fmt"
+	"net"
+	"net/url"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
-
-	"bitbucket.org/liamstask/goose/lib/goose"
 
 	mysql "github.com/go-sql-driver/mysql"
 
 	"github.com/Vesperis-group/gophishfr/auth"
 	"github.com/Vesperis-group/gophishfr/config"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
+	"github.com/jackc/pgx/v5/stdlib"
 	"github.com/jinzhu/gorm"
 	_ "github.com/mattn/go-sqlite3" // Blank import needed to import sqlite3
+	"github.com/pressly/goose/v3"
 
 	log "github.com/Vesperis-group/gophishfr/logger"
 )
@@ -72,21 +81,287 @@ type Response struct {
 	Data    interface{} `json:"data"`
 }
 
-func chooseDBDriver(name, openStr string) goose.DBDriver {
-	d := goose.DBDriver{Name: name, OpenStr: openStr}
-
+func openDatabase(name, connectionString string) (*gorm.DB, error) {
 	switch name {
-	case "mysql":
-		d.Import = "github.com/go-sql-driver/mysql"
-		d.Dialect = &goose.MySqlDialect{}
-
-	// Default database is sqlite3
+	case "postgres", "postgresql":
+		postgresConfig, err := postgresConnectionConfig(connectionString)
+		if err != nil {
+			return nil, err
+		}
+		sqlDB := stdlib.OpenDB(*postgresConfig)
+		// Keep GORM's PostgreSQL SQL dialect while pgx owns the connection.
+		database, err := gorm.Open("postgres", sqlDB)
+		if err != nil {
+			_ = sqlDB.Close()
+			return nil, err
+		}
+		return database, nil
 	default:
-		d.Import = "github.com/mattn/go-sqlite3"
-		d.Dialect = &goose.Sqlite3Dialect{}
+		return gorm.Open(name, connectionString)
+	}
+}
+
+func postgresConnectionConfig(connectionString string) (*pgx.ConnConfig, error) {
+	validatedConnectionString, err := validatePostgresConnectionString(connectionString)
+	if err != nil {
+		return nil, err
+	}
+	defaultedConnectionString, err := applyLegacyPostgresHostDefault(validatedConnectionString)
+	if err != nil {
+		return nil, err
+	}
+	postgresConfig, err := pgx.ParseConfig(defaultedConnectionString)
+	if err != nil {
+		return nil, fmt.Errorf("parse PostgreSQL connection string: %w", err)
+	}
+	if postgresConfig.TLSConfig == nil &&
+		!isPostgresUnixSocket(postgresConfig.Host, postgresConfig.Port) {
+		for index, fallback := range postgresConfig.Fallbacks {
+			if fallback.Host == postgresConfig.Host &&
+				fallback.Port == postgresConfig.Port &&
+				fallback.TLSConfig != nil {
+				postgresConfig.TLSConfig = fallback.TLSConfig
+				postgresConfig.Fallbacks = append(
+					postgresConfig.Fallbacks[:index],
+					postgresConfig.Fallbacks[index+1:]...,
+				)
+				break
+			}
+		}
+	}
+	hasTLSConfig := postgresConfig.TLSConfig != nil
+	for _, fallback := range postgresConfig.Fallbacks {
+		hasTLSConfig = hasTLSConfig || fallback.TLSConfig != nil
+	}
+	if hasTLSConfig {
+		secureFallbacks := postgresConfig.Fallbacks[:0]
+		for _, fallback := range postgresConfig.Fallbacks {
+			if fallback.TLSConfig != nil || isPostgresUnixSocket(fallback.Host, fallback.Port) {
+				secureFallbacks = append(secureFallbacks, fallback)
+			}
+		}
+		postgresConfig.Fallbacks = secureFallbacks
+	}
+	return postgresConfig, nil
+}
+
+func applyLegacyPostgresHostDefault(connectionString string) (string, error) {
+	if os.Getenv("PGHOST") != "" || os.Getenv("PGSERVICE") != "" {
+		return connectionString, nil
 	}
 
-	return d
+	if strings.HasPrefix(connectionString, "postgres://") ||
+		strings.HasPrefix(connectionString, "postgresql://") {
+		parsedURL, err := url.Parse(connectionString)
+		if err != nil {
+			return "", fmt.Errorf("parse PostgreSQL connection URL: %w", err)
+		}
+		query := parsedURL.Query()
+		if parsedURL.Hostname() != "" || query.Has("host") || query.Has("service") {
+			return connectionString, nil
+		}
+		port := parsedURL.Port()
+		parsedURL.Host = "localhost"
+		if port != "" {
+			parsedURL.Host = net.JoinHostPort("localhost", port)
+		}
+		return parsedURL.String(), nil
+	}
+
+	if postgresKeywordHasKey(connectionString, "host") ||
+		postgresKeywordHasKey(connectionString, "service") {
+		return connectionString, nil
+	}
+	return strings.TrimSpace("host=localhost " + connectionString), nil
+}
+
+func postgresKeywordHasKey(connectionString, target string) bool {
+	remaining := strings.TrimSpace(connectionString)
+	for remaining != "" {
+		equalsIndex := strings.IndexByte(remaining, '=')
+		if equalsIndex < 0 {
+			return false
+		}
+		key := strings.TrimSpace(remaining[:equalsIndex])
+		remaining = strings.TrimLeft(remaining[equalsIndex+1:], " \t\n\r\v\f")
+		if key == target {
+			return true
+		}
+
+		quoted := strings.HasPrefix(remaining, "'")
+		if quoted {
+			remaining = remaining[1:]
+		}
+		escaped := false
+		valueEnd := len(remaining)
+		for index, character := range remaining {
+			if escaped {
+				escaped = false
+				continue
+			}
+			if character == '\\' {
+				escaped = true
+				continue
+			}
+			if (quoted && character == '\'') || (!quoted && strings.ContainsRune(" \t\n\r\v\f", character)) {
+				valueEnd = index
+				if quoted {
+					valueEnd++
+				}
+				break
+			}
+		}
+		remaining = strings.TrimLeft(remaining[valueEnd:], " \t\n\r\v\f")
+	}
+	return false
+}
+
+func isPostgresUnixSocket(host string, port uint16) bool {
+	network, _ := pgconn.NetworkAddress(host, port)
+	return network == "unix"
+}
+
+func validatePostgresConnectionString(connectionString string) (string, error) {
+	if !strings.HasPrefix(connectionString, "postgres://") &&
+		!strings.HasPrefix(connectionString, "postgresql://") {
+		return connectionString, nil
+	}
+
+	parsedURL, err := url.Parse(connectionString)
+	if err != nil {
+		return "", fmt.Errorf("parse PostgreSQL connection URL: %w", err)
+	}
+	if len(parsedURL.Query()["sslmode"]) > 1 {
+		return "", errors.New("PostgreSQL connection URL contains multiple sslmode values")
+	}
+	return connectionString, nil
+}
+
+func migrationDialect(name string) (string, error) {
+	switch name {
+	case "sqlite3", "mysql":
+		return name, nil
+	case "postgres", "postgresql":
+		return "postgres", nil
+	default:
+		return "", fmt.Errorf("unsupported database %q", name)
+	}
+}
+
+func migrateDatabase(database *sql.DB, name, migrationsPath string) error {
+	dialect, err := migrationDialect(name)
+	if err != nil {
+		return err
+	}
+	migrationsPath, err = resolveMigrationsPath(migrationsPath)
+	if err != nil {
+		return err
+	}
+	if err := goose.SetDialect(dialect); err != nil {
+		return fmt.Errorf("configure database migrations: %w", err)
+	}
+	if _, err := goose.EnsureDBVersion(database); err != nil {
+		return fmt.Errorf("initialize database migration metadata: %w", err)
+	}
+	if err := normalizeLegacyGooseHistory(database, dialect); err != nil {
+		return err
+	}
+	if err := goose.Up(database, migrationsPath); err != nil {
+		return fmt.Errorf("run database migrations: %w", err)
+	}
+	return nil
+}
+
+func resolveMigrationsPath(configuredPath string) (string, error) {
+	configuredInfo, err := os.Stat(configuredPath)
+	if err != nil {
+		return "", fmt.Errorf("inspect migrations path: %w", err)
+	}
+	if !configuredInfo.IsDir() {
+		return "", fmt.Errorf("migrations path %q is not a directory", configuredPath)
+	}
+
+	nestedPath := filepath.Join(configuredPath, "migrations")
+	nestedInfo, err := os.Stat(nestedPath)
+	switch {
+	case err == nil && nestedInfo.IsDir():
+		return nestedPath, nil
+	case err == nil:
+		return "", fmt.Errorf("nested migrations path %q is not a directory", nestedPath)
+	case errors.Is(err, os.ErrNotExist):
+		return configuredPath, nil
+	default:
+		return "", fmt.Errorf("inspect nested migrations path: %w", err)
+	}
+}
+
+func normalizeLegacyGooseHistory(database *sql.DB, dialect string) error {
+	transaction, err := database.Begin()
+	if err != nil {
+		return fmt.Errorf("begin migration metadata normalization: %w", err)
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = transaction.Rollback()
+		}
+	}()
+
+	rows, err := transaction.Query(
+		"SELECT id, version_id, is_applied FROM goose_db_version ORDER BY id DESC",
+	)
+	if err != nil {
+		return fmt.Errorf("read migration metadata: %w", err)
+	}
+
+	type migrationState struct {
+		id        int64
+		isApplied bool
+	}
+	latestStates := make(map[int64]migrationState)
+	for rows.Next() {
+		var id int64
+		var version int64
+		var isApplied bool
+		if err := rows.Scan(&id, &version, &isApplied); err != nil {
+			_ = rows.Close()
+			return fmt.Errorf("scan migration metadata: %w", err)
+		}
+		if _, exists := latestStates[version]; !exists {
+			latestStates[version] = migrationState{id: id, isApplied: isApplied}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		_ = rows.Close()
+		return fmt.Errorf("iterate migration metadata: %w", err)
+	}
+	if err := rows.Close(); err != nil {
+		return fmt.Errorf("close migration metadata rows: %w", err)
+	}
+
+	deleteVersionQuery := "DELETE FROM goose_db_version WHERE version_id = ?"
+	deleteDuplicateQuery := "DELETE FROM goose_db_version WHERE version_id = ? AND id <> ?"
+	if dialect == "postgres" {
+		deleteVersionQuery = "DELETE FROM goose_db_version WHERE version_id = $1"
+		deleteDuplicateQuery = "DELETE FROM goose_db_version WHERE version_id = $1 AND id <> $2"
+	}
+	for version, state := range latestStates {
+		if !state.isApplied {
+			if _, err := transaction.Exec(deleteVersionQuery, version); err != nil {
+				return fmt.Errorf("remove rolled-back migration metadata: %w", err)
+			}
+			continue
+		}
+		if _, err := transaction.Exec(deleteDuplicateQuery, version, state.id); err != nil {
+			return fmt.Errorf("deduplicate migration metadata: %w", err)
+		}
+	}
+
+	if err := transaction.Commit(); err != nil {
+		return fmt.Errorf("commit migration metadata normalization: %w", err)
+	}
+	committed = true
+	return nil
 }
 
 func createTemporaryPassword(u *User) error {
@@ -124,18 +399,6 @@ func createTemporaryPassword(u *User) error {
 func Setup(c *config.Config) error {
 	// Setup the package-scoped config
 	conf = c
-	// Setup the goose configuration
-	migrateConf := &goose.DBConf{
-		MigrationsDir: conf.MigrationsPath,
-		Env:           "production",
-		Driver:        chooseDBDriver(conf.DBName, conf.DBPath),
-	}
-	// Get the latest possible migration
-	latest, err := goose.GetMostRecentDBVersion(migrateConf.MigrationsDir)
-	if err != nil {
-		log.Error(err)
-		return err
-	}
 
 	// Register certificates for tls encrypted db connections
 	if conf.DBSSLCaPath != "" {
@@ -165,8 +428,9 @@ func Setup(c *config.Config) error {
 
 	// Open our database connection
 	i := 0
+	var err error
 	for {
-		db, err = gorm.Open(conf.DBName, conf.DBPath)
+		db, err = openDatabase(conf.DBName, conf.DBPath)
 		if err == nil {
 			break
 		}
@@ -185,9 +449,7 @@ func Setup(c *config.Config) error {
 		log.Error(err)
 		return err
 	}
-	// Migrate up to the latest version
-	err = goose.RunMigrationsOnDb(migrateConf, migrateConf.MigrationsDir, latest, db.DB())
-	if err != nil {
+	if err = migrateDatabase(db.DB(), conf.DBName, conf.MigrationsPath); err != nil {
 		log.Error(err)
 		return err
 	}

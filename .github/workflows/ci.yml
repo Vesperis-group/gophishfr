@@ -258,6 +258,75 @@ jobs:
           echo "Total coverage: ${total}"
           echo "Total coverage: ${total}" >> "${GITHUB_STEP_SUMMARY}"
 
+  postgres-driver-integration:
+    name: PostgreSQL driver integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      postgres:
+        image: postgres:17.6-bookworm@sha256:f3bd19c606e442c3d7bdfa8002e03fe260a1023351e0ea4598032022b68dd6e3
+        env:
+          POSTGRES_DB: gophishfr_test
+          POSTGRES_PASSWORD: gophishfr_test
+          POSTGRES_USER: gophishfr
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready --dbname=gophishfr_test --username=gophishfr"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Test PostgreSQL driver and migrations
+        env:
+          GOPHISHFR_POSTGRES_TEST_DSN: postgres://gophishfr:gophishfr_test@127.0.0.1:5432/gophishfr_test?sslmode=disable
+        run: go test ./models -run '^TestPostgresDriverIntegration$' -count=1
+
+  mysql-driver-integration:
+    name: MySQL driver integration
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.4.6@sha256:869218921e61d6c3c89820955d63cca42971f0e3e6c1e2792247bbd944ebc6e9
+        env:
+          MYSQL_DATABASE: gophishfr_test
+          MYSQL_PASSWORD: gophishfr_test
+          MYSQL_ROOT_PASSWORD: gophishfr_root_test
+          MYSQL_USER: gophishfr
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd "mysqladmin ping --host=127.0.0.1 --user=gophishfr --password=gophishfr_test --silent"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Test MySQL driver and migrations
+        env:
+          GOPHISHFR_MYSQL_TEST_DSN: gophishfr:gophishfr_test@tcp(127.0.0.1:3306)/gophishfr_test?parseTime=true
+        run: go test ./models -run '^TestMySQLDriverIntegration$' -count=1
+
   go-race:
     name: Go test (race)
     runs-on: ubuntu-24.04
@@ -341,6 +410,8 @@ jobs:
       - frontend-browser-smoke
       - container-build
       - go-test
+      - postgres-driver-integration
+      - mysql-driver-integration
       - go-race
       - go-vulncheck
     steps:
