@@ -667,9 +667,15 @@ table.dataTable {
     line-height: 20px !important;
 }
 
-.highcharts-title {
-    font-family: "Source Sans Pro", Helvetica, Arial, sans-serif;
-    font-size: 16px !important;
+.chart-wrapper {
+    position: relative;
+}
+
+.chart-reset-zoom {
+    position: absolute;
+    right: 5px;
+    top: 5px;
+    z-index: 1;
 }
 
 .color-success {

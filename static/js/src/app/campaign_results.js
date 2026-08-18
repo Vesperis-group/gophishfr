@@ -443,131 +443,20 @@ function renderTimeline(data) {
 }
 
 var renderTimelineChart = function (chartopts) {
-    return Highcharts.chart('timeline_chart', {
-        chart: {
-            zoomType: 'x',
-            type: 'line',
-            height: "200px"
-        },
-        title: {
-            text: 'Campaign Timeline'
-        },
-        xAxis: {
-            type: 'datetime',
-            dateTimeLabelFormats: {
-                second: '%l:%M:%S',
-                minute: '%l:%M',
-                hour: '%l:%M',
-                day: '%b %d, %Y',
-                week: '%b %d, %Y',
-                month: '%b %Y'
-            }
-        },
-        yAxis: {
-            min: 0,
-            max: 2,
-            visible: false,
-            tickInterval: 1,
-            labels: {
-                enabled: false
-            },
-            title: {
-                text: ""
-            }
-        },
-        tooltip: {
-            formatter: function () {
-                return Highcharts.dateFormat('%A, %b %d %l:%M:%S %P', new Date(this.x)) +
-                    '<br>Event: ' + this.point.message + '<br>Email: <b>' + this.point.email + '</b>'
-            }
-        },
-        legend: {
-            enabled: false
-        },
-        plotOptions: {
-            series: {
-                marker: {
-                    enabled: true,
-                    symbol: 'circle',
-                    radius: 3
-                },
-                cursor: 'pointer',
-            },
-            line: {
-                states: {
-                    hover: {
-                        lineWidth: 1
-                    }
-                }
-            }
-        },
-        credits: {
-            enabled: false
-        },
-        series: [{
-            data: chartopts['data'],
-            dashStyle: "shortdash",
-            color: "#cccccc",
-            lineWidth: 1,
-            turboThreshold: 0
-        }]
+    return GophishCharts.renderTimeline({
+        elemId: 'timeline_chart',
+        title: 'Campaign Timeline',
+        data: chartopts['data']
     })
 }
 
-/* Renders a pie chart using the provided chartops */
 var renderPieChart = function (chartopts) {
-    return Highcharts.chart(chartopts['elemId'], {
-        chart: {
-            type: 'pie',
-            events: {
-                load: function () {
-                    var chart = this,
-                        rend = chart.renderer,
-                        pie = chart.series[0],
-                        left = chart.plotLeft + pie.center[0],
-                        top = chart.plotTop + pie.center[1];
-                    this.innerText = rend.text(chartopts['data'][0].count, left, top).
-                    attr({
-                        'text-anchor': 'middle',
-                        'font-size': '24px',
-                        'font-weight': 'bold',
-                        'fill': chartopts['colors'][0],
-                        'font-family': 'Helvetica,Arial,sans-serif'
-                    }).add();
-                },
-                render: function () {
-                    this.innerText.attr({
-                        text: chartopts['data'][0].count
-                    })
-                }
-            }
-        },
-        title: {
-            text: chartopts['title']
-        },
-        plotOptions: {
-            pie: {
-                innerSize: '80%',
-                dataLabels: {
-                    enabled: false
-                }
-            }
-        },
-        credits: {
-            enabled: false
-        },
-        tooltip: {
-            formatter: function () {
-                if (this.key == undefined) {
-                    return false
-                }
-                return '<span style="color:' + this.color + '">\u25CF</span>' + this.point.name + ': <b>' + this.y + '%</b><br/>'
-            }
-        },
-        series: [{
-            data: chartopts['data'],
-            colors: chartopts['colors'],
-        }]
+    return GophishCharts.renderDoughnut({
+        elemId: chartopts['elemId'],
+        title: chartopts['title'],
+        data: chartopts['data'],
+        colors: chartopts['colors'],
+        centerFontSize: 24
     })
 }
 
@@ -637,21 +526,19 @@ function poll() {
             /* Update the timeline */
             var timeline_series_data = []
             $.each(campaign.timeline, function (i, event) {
+                if (event.message == "Campaign Created") {
+                    return true
+                }
                 var event_date = moment.utc(event.time).local()
                 timeline_series_data.push({
                     email: event.email,
                     message: event.message,
                     x: event_date.valueOf(),
                     y: 1,
-                    marker: {
-                        fillColor: statuses[event.message].color
-                    }
+                    color: statuses[event.message].color
                 })
             })
-            var timeline_chart = $("#timeline_chart").highcharts()
-            timeline_chart.series[0].update({
-                data: timeline_series_data
-            })
+            GophishCharts.updateTimeline('timeline_chart', timeline_series_data)
             /* Update the results donut chart */
             var email_series_data = {}
             // Load the initial data
@@ -683,10 +570,7 @@ function poll() {
                     name: '',
                     y: 100 - Math.floor((count / campaign.results.length) * 100)
                 })
-                var chart = $("#" + statusMapping[status] + "_chart").highcharts()
-                chart.series[0].update({
-                    data: email_data
-                })
+                GophishCharts.updateDoughnut(statusMapping[status] + '_chart', email_data)
             })
 
             /* Update the datatable */
@@ -847,9 +731,7 @@ function load() {
                         message: event.message,
                         x: event_date.valueOf(),
                         y: 1,
-                        marker: {
-                            fillColor: statuses[event.message].color
-                        }
+                        color: statuses[event.message].color
                     })
                 })
                 renderTimelineChart({
@@ -961,11 +843,6 @@ function report_mail(rid, cid) {
 }
 
 $(document).ready(function () {
-    Highcharts.setOptions({
-        global: {
-            useUTC: false
-        }
-    })
     load();
 
     // Start the polling loop

@@ -141,6 +141,54 @@ critical assets, failed requests, console errors, and JavaScript exceptions. It
 now also opens User Management, loads both the users and password bundles, and
 verifies that typing a synthetic password updates the zxcvbn strength indicator.
 
+## Charting library replacement
+
+The manually vendored Highcharts 5.0.14 runtime was removed because its
+commercial redistribution entitlement could not be established. Chart.js
+4.5.1 was selected as the maintained replacement: it is MIT-licensed, supports
+the required doughnut, line, filled-area, tooltip, responsive, and click
+behaviors, works with the existing classic-script build, and adds only one
+runtime color dependency.
+
+The original charts also enabled horizontal drag zoom. Chart.js core does not
+provide that interaction, so the MIT-licensed `chartjs-plugin-zoom` 2.2.0 is a
+direct dependency. Its Hammer.JS 2.0.8 runtime dependency is bundled to retain
+touch support. The replacement supplies the same horizontal drag selection and
+a reset control. No CDN, external chart service, package-manager change, or
+general toolchain migration is involved.
+
+| Package | Relationship | Version | License | Purpose |
+| --- | --- | ---: | --- | --- |
+| `chart.js` | direct | 4.5.1 | MIT | Doughnut, timeline, and campaign-overview rendering |
+| `chartjs-plugin-zoom` | direct | 2.2.0 | MIT | Preserve horizontal drag zoom and reset |
+| `@kurkle/color` | transitive | 0.3.4 | MIT | Chart.js color parsing |
+| `hammerjs` | transitive | 2.0.8 | MIT | Zoom plugin pointer and touch gestures |
+| `@types/hammerjs` | transitive build metadata | 2.0.46 | MIT | Type declarations installed by the zoom plugin; not bundled |
+
+The build reads the maintained packages from `node_modules` and emits their
+code into the existing vendor bundle. Complete notices for every bundled new
+component are generated in `static/js/dist/vendor.min.js.LICENSE.txt` and
+identified in the repository `NOTICE`.
+
+| Generated asset metric | Before chart replacement | After chart replacement |
+| --- | ---: | ---: |
+| Generated files | 16 | 18 |
+| Aggregate bytes | 2,209,800 | 2,259,593 |
+| Aggregate SHA-256 manifest | `6389202e8d0ae7d32e14fc90bf1ad580e92314113a6b2bffe56e4e9dd664ec20` | `9a592d7810ca43d6f6d95d07f968079b2857a117550e8bc87d99f001c3e76003` |
+| `vendor.min.js` | 981,029 bytes | 1,023,916 bytes |
+| `gophish.css` | 329,349 bytes | 329,346 bytes |
+| `charts.min.js` | Not present | 5,017 bytes |
+| `vendor.min.js.LICENSE.txt` | Not present | 4,469 bytes |
+
+Two independent clean-room installs and builds produced identical per-file
+hashes and the aggregate manifest above. The dashboard and campaign-result
+browser baseline verifies chart rendering, titles, values, accessible labels,
+timeline tooltip content, campaign navigation, horizontal zoom/reset, failed
+requests, console errors, JavaScript exceptions, and external traffic.
+
+After the replacement, Yarn reports 80 audited dependencies and npm reports 79;
+both report zero known vulnerabilities at every severity.
+
 Webpack reports the expected 801 KiB password bundle performance warning. It is
 kept visible rather than suppressed. Lazy-loading or replacing zxcvbn would be a
 separate application-performance and behavior change, not a build-toolchain
@@ -152,8 +200,8 @@ The npm and Yarn audits report zero known dependency vulnerabilities. Remaining
 debt is non-advisory:
 
 - Yarn Classic emits Node's `DEP0169` deprecation warning under Node 24.
-- The repository still ships old vendored browser libraries that are outside
-  the package-manager graph.
+- The repository still ships other old vendored browser libraries that are
+  outside the package-manager graph.
 - zxcvbn 4.4.2 is old and produces a large bundle, although it has no current
   npm/Yarn advisory.
 

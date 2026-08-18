@@ -42,7 +42,9 @@ The suite verifies:
 
 - login rendering, CSS application, vendor globals, synthetic authentication,
   and the dashboard redirect;
-- dashboard JavaScript and its empty state;
+- dashboard chart rendering, values, labels, and campaign navigation;
+- campaign-result doughnut and timeline rendering, tooltip data, horizontal
+  zoom, and zoom reset;
 - campaign navigation, Bootstrap tabs and modals, Select2, and the datetime
   picker;
 - group DataTables rendering and client-side target entry;
