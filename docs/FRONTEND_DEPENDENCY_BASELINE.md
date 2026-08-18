@@ -1,24 +1,19 @@
-# Frontend dependency vulnerability baseline
+# Frontend dependency and build baseline
 
 This baseline was remeasured on 2026-08-18 with Node.js 24.19.0 and Yarn
-Classic 1.22.22. This pull request applies only compatible patch/minor updates,
-safe transitive refreshes within parent ranges, and removal of unused build
-dependencies. It does not migrate Gulp or Webpack.
+Classic 1.22.22. The frontend build remains development-only: Node packages are
+not copied into release archives or the runtime container.
 
 ## Measurement
 
-`yarn.lock` remains the authoritative dependency graph. The locked graph was
-measured with:
+`yarn.lock` remains the authoritative dependency graph. The locked graph and the
+package-level npm comparison were measured with:
 
 ```sh
 yarn install --frozen-lockfile --non-interactive
 yarn audit --json
-```
 
-The npm package-level comparison was reproduced outside the repository from
-`package.json` alone:
-
-```sh
+# In a temporary directory containing package.json only:
 npm install --package-lock-only --ignore-scripts --no-audit
 npm audit --json
 ```
@@ -26,133 +21,141 @@ npm audit --json
 No `package-lock.json`, `resolutions`, audit suppression, or automatic audit fix
 was added.
 
+| Metric | Before modernization | After modernization |
+| --- | ---: | ---: |
+| npm vulnerable packages | 22 | 0 |
+| npm critical | 0 | 0 |
+| npm high | 10 | 0 |
+| npm moderate | 7 | 0 |
+| npm low | 5 | 0 |
+| npm production | 0 | 0 |
+| npm development | 22 | 0 |
+| Yarn vulnerable paths | 27 | 0 |
+| Yarn unique advisories | 7 | 0 |
+| Yarn unique critical | 1 | 0 |
+| Yarn unique high | 4 | 0 |
+| Yarn unique moderate | 1 | 0 |
+| Yarn unique low | 1 | 0 |
+| Yarn audit dependency count | 744 | 75 |
+| Yarn lock selectors | 696 | 75 |
+
+## Advisory inventory before modernization
+
+All findings were reachable only while installing or running the build
+toolchain. They did not execute in the Go server or runtime image, but remained
+relevant to CI and developer hosts processing repository content.
+
+| Package | Advisory | Severity | Parent and role | Patched version | Decision |
+| --- | --- | --- | --- | --- | --- |
+| `set-value` 0.4.3 | `GHSA-4g88-fppr-53pp` / `CVE-2019-10747` | critical | Gulp/Webpack watcher and glob chains through `micromatch`, `snapdragon`, `cache-base`, and `union-value` | 2.0.1 | Remove the obsolete chains |
+| `set-value` 0.4.3 | `GHSA-4jqc-8m5r-9rpr` / `CVE-2021-23440` | high | Same Gulp/Webpack watcher and glob chains | 2.0.1 | Remove the obsolete chains |
+| `braces` 2.3.2 | `GHSA-grv7-fg5c-xmjg` / `CVE-2024-4068` | high | Gulp/Webpack file matching through `micromatch` | 3.0.3 | Remove Gulp and upgrade Webpack |
+| `serialize-javascript` 4.0.0 | `GHSA-5c6j-r48x-rmvq` | high | Webpack 4 minification through `terser-webpack-plugin` | 7.0.3 | Upgrade Webpack |
+| `terser` 5.9.0 | `GHSA-4wf5-vphf-c2xc` / `CVE-2022-25858` | high | JavaScript minification through abandoned `gulp-uglify-es` | 5.14.2 | Replace the wrapper with Terser 5.50.0 direct |
+| `micromatch` 3.1.10 | `GHSA-952p-6rrq-rcjv` / `CVE-2024-4067` | moderate | Gulp/Webpack watcher and glob matching | 4.0.8 | Remove Gulp and upgrade Webpack |
+| `elliptic` 6.6.1 | `GHSA-848j-6mx2-7j84` / `CVE-2025-14505` | low | Webpack 4 Node crypto polyfills | No patched release | Upgrade Webpack, which no longer installs the polyfill chain |
+
+The migration removes every affected dependency chain. No advisory is
+suppressed or accepted as a false positive.
+
+## Toolchain migration
+
+The old normal build invoked only Gulp. Its three tasks used fixed source lists
+to concatenate and minify vendored JavaScript, minify application scripts, and
+minify then concatenate stylesheets. No watch task was used. Webpack and Babel
+were installed and configured but were not called by `yarn build`, CI, or
+Docker.
+
+That disconnected setup also caused `passwords.min.js` to retain a bare
+`import zxcvbn` statement while templates loaded it as a classic script. The
+password-strength code was therefore not executable after a normal build.
+
+| Component | Before | Decision | After |
+| --- | --- | --- | --- |
+| Webpack | 4.47.0, disconnected three-entry config | `UPGRADE_MAJOR` and reduce scope | 5.109.2, one `passwords.js` entry invoked through the Node API |
+| webpack-cli | 3.3.12, unused | `REMOVE` | No CLI; the build calls Webpack programmatically |
+| Terser | 5.9.0 through abandoned `gulp-uglify-es` | `REPLACE` | Direct exact dependency 5.50.0 |
+| Gulp | 4.0.1 | `REMOVE` | Fixed ordered lists and filesystem operations in `scripts/build-frontend.js` |
+| Gulp plugins | `gulp-clean-css`, `gulp-concat`, `gulp-rename`, `gulp-uglify-es` | `REMOVE` | Direct CleanCSS/Terser APIs and Node filesystem APIs |
+| Babel | Babel 7 core/preset and babel-loader 8, disconnected | `REMOVE` | No dormant transpilation configuration |
+| CSS minifier | CleanCSS 4.2.1 through Gulp | `UPGRADE_MAJOR` | Direct exact dependency 5.3.3 |
+| CSS/assets | Per-file level-1 CSS minification, then fixed-order concatenation | `KEEP` | Same ordering and optimization level |
+
+Application scripts remain classic scripts. Terser uses its non-module defaults,
+so top-level function names referenced by legacy inline handlers are not
+mangled. The vendor list retains its original fixed order and newline
+separators. Webpack is the sole producer of `passwords.min.js`; every other
+application script remains independently minified.
+
+## Direct dependency changes
+
+| Package | Before | After | Reason |
+| --- | --- | --- | --- |
+| `clean-css` | 4.2.1 | 5.3.3 exact | Maintained direct CSS minifier |
+| `webpack` | 4.47.0 | 5.109.2 exact | Remove vulnerable Webpack 4 chains and bundle the real module import |
+| `terser` | transitive 5.9.0 | 5.50.0 exact | Replace the abandoned Gulp wrapper with the maintained API |
+| `@babel/core` | 7.29.7 | removed | Disconnected build dependency |
+| `@babel/preset-env` | 7.4.5 | removed | Disconnected build dependency |
+| `babel-loader` | 8.0.6 | removed | Disconnected build dependency |
+| `gulp` | 4.0.1 | removed | Three simple non-watching tasks are implemented directly |
+| `gulp-cli` | 2.2.0 | removed | No Gulp runtime remains |
+| `gulp-clean-css` | 4.0.0 | removed | Direct CleanCSS API replaces the wrapper |
+| `gulp-concat` | 2.6.1 | removed | Ordered string concatenation replaces the wrapper |
+| `gulp-rename` | 1.4.0 | removed | Output names are explicit |
+| `gulp-uglify-es` | 3.0.0 | removed | Abandoned and pinned to vulnerable Terser |
+
+`terser` is the only new direct dependency, but it replaces an existing
+transitive minifier and its abandoned wrapper. Calling the maintained API
+directly avoids another stream plugin and reduces maintenance and supply-chain
+surface.
+
+## Generated assets
+
+The committed assets were rebuilt because the minifiers changed. Comparison
+against the previous baseline is informational; reproducibility is enforced
+between clean builds of the new state.
+
 | Metric | Before | After |
 | --- | ---: | ---: |
-| npm vulnerable packages | 25 | 22 |
-| npm high | 13 | 10 |
-| npm moderate | 7 | 7 |
-| npm low | 5 | 5 |
-| npm critical | 0 | 0 |
-| npm production | 0 | 0 |
-| npm development | 25 | 22 |
-| npm direct | 5 | 4 |
-| npm transitive | 20 | 18 |
-| Yarn vulnerable paths | 251 | 27 |
-| Yarn unique advisories | 70 | 7 |
-| Yarn unique critical | 12 | 1 |
-| Yarn unique high | 32 | 4 |
-| Yarn unique moderate | 16 | 1 |
-| Yarn unique low | 10 | 1 |
+| Generated files | 15 | 16 |
+| Aggregate bytes | 1,395,926 | 2,209,800 |
+| Aggregate SHA-256 manifest | `5411d7336d29c01e3461df0efe8971deab9a22fb4d7812a24186609280d4f451` | `6389202e8d0ae7d32e14fc90bf1ad580e92314113a6b2bffe56e4e9dd664ec20` |
+| `vendor.min.js` | 983,831 bytes | 981,029 bytes |
+| `gophish.css` | 329,304 bytes | 329,349 bytes |
+| `passwords.min.js` | 1,008 bytes, invalid bare import | 819,870 bytes, bundled `zxcvbn` |
 
-The previous document classified the npm findings as 4 direct and 21
-transitive. Reproduction showed 5 direct findings (`gulp`, `gulp-cli`, `jshint`,
-`webpack`, and `webpack-cli`) and 20 transitive findings. The package and
-severity totals were unchanged.
+The additional file is `passwords.min.js.LICENSE.txt`, copied from the zxcvbn
+package so its MIT notice ships with the bundled code. The 813,874-byte total
+increase is attributable to the previously missing zxcvbn bundle and its
+license; the other generated assets are collectively smaller.
 
-## Corrected now
+Two consecutive clean builds produced identical per-file hashes and the same
+aggregate manifest hash shown above. File names and template references are
+unchanged.
 
-The normal Gulp build produced byte-identical JavaScript and CSS before and
-after these changes.
+## Compatibility validation
 
-### Direct dependencies
+The Playwright smoke baseline still validates login, navigation, representative
+admin pages, Bootstrap, DataTables, Select2, the datetime picker, CKEditor,
+critical assets, failed requests, console errors, and JavaScript exceptions. It
+now also opens User Management, loads both the users and password bundles, and
+verifies that typing a synthetic password updates the zxcvbn strength indicator.
 
-The removals and direct patch/minor updates below are classified
-`A - SAFE_NOW`. Their affected transitive trees are
-`B - SAFE_PARENT_UPGRADE`.
+Webpack reports the expected 801 KiB password bundle performance warning. It is
+kept visible rather than suppressed. Lazy-loading or replacing zxcvbn would be a
+separate application-performance and behavior change, not a build-toolchain
+remediation.
 
-| Package | Before | After | Method |
-| --- | --- | --- | --- |
-| `@babel/core` | 7.4.5 | 7.29.7 | Compatible Babel 7 minor update |
-| `webpack` | 4.32.2 | 4.47.0 | Latest Webpack 4 minor |
-| `webpack-cli` | 3.3.2 | 3.3.12 | Latest Webpack CLI 3 patch |
-| `gulp-babel` | 8.0.0 | removed | Required but never used by `gulpfile.js` |
-| `gulp-jshint` | 2.1.0 | removed | No lint task or import exists |
-| `gulp-wrap` | 0.15.0 | removed | No task or import exists |
-| `jshint` | 2.13.6 | removed | No lint task or script exists |
-| `jshint-stylish` | 2.2.1 | removed | No lint task or import exists |
+## Remaining frontend debt
 
-The Babel preset and loader remain because `webpack.config.js` uses them. The
-Webpack dependencies remain because that configuration is still present, even
-though the normal `yarn build` command currently invokes only Gulp.
+The npm and Yarn audits report zero known dependency vulnerabilities. Remaining
+debt is non-advisory:
 
-### Compatible transitive refreshes
+- Yarn Classic emits Node's `DEP0169` deprecation warning under Node 24.
+- The repository still ships old vendored browser libraries that are outside
+  the package-manager graph.
+- zxcvbn 4.4.2 is old and produces a large bundle, although it has no current
+  npm/Yarn advisory.
 
-Yarn Classic does not update transitive entries with `yarn upgrade` unless they
-are direct dependencies. The affected lock entries were therefore re-resolved
-only where every parent already accepted the new version. No forced resolution
-was added.
-
-| Package | Before | After |
-| --- | --- | --- |
-| `@babel/helpers` | 7.4.4 | 7.29.7 |
-| `@babel/traverse` | 7.4.5 | 7.29.8 |
-| `ajv` | 6.12.6 | 6.15.0 |
-| `ansi-regex` | 3.0.0 | 4.1.1 |
-| `bn.js` | 4.12.0 | 4.12.5 / 5.2.5 |
-| `brace-expansion` | 1.1.11 | 1.1.18 |
-| `browserify-sign` | 4.0.4 | 4.2.6 |
-| `cipher-base` | 1.0.4 | 1.0.7 |
-| `cross-spawn` | 6.0.5 | 6.0.6 |
-| `debug` | 4.1.1 | 4.4.3 |
-| `decode-uri-component` | 0.2.0 | 0.2.2 |
-| `elliptic` | 6.5.4 | 6.6.1 |
-| `es5-ext` | 0.10.49 | 0.10.64 |
-| `fsevents` | 1.2.8 | 1.2.13 / 2.3.3 |
-| `json5` | 1.0.1 / 2.1.0 | 1.0.2 / 2.2.3 |
-| `kind-of` | 6.0.2 | 6.0.3 |
-| `loader-utils` | 1.2.3 | 1.4.2 |
-| `lodash` | 4.17.21 / 4.17.23 | 4.18.1 |
-| `minimatch` | 3.0.4 | 3.1.5 |
-| `minimist` | 1.2.5 | 1.2.8 |
-| `pbkdf2` | 3.0.17 | 3.1.6 |
-| `semver` | 5.7.0 / 6.1.1 | 5.7.2 / 6.3.1 |
-| `set-value` | 2.0.0 | 2.0.1 |
-| `sha.js` | 2.4.11 | 2.4.12 |
-| `y18n` | 4.0.0 | 4.0.3 |
-| `yargs-parser` | 11.1.1 | 13.1.2 |
-
-These updates and removals eliminate 63 unique Yarn advisories: 11 critical,
-28 high, 15 moderate, and 9 low. The affected packages include Babel helpers,
-the legacy Webpack crypto polyfills, JSHint dependencies, old file-watcher
-dependencies, and vulnerable parsing/minimization support packages.
-
-Notable advisories corrected include:
-
-- `GHSA-67hx-6x53-jw92` (`@babel/traverse`)
-- `GHSA-cpq7-6gpm-g9rc` (`cipher-base`)
-- `GHSA-76p3-8jx3-jpfq` (`loader-utils`)
-- `GHSA-xvch-5gv4-984h` (`minimist`)
-- `GHSA-h7cp-r72f-jxh6` and `GHSA-v62p-rq8g-8h59` (`pbkdf2`)
-- `GHSA-95m3-7q98-8xr5` (`sha.js`)
-- `GHSA-x9w5-v3q2-3rhw` (`browserify-sign`)
-- `GHSA-23c5-xmqv-rm74` and related `minimatch` advisories
-- `GHSA-hxcc-f52p-wc94` (`serialize-javascript`)
-- `GHSA-p9pc-299p-vxgp` (`yargs-parser`)
-
-## Remaining intentionally
-
-All remaining findings are development/build-only. The Node dependency tree is
-not copied into release archives or the runtime container, and the Go server
-does not load it.
-
-| Package | Severity | Dependency chain | Classification | Reason for deferral |
-| --- | --- | --- | --- | --- |
-| `set-value` 0.4.3 | critical, high | Gulp/Webpack -> micromatch 3 -> snapdragon -> cache-base -> union-value -> set-value | `C - MAJOR_MIGRATION_REQUIRED` | The parent requires the incompatible 0.x API; correction requires replacing the micromatch 3 chain. |
-| `braces` 2.3.2 | high | Gulp/Webpack -> micromatch 3 -> braces | `C - MAJOR_MIGRATION_REQUIRED` | Fixed in braces 3, outside the parent range. |
-| `serialize-javascript` 4.0.0 | high | Webpack 4 -> terser-webpack-plugin 1 -> serialize-javascript | `C - MAJOR_MIGRATION_REQUIRED` | Fixed in 7.0.3, outside the plugin range. |
-| `terser` 5.9.0 | high | gulp-uglify-es -> terser | `D - BUILD_ONLY_ACCEPTED_TEMPORARILY` | This code is reachable in every CI frontend build. Updating to the fixed 5.14.2+ rewrites every JavaScript bundle, and there are no browser regression tests proving those output changes safe. |
-| `elliptic` 6.6.1 | low | Webpack 4 -> node-libs-browser -> crypto-browserify -> browserify-sign -> elliptic | `D - UNREACHABLE/BUILD_ONLY_ACCEPTED_TEMPORARILY` | The remaining advisory declares no patched release and the Webpack command is not part of the normal build. |
-| `micromatch` 3.1.10 | moderate | Gulp/Webpack watcher chains -> micromatch | `C - MAJOR_MIGRATION_REQUIRED` | Fixed in micromatch 4, outside parent ranges. |
-
-No finding was classified as a false positive. Build-only status limits product
-runtime exposure, but CI and developer hosts still process untrusted repository
-content, so these findings remain security debt rather than accepted risk
-without qualification.
-
-## Next step
-
-A dedicated `build/modernize-frontend-toolchain` pull request is justified. It
-should first add browser-level regression tests for the generated assets, then
-replace or upgrade the abandoned Gulp minifier and migrate the Gulp/Webpack
-dependency chains that require major versions. That work must not be combined
-with this compatibility-preserving remediation.
+These items require separate, behavior-focused work and are not hidden or
+suppressed by this migration.
