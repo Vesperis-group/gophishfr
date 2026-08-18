@@ -30,37 +30,40 @@ const vendorSourceDirectory = path.join(javascriptSourceDirectory, "vendor");
 const stylesheetSourceDirectory = path.join(projectRoot, "static", "css");
 const stylesheetOutputDirectory = path.join(stylesheetSourceDirectory, "dist");
 
-const vendoredScriptNames = [
-  "jquery.js",
-  "bootstrap.min.js",
-  "moment.min.js",
-  "papaparse.min.js",
-  "d3.min.js",
-  "topojson.min.js",
-  "datamaps.min.js",
-  "jquery.dataTables.min.js",
-  "dataTables.bootstrap.js",
-  "datetime-moment.js",
-  "jquery.ui.widget.js",
-  "jquery.fileupload.js",
-  "jquery.iframe-transport.js",
-  "sweetalert2.min.js",
-  "bootstrap-datetime.js",
-  "select2.min.js",
-  "core.min.js",
-  "ua-parser.min.js",
-];
+function vendoredScript(name) {
+  return path.join(vendorSourceDirectory, name);
+}
 
-const vendorScriptPaths = vendoredScriptNames.map((name) =>
-  path.join(vendorSourceDirectory, name),
-);
-vendorScriptPaths.splice(
-  vendorScriptPaths.length - 1,
-  0,
+function managedFile(packageName, ...segments) {
+  const packageDirectory = path.dirname(
+    require.resolve(`${packageName}/package.json`),
+  );
+  return path.join(packageDirectory, ...segments);
+}
+
+const vendorScriptPaths = [
+  vendoredScript("jquery.js"),
+  vendoredScript("bootstrap.min.js"),
+  managedFile("moment", "min", "moment.min.js"),
+  managedFile("papaparse", "papaparse.min.js"),
+  vendoredScript("d3.min.js"),
+  vendoredScript("topojson.min.js"),
+  vendoredScript("datamaps.min.js"),
+  managedFile("datatables.net", "js", "jquery.dataTables.min.js"),
+  managedFile("datatables.net-bs", "js", "dataTables.bootstrap.min.js"),
+  vendoredScript("datetime-moment.js"),
+  vendoredScript("jquery.ui.widget.js"),
+  vendoredScript("jquery.fileupload.js"),
+  vendoredScript("jquery.iframe-transport.js"),
+  vendoredScript("sweetalert2.min.js"),
+  vendoredScript("bootstrap-datetime.js"),
+  managedFile("select2", "dist", "js", "select2.min.js"),
+  vendoredScript("core.min.js"),
   path.join(chartPackageDirectory, "dist", "chart.umd.js"),
   path.join(hammerPackageDirectory, "hammer.min.js"),
   path.join(zoomPackageDirectory, "dist", "chartjs-plugin-zoom.min.js"),
-);
+  managedFile("ua-parser-js", "src", "ua-parser.js"),
+];
 
 const applicationScripts = [
   "autocomplete.js",
@@ -78,19 +81,57 @@ const applicationScripts = [
   "webhooks.js",
 ];
 
-const stylesheets = [
-  "bootstrap.min.css",
-  "main.css",
-  "dashboard.css",
-  "flat-ui.css",
-  "dataTables.bootstrap.css",
-  "font-awesome.min.css",
-  "chartist.min.css",
-  "bootstrap-datetime.css",
-  "checkbox.css",
-  "sweetalert2.min.css",
-  "select2.min.css",
-  "select2-bootstrap.min.css",
+const stylesheetSources = [
+  path.join(stylesheetSourceDirectory, "bootstrap.min.css"),
+  path.join(stylesheetSourceDirectory, "main.css"),
+  path.join(stylesheetSourceDirectory, "dashboard.css"),
+  path.join(stylesheetSourceDirectory, "flat-ui.css"),
+  managedFile("datatables.net-bs", "css", "dataTables.bootstrap.min.css"),
+  path.join(stylesheetSourceDirectory, "font-awesome.min.css"),
+  path.join(stylesheetSourceDirectory, "bootstrap-datetime.css"),
+  path.join(stylesheetSourceDirectory, "checkbox.css"),
+  path.join(stylesheetSourceDirectory, "sweetalert2.min.css"),
+  managedFile("select2", "dist", "css", "select2.min.css"),
+  path.join(stylesheetSourceDirectory, "select2-bootstrap.min.css"),
+];
+
+const managedVendorLicenses = [
+  {
+    component: "Chart.js 4.5.1",
+    sourcePath: path.join(chartPackageDirectory, "LICENSE.md"),
+  },
+  {
+    component: "@kurkle/color 0.3.4",
+    sourcePath: path.join(colorPackageDirectory, "LICENSE.md"),
+  },
+  {
+    component: "chartjs-plugin-zoom 2.2.0",
+    sourcePath: path.join(zoomPackageDirectory, "LICENSE.md"),
+  },
+  {
+    component: "Hammer.JS 2.0.8",
+    sourcePath: path.join(hammerPackageDirectory, "LICENSE.md"),
+  },
+  {
+    component: "DataTables and DataTables Bootstrap integration 1.13.11",
+    sourcePath: managedFile("datatables.net", "License.txt"),
+  },
+  {
+    component: "Moment.js 2.30.1",
+    sourcePath: managedFile("moment", "LICENSE"),
+  },
+  {
+    component: "Papa Parse 5.6.0",
+    sourcePath: managedFile("papaparse", "LICENSE"),
+  },
+  {
+    component: "Select2 4.0.13",
+    sourcePath: managedFile("select2", "LICENSE.md"),
+  },
+  {
+    component: "UAParser.js 0.7.41",
+    sourcePath: managedFile("ua-parser-js", "license.md"),
+  },
 ];
 
 async function minifyJavaScript(source, sourceName) {
@@ -106,27 +147,22 @@ async function buildVendorScripts() {
     vendorScriptPaths.map((sourcePath) => fs.readFile(sourcePath, "utf8")),
   );
   const output = await minifyJavaScript(sources.join("\n"), "vendor scripts");
-  await fs.writeFile(path.join(javascriptOutputDirectory, "vendor.min.js"), output);
+  await fs.writeFile(
+    path.join(javascriptOutputDirectory, "vendor.min.js"),
+    output,
+  );
 }
 
-async function buildVendorLicense() {
+async function buildManagedVendorLicenses() {
   const notices = await Promise.all(
-    [
-      chartPackageDirectory,
-      colorPackageDirectory,
-      zoomPackageDirectory,
-      hammerPackageDirectory,
-    ].map(async (directory) => {
-      const packageMetadata = JSON.parse(
-        await fs.readFile(path.join(directory, "package.json"), "utf8"),
-      );
-      const license = await fs.readFile(path.join(directory, "LICENSE.md"), "utf8");
-      return `${packageMetadata.name} ${packageMetadata.version}\n\n${license.trim()}\n`;
+    managedVendorLicenses.map(async ({ component, sourcePath }) => {
+      const license = await fs.readFile(sourcePath, "utf8");
+      return `${component}\n${"=".repeat(component.length)}\n\n${license.trim()}`;
     }),
   );
   await fs.writeFile(
     path.join(javascriptOutputDirectory, "vendor.min.js.LICENSE.txt"),
-    notices.join("\n"),
+    `${notices.join("\n\n")}\n`,
   );
 }
 
@@ -147,17 +183,16 @@ async function buildApplicationScripts() {
 
 async function buildStylesheets() {
   const outputs = await Promise.all(
-    stylesheets.map(async (name) => {
-      const source = await fs.readFile(
-        path.join(stylesheetSourceDirectory, name),
-        "utf8",
-      );
+    stylesheetSources.map(async (sourcePath) => {
+      const source = await fs.readFile(sourcePath, "utf8");
       const result = new CleanCSS({ level: 1 }).minify(source);
       if (result.errors.length > 0) {
-        throw new Error(`CleanCSS failed for ${name}: ${result.errors.join("; ")}`);
+        throw new Error(
+          `CleanCSS failed for ${sourcePath}: ${result.errors.join("; ")}`,
+        );
       }
       for (const warning of result.warnings) {
-        console.warn(`CleanCSS warning for ${name}: ${warning}`);
+        console.warn(`CleanCSS warning for ${sourcePath}: ${warning}`);
       }
       return result.styles;
     }),
@@ -230,7 +265,7 @@ async function build() {
   ]);
   await Promise.all([
     buildVendorScripts(),
-    buildVendorLicense(),
+    buildManagedVendorLicenses(),
     buildApplicationScripts(),
     buildStylesheets(),
     buildPasswordScript(),

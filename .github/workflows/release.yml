@@ -144,6 +144,7 @@ jobs:
                       VERSION \
                       LICENSE \
                       NOTICE \
+                      docs/FRONTEND_VENDOR_INVENTORY.md \
                       config.json;
                     rm "${BINARY}";
                   done

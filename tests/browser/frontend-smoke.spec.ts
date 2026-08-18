@@ -154,6 +154,19 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
           typeof window.jQuery.fn.DataTable === "function",
       ),
     ).toBe(true);
+    expect(
+      await page.evaluate(() => ({
+        dataTables: window.jQuery.fn.dataTable.version,
+        moment: window.moment.version,
+        parsedCsv: window.Papa.parse("name\nBrowser Fixture").data[1][0],
+        uaParser: window.UAParser.VERSION,
+      })),
+    ).toEqual({
+      dataTables: "1.13.11",
+      moment: "2.30.1",
+      parsedCsv: "Browser Fixture",
+      uaParser: "0.7.41",
+    });
   });
 
   await test.step("synthetic login redirects to the dashboard", async () => {
@@ -446,8 +459,14 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
     await page.getByRole("link", { name: "User Management" }).click();
     await expect(page).toHaveURL(/\/users$/);
     await expect(page.getByRole("heading", { name: "User Management" })).toBeVisible();
+    await expect(page.locator("#userTable")).toBeVisible();
+    await expect(page.locator("#userTable")).toContainText(username);
 
     await page.getByRole("button", { name: "New User" }).click();
+    expect({ consoleErrors, pageErrors }).toEqual({
+      consoleErrors: [],
+      pageErrors: [],
+    });
     await expect(page.locator("#modal")).toBeVisible();
     await page.locator("#password").fill("browser fixture password 2026");
     await expect(page.locator("#password-strength-container")).not.toHaveClass(

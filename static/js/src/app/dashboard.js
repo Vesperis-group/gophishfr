@@ -1,17 +1,15 @@
 var campaigns = []
-// statuses is a helper map to point result statuses to ui classes
+// statuses maps result statuses to UI metadata.
 var statuses = {
     "Email Sent": {
         color: "#1abc9c",
         label: "label-success",
-        icon: "fa-envelope",
-        point: "ct-point-sent"
+        icon: "fa-envelope"
     },
     "Emails Sent": {
         color: "#1abc9c",
         label: "label-success",
-        icon: "fa-envelope",
-        point: "ct-point-sent"
+        icon: "fa-envelope"
     },
     "In progress": {
         label: "label-primary"
@@ -25,56 +23,47 @@ var statuses = {
     "Email Opened": {
         color: "#f9bf3b",
         label: "label-warning",
-        icon: "fa-envelope",
-        point: "ct-point-opened"
+        icon: "fa-envelope"
     },
     "Email Reported": {
         color: "#45d6ef",
         label: "label-warning",
-        icon: "fa-bullhorne",
-        point: "ct-point-reported"
+        icon: "fa-bullhorne"
     },
     "Clicked Link": {
         color: "#F39C12",
         label: "label-clicked",
-        icon: "fa-mouse-pointer",
-        point: "ct-point-clicked"
+        icon: "fa-mouse-pointer"
     },
     "Success": {
         color: "#f05b4f",
         label: "label-danger",
-        icon: "fa-exclamation",
-        point: "ct-point-clicked"
+        icon: "fa-exclamation"
     },
     "Error": {
         color: "#6c7a89",
         label: "label-default",
-        icon: "fa-times",
-        point: "ct-point-error"
+        icon: "fa-times"
     },
     "Error Sending Email": {
         color: "#6c7a89",
         label: "label-default",
-        icon: "fa-times",
-        point: "ct-point-error"
+        icon: "fa-times"
     },
     "Submitted Data": {
         color: "#f05b4f",
         label: "label-danger",
-        icon: "fa-exclamation",
-        point: "ct-point-clicked"
+        icon: "fa-exclamation"
     },
     "Unknown": {
         color: "#6c7a89",
         label: "label-default",
-        icon: "fa-question",
-        point: "ct-point-error"
+        icon: "fa-question"
     },
     "Sending": {
         color: "#428bca",
         label: "label-primary",
-        icon: "fa-spinner",
-        point: "ct-point-sending"
+        icon: "fa-spinner"
     },
     "Campaign Created": {
         label: "label-success",
