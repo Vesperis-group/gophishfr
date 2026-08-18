@@ -109,7 +109,7 @@ func main() {
 	}
 
 	// Unlock any maillogs that may have been locked for processing
-	// when Gophish was last shutdown.
+	// when GophishFR was last shut down.
 	err = models.UnlockAllMailLogs()
 	if err != nil {
 		log.Fatal(err)

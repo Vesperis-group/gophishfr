@@ -1,87 +1,87 @@
-GophishFR
-=========
+# GophishFR
 
-**GophishFR is a derivative of [Gophish](https://github.com/gophish/gophish), the
-open-source phishing framework by Jordan Wright.** See [NOTICE](NOTICE) for
-attribution and [LICENSE](LICENSE) for the MIT license that governs this code.
+![GophishFR logo](static/images/gophish_purple.png)
 
-> **Status: independently maintained.** `Vesperis-group/gophishfr` is the sole
-> source of truth and `main` is the stable branch. No synchronization with the
-> historical Gophish project is planned.
->
-> Historical baseline: Gophish `master` @ `9561846`. Its history and attribution
-> remain preserved in this repository.
+[![CI](https://github.com/Vesperis-group/gophishfr/actions/workflows/ci.yml/badge.svg)](https://github.com/Vesperis-group/gophishfr/actions/workflows/ci.yml)
 
-GophishFR is **not** affiliated with or endorsed by the Gophish project. Do not
-report GophishFR issues upstream.
+GophishFR is an independently maintained security awareness simulation platform
+for authorized training and assessment campaigns.
 
----
+> [!IMPORTANT]
+> Use GophishFR only on systems and recipients for which you have explicit
+> authorization. You are responsible for complying with applicable laws,
+> policies, and consent requirements.
 
-The upstream Gophish README follows, unchanged.
+## Install
 
-![gophish logo](https://raw.github.com/gophish/gophish/master/static/images/gophish_purple.png)
+Download an archive for your platform from the
+[GophishFR releases](https://github.com/Vesperis-group/gophishfr/releases),
+extract it, and run the `gophishfr` binary.
 
-Gophish
-=======
+On first start, the application writes the temporary administrator credentials
+to the console. Open <https://localhost:3333>, sign in with those credentials,
+and change the password immediately.
 
-![Build Status](https://github.com/gophish/gophish/workflows/CI/badge.svg) [![GoDoc](https://godoc.org/github.com/gophish/gophish?status.svg)](https://godoc.org/github.com/gophish/gophish)
+## Build from source
 
-Gophish: Open-Source Phishing Toolkit
+Building GophishFR requires the Go version declared in [`go.mod`](go.mod).
 
-[Gophish](https://getgophish.com) is an open-source phishing toolkit designed for businesses and penetration testers. It provides the ability to quickly and easily setup and execute phishing engagements and security awareness training.
-
-### Install
-
-Installation of Gophish is dead-simple - just download and extract the zip containing the [release for your system](https://github.com/gophish/gophish/releases/), and run the binary. Gophish has binary releases for Windows, Mac, and Linux platforms.
-
-### Building From Source
-**If you are building from source, please note that Gophish requires Go v1.10 or above!**
-
-To build Gophish from source, simply run ```git clone https://github.com/gophish/gophish.git``` and ```cd``` into the project source directory. Then, run ```go build```. After this, you should have a binary called ```gophish``` in the current directory.
-
-### Docker
-You can also use Gophish via the official Docker container [here](https://hub.docker.com/r/gophish/gophish/).
-
-### Setup
-After running the Gophish binary, open an Internet browser to https://localhost:3333 and login with the default username and password listed in the log output.
-e.g.
-```
-time="2020-07-29T01:24:08Z" level=info msg="Please login with the username admin and the password 4304d5255378177d"
+```sh
+git clone https://github.com/Vesperis-group/gophishfr.git
+cd gophishfr
+go build -o gophishfr .
+./gophishfr
 ```
 
-Releases of Gophish prior to v0.10.1 have a default username of `admin` and password of `gophish`.
+The default [`config.json`](config.json) stores the SQLite database and logs
+relative to the working directory. Back up existing data before changing paths
+or deployment layouts.
 
-### Documentation
+## Docker
 
-Documentation can be found on our [site](http://getgophish.com/documentation). Find something missing? Let us know by filing an issue!
+Build the container image from the checked-out source:
 
-### Issues
-
-Find a bug? Want more features? Find something missing in the documentation? Let us know! Please don't hesitate to [file an issue](https://github.com/gophish/gophish/issues/new) and we'll get right on it.
-
-### License
+```sh
+docker build --tag gophishfr .
+docker run --rm -it \
+  -p 3333:3333 \
+  -p 8080:80 \
+  gophishfr
 ```
-Gophish - Open-Source Phishing Framework
 
-The MIT License (MIT)
+The container keeps `/opt/gophish` as its internal data directory for
+compatibility with existing deployments. Mount persistent configuration,
+database, and log storage according to your environment before using the image
+beyond local evaluation.
 
-Copyright (c) 2013 - 2020 Jordan Wright
+## Development
 
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software ("Gophish Community Edition") and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
+Run the complete local quality gate before submitting changes:
 
-The above copyright notice and this permission notice shall be included in
-all copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
-THE SOFTWARE.
+```sh
+./scripts/verify.sh
 ```
+
+Frontend assets are built by the existing Gulp pipeline:
+
+```sh
+npm install --only=dev --package-lock=false
+npx --no-install gulp
+```
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements and
+[SECURITY.md](SECURITY.md) for responsible vulnerability reporting.
+
+## Issues
+
+Report GophishFR bugs and documentation gaps in the
+[GophishFR issue tracker](https://github.com/Vesperis-group/gophishfr/issues).
+Do not report them to the historical Gophish project.
+
+## History and attribution
+
+GophishFR is derived from
+[Gophish](https://github.com/gophish/gophish), originally created by Jordan
+Wright. GophishFR is not affiliated with or endorsed by the Gophish project.
+The preserved Git history, [NOTICE](NOTICE), and [LICENSE](LICENSE) document the
+original project's provenance, copyright, and MIT license terms.

@@ -2,9 +2,12 @@ package util
 
 import (
 	"bytes"
+	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"mime/multipart"
 	"net/http"
+	"os"
 	"reflect"
 	"testing"
 
@@ -58,5 +61,32 @@ func TestParseCSVEmail(t *testing.T) {
 	}
 	if !reflect.DeepEqual(expected, got[0]) {
 		t.Fatalf("Incorrect targets received. Expected: %#v\nGot: %#v", expected, got)
+	}
+}
+
+func TestCheckAndCreateSSLUsesGophishFRBranding(t *testing.T) {
+	certPath := t.TempDir() + "/gophishfr.crt"
+	keyPath := t.TempDir() + "/gophishfr.key"
+
+	if err := CheckAndCreateSSL(certPath, keyPath); err != nil {
+		t.Fatalf("creating self-signed certificate: %v", err)
+	}
+
+	certPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatalf("reading self-signed certificate: %v", err)
+	}
+	certBlock, _ := pem.Decode(certPEM)
+	if certBlock == nil {
+		t.Fatal("decoding self-signed certificate PEM")
+	}
+	cert, err := x509.ParseCertificate(certBlock.Bytes)
+	if err != nil {
+		t.Fatalf("parsing self-signed certificate: %v", err)
+	}
+
+	expectedOrganization := []string{"GophishFR"}
+	if !reflect.DeepEqual(cert.Subject.Organization, expectedOrganization) {
+		t.Fatalf("unexpected certificate organization: got %q, want %q", cert.Subject.Organization, expectedOrganization)
 	}
 }

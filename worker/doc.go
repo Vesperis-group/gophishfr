@@ -1,5 +1,5 @@
 /*
-gophish - Open-Source Phishing Framework
+GophishFR - Security Awareness Simulation Platform
 
 The MIT License (MIT)
 

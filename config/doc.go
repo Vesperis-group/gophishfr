@@ -1,5 +1,5 @@
 /*
-gophish - Open-Source Phishing Framework
+GophishFR - Security Awareness Simulation Platform
 
 The MIT License (MIT)
 
@@ -24,5 +24,5 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-// Package config implements a global configuration to be used with gophish.
+// Package config implements the global configuration used by GophishFR.
 package config

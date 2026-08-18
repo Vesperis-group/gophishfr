@@ -1,16 +1,16 @@
 {
-  "name": "gophish",
+  "name": "gophishfr",
   "version": "0.4.0-dev",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/gophish/gophish.git"
+    "url": "git+https://github.com/Vesperis-group/gophishfr.git"
   },
-  "author": "Jordan Wright",
+  "author": "Vesperis Group",
   "license": "MIT",
   "bugs": {
-    "url": "https://github.com/gophish/gophish/issues"
+    "url": "https://github.com/Vesperis-group/gophishfr/issues"
   },
-  "homepage": "https://getgophish.com",
+  "homepage": "https://github.com/Vesperis-group/gophishfr",
   "devDependencies": {
     "@babel/core": "^7.4.5",
     "@babel/preset-env": "^7.4.5",

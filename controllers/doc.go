@@ -1,5 +1,5 @@
 /*
-gophish - Open-Source Phishing Framework
+GophishFR - Security Awareness Simulation Platform
 
 The MIT License (MIT)
 
@@ -24,5 +24,5 @@ OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
 THE SOFTWARE.
 */
 
-// Package controllers is responsible for setting up the routing and controllers (http.Handlers) for gophish.
+// Package controllers sets up the routing and HTTP handlers for GophishFR.
 package controllers
