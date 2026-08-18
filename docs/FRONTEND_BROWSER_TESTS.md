@@ -1,0 +1,74 @@
+# Frontend browser smoke tests
+
+The browser smoke suite is a small functional baseline for the legacy frontend.
+It is intended to detect runtime regressions before the planned Gulp, Webpack,
+and Terser migration without introducing broad end-to-end coverage.
+
+## Tooling
+
+The suite uses Playwright with Chromium. Playwright was selected because its
+package pins a compatible browser revision, works with the Node version in
+`.nvmrc`, and adds only three Node packages. A Go browser driver would still
+require an independently installed, unpinned system browser; Cypress would add
+a larger runtime for the same smoke-test scope.
+
+`@playwright/test` is pinned to 1.62.1. Its addition leaves the authoritative
+Yarn audit baseline unchanged at 27 vulnerable paths and 7 unique advisories
+(1 critical, 4 high, 1 moderate, and 1 low); none belongs to Playwright or its
+two runtime packages.
+
+Install the immutable Node dependency graph and the pinned Chromium revision:
+
+```sh
+corepack yarn install --frozen-lockfile --non-interactive
+yarn playwright install chromium
+```
+
+Run the suite:
+
+```sh
+yarn test:browser
+```
+
+The harness currently supports Linux and WSL, matching the CI environment.
+The command rebuilds the frontend assets, creates an isolated SQLite database,
+starts the real admin router on an ephemeral loopback port, runs Chromium, and
+cleans up the server, browser output, and temporary database even when a test
+fails. Browser system packages may need to be installed once on Linux with
+`yarn playwright install-deps chromium`.
+
+## Coverage
+
+The suite verifies:
+
+- login rendering, CSS application, vendor globals, synthetic authentication,
+  and the dashboard redirect;
+- dashboard JavaScript and its empty state;
+- campaign navigation, Bootstrap tabs and modals, Select2, and the datetime
+  picker;
+- group DataTables rendering and client-side target entry;
+- template DataTables rendering, CKEditor initialization, and Bootstrap tabs;
+- successful loading of critical CSS, JavaScript, image, and font assets;
+- absence of unexpected JavaScript exceptions, console errors, failed local
+  requests, and HTTP error responses.
+
+It deliberately does not launch campaigns, send email, exercise IMAP, compare
+pixels, or snapshot generated HTML and bundles.
+
+## Isolation
+
+The Go harness uses a temporary SQLite file and synthetic credentials and
+fixtures. The sending profile points to the closed local address
+`127.0.0.1:1`, the background worker is never started, and no action capable of
+sending email is exercised.
+
+Playwright rejects a non-loopback base URL. During the test, all requests are
+restricted to the ephemeral local server. The two existing Google Fonts
+stylesheet requests are fulfilled with empty local responses rather than sent
+to the Internet; every other external request fails the suite. Routing is
+applied to the complete browser context, service workers are blocked, and
+non-loopback WebSockets are rejected.
+
+These tests serve as the browser baseline before migration of the legacy
+frontend toolchain. They are intentionally smoke tests, not an exhaustive E2E
+or visual-regression suite.
