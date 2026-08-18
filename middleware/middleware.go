@@ -1,15 +1,14 @@
 package middleware
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 
+	csrf "filippo.io/csrf/gorilla"
 	ctx "github.com/gophish/gophish/context"
 	"github.com/gophish/gophish/models"
-	"github.com/gorilla/csrf"
 )
 
 // CSRFExemptPrefixes are a list of routes that are exempt from CSRF protection
@@ -31,33 +30,10 @@ func CSRFExceptions(handler http.Handler) http.HandlerFunc {
 	}
 }
 
-// PlaintextHTTP tells gorilla/csrf whether the request actually reached us over
-// cleartext HTTP.
-//
-// Since v1.7.2, gorilla/csrf assumes TLS unless told otherwise and enforces a
-// strict Referer check on unsafe methods, which is what closes GO-2025-3607.
-// That check is a defence against an HTTP machine-in-the-middle injecting a
-// form; over cleartext HTTP it protects nothing, and left enabled it rejects
-// every POST from a client that sends neither Origin nor Referer.
-//
-// The transport is read from the request rather than from the configuration,
-// so a deployment terminating TLS at a reverse proxy keeps the strict checks:
-// ProxyHeaders has already resolved X-Forwarded-Proto into r.URL.Scheme by the
-// time this runs. Getting this wrong in the other direction would be worse
-// than a broken POST: csrf compares the scheme of the Origin header against
-// the scheme it believes it is serving, so declaring a TLS-terminated
-// deployment "plaintext" would reject every legitimate browser request.
-//
-// The Origin allowlist check is unconditional in gorilla/csrf and is unaffected
-// by this: it still runs on cleartext deployments.
-func PlaintextHTTP(handler http.Handler) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		if r.TLS == nil && !strings.EqualFold(r.URL.Scheme, "https") {
-			r = r.WithContext(context.WithValue(r.Context(), csrf.PlaintextHTTPContextKey, true))
-		}
-		handler.ServeHTTP(w, r)
-	}
-}
+// PlaintextHTTP is intentionally absent: filippo.io/csrf/gorilla derives the
+// origin from Fetch metadata headers and ignores the plaintext-HTTP hint that
+// github.com/gorilla/csrf v1.7.3 required. Keeping the middleware would have
+// left code that reads as if it configured something.
 
 // Use allows us to stack middleware to process the request
 // Example taken from https://github.com/gorilla/mux/pull/36#issuecomment-25849172
