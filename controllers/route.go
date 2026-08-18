@@ -152,12 +152,19 @@ func (as *AdminServer) registerRoutes() {
 	if len(csrfKey) == 0 {
 		csrfKey = []byte(auth.GenerateSecureKey(auth.APIKeyLength))
 	}
+	// Known unfixed issue, GO-2025-3884: gorilla/csrf matches TrustedOrigins on
+	// host only and ignores the scheme, so trusting example.net also trusts
+	// http://example.net, which a network attacker can serve. It is inert while
+	// trusted_origins is empty, which is the shipped default, and there is no
+	// fixed release of gorilla/csrf. Do not document trusted_origins as safe
+	// without replacing this dependency; the advisory points to
+	// net/http.CrossOriginProtection and to filippo.io/csrf/gorilla.
 	csrfHandler := csrf.Protect(csrfKey,
 		csrf.FieldName("csrf_token"),
 		csrf.Secure(as.config.UseTLS),
 		csrf.TrustedOrigins(as.config.TrustedOrigins))
 	adminHandler := csrfHandler(router)
-	adminHandler = mid.Use(adminHandler.ServeHTTP, mid.CSRFExceptions, mid.GetContext, mid.ApplySecurityHeaders)
+	adminHandler = mid.Use(adminHandler.ServeHTTP, mid.CSRFExceptions, mid.PlaintextHTTP, mid.GetContext, mid.ApplySecurityHeaders)
 
 	// Setup GZIP compression
 	gzipWrapper, _ := gziphandler.NewGzipLevelHandler(gzip.BestCompression)

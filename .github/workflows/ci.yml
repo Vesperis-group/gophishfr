@@ -33,9 +33,9 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           # go.mod is the single source of truth for the toolchain, here as
-          # everywhere else in this pipeline.
+          # everywhere else in this pipeline. Its `toolchain` directive pins an
+          # exact patch release, so every job compiles with the same Go.
           go-version-file: go.mod
-          check-latest: true
 
       # go install verifies the module against the Go checksum database, so the
       # pinned version is tamper-evident.
@@ -80,7 +80,6 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          check-latest: true
 
       - name: gofmt
         run: |
@@ -107,7 +106,6 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          check-latest: true
 
       - name: go vet
         run: go vet ./...
@@ -126,7 +124,6 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          check-latest: true
 
       # No `go get` here, unlike the upstream workflow: dependencies come from
       # the committed go.mod/go.sum only, so CI can never silently resolve a
@@ -151,7 +148,6 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          check-latest: true
 
       - name: Test
         run: go test -coverprofile=coverage.out -covermode=atomic ./...
@@ -176,7 +172,6 @@ jobs:
         uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
         with:
           go-version-file: go.mod
-          check-latest: true
 
       # GophishFR is a concurrent mail sender with background workers. Data
       # races here are real bugs, not theoretical ones.
