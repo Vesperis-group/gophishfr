@@ -1,12 +1,11 @@
 # Minify client side assets (JavaScript)
-FROM node:latest AS build-js
-
-RUN npm install gulp gulp-cli -g
+FROM node:24.19.0-bookworm-slim@sha256:3638d9a6fe4030bd716be989438248074489337ba3275657f93595428be4fc03 AS build-js
 
 WORKDIR /build
+COPY package.json yarn.lock ./
+RUN corepack enable && yarn install --frozen-lockfile --non-interactive
 COPY . .
-RUN npm install --only=dev
-RUN gulp
+RUN yarn build
 
 
 # Build Golang binary

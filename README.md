@@ -62,11 +62,15 @@ Run the complete local quality gate before submitting changes:
 ./scripts/verify.sh
 ```
 
-Frontend assets are built by the existing Gulp pipeline:
+Frontend assets use the Node version pinned in [`.nvmrc`](.nvmrc), Yarn Classic
+as declared by `package.json`, and the committed `yarn.lock`. Enable Corepack
+once for the selected Node installation, then use an immutable install:
 
 ```sh
-npm install --only=dev --package-lock=false
-npx --no-install gulp
+nvm use
+corepack enable
+yarn install --frozen-lockfile --non-interactive
+yarn build
 ```
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements and

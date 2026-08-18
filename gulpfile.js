@@ -68,9 +68,7 @@ scripts = function () {
         .pipe(rename({
             suffix: '.min'
         }))
-        .pipe(uglify().on('error', function (e) {
-            console.log(e);
-        }))
+        .pipe(uglify())
         .pipe(gulp.dest(dest_js_directory + 'app/'));
 }
 

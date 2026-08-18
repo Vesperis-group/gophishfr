@@ -75,6 +75,45 @@ else
     printf '\n\033[33mskipped\033[0m  go test -race (--quick)\n'
 fi
 
+gate_frontend() {
+    local expected_node actual_node expected_yarn actual_yarn workdir status
+
+    expected_node="v$(tr -d '[:space:]' < .nvmrc)"
+    actual_node="$(node --version)"
+    if [ "${actual_node}" != "${expected_node}" ]; then
+        echo "Node version mismatch: expected ${expected_node}, got ${actual_node}." >&2
+        return 1
+    fi
+
+    expected_yarn="$(node -p "require('./package.json').packageManager.split('@').pop().split('+')[0]")"
+    actual_yarn="$(corepack yarn --version)"
+    if [ "${actual_yarn}" != "${expected_yarn}" ]; then
+        echo "Yarn version mismatch: expected ${expected_yarn}, got ${actual_yarn}." >&2
+        return 1
+    fi
+
+    workdir="$(mktemp -d)"
+    if ! tar --exclude=.git --exclude=node_modules -cf - . | tar -xf - -C "${workdir}"; then
+        rm -rf "${workdir}"
+        return 1
+    fi
+
+    (
+        cd "${workdir}"
+        corepack yarn install --frozen-lockfile --non-interactive &&
+        corepack yarn build &&
+        git diff --no-index --exit-code \
+            "${OLDPWD}/static/js/dist" static/js/dist &&
+        git diff --no-index --exit-code \
+            "${OLDPWD}/static/css/dist" static/css/dist
+    )
+    status=$?
+    rm -rf "${workdir}"
+    return "${status}"
+}
+
+run_gate "frontend" gate_frontend
+
 # Needs network and an authenticated gh; skipped rather than failed when
 # unavailable, because CI runs it unconditionally and is the authority.
 if command -v gh >/dev/null 2>&1 && gh auth status >/dev/null 2>&1; then
