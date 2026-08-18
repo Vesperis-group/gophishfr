@@ -18,8 +18,8 @@ var DefaultDialer = &RestrictedDialer{}
 
 // SetAllowedHosts sets the list of allowed hosts or IP ranges for the default
 // dialer.
-func SetAllowedHosts(allowed []string) {
-	DefaultDialer.SetAllowedHosts(allowed)
+func SetAllowedHosts(allowed []string) error {
+	return DefaultDialer.SetAllowedHosts(allowed)
 }
 
 // AllowedHosts returns the configured hosts that are allowed for the dialer.
@@ -32,7 +32,13 @@ func (d *RestrictedDialer) AllowedHosts() []string {
 }
 
 // SetAllowedHosts sets the list of allowed hosts or IP ranges for the dialer.
+//
+// The parsed list is only installed once every entry has been validated. A
+// partial allowlist would be worse than a rejected one: it silently narrows or
+// widens which internal hosts the application is willing to reach, and the
+// operator gets no signal that their configuration was only half applied.
 func (d *RestrictedDialer) SetAllowedHosts(allowed []string) error {
+	parsedHosts := make([]*net.IPNet, 0, len(allowed))
 	for _, ipRange := range allowed {
 		// For flexibility, try to parse as an IP first since this will
 		// undoubtedly cause issues. If it works, then just append the
@@ -48,8 +54,9 @@ func (d *RestrictedDialer) SetAllowedHosts(allowed []string) error {
 		if err != nil {
 			return fmt.Errorf("provided ip range is not valid CIDR notation: %v", err)
 		}
-		d.allowedHosts = append(d.allowedHosts, parsed)
+		parsedHosts = append(parsedHosts, parsed)
 	}
+	d.allowedHosts = parsedHosts
 	return nil
 }
 
@@ -112,14 +119,9 @@ var allInternal = []string{
 
 type dialControl = func(network, address string, c syscall.RawConn) error
 
-type restrictedDialer struct {
-	*net.Dialer
-	allowed []string
-}
-
 func restrictedControl(allowed []*net.IPNet) dialControl {
 	return func(network string, address string, conn syscall.RawConn) error {
-		if !(network == "tcp4" || network == "tcp6") {
+		if network != "tcp4" && network != "tcp6" {
 			return fmt.Errorf("%s is not a safe network type", network)
 		}
 

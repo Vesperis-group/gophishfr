@@ -75,7 +75,9 @@ func (w *DefaultWorker) processCampaigns(t time.Time) error {
 			}
 			campaignCache[c.Id] = c
 		}
-		m.CacheCampaign(&c)
+		if err := m.CacheCampaign(&c); err != nil {
+			return err
+		}
 		msg[m.CampaignId] = append(msg[m.CampaignId], m)
 	}
 
@@ -120,7 +122,12 @@ func (w *DefaultWorker) LaunchCampaign(c models.Campaign) {
 		log.Error(err)
 		return
 	}
-	models.LockMailLogs(ms, true)
+	// Locking is what stops the periodic worker from picking these maillogs up
+	// concurrently. Launching the campaign anyway would send twice.
+	if err = models.LockMailLogs(ms, true); err != nil {
+		log.Error(err)
+		return
+	}
 	// This is required since you cannot pass a slice of values
 	// that implements an interface as a slice of that interface.
 	mailEntries := []mailer.Mail{}
@@ -134,7 +141,11 @@ func (w *DefaultWorker) LaunchCampaign(c models.Campaign) {
 		// Only send the emails scheduled to be sent for the past minute to
 		// respect the campaign scheduling options
 		if m.SendDate.After(currentTime) {
-			m.Unlock()
+			// Scheduled for later: hand it back to the periodic worker. A
+			// failure here only means it stays locked until the next run.
+			if err := m.Unlock(); err != nil {
+				log.Error(err)
+			}
 			continue
 		}
 		err = m.CacheCampaign(&campaignMailCtx)

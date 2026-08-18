@@ -4,9 +4,10 @@ import (
 	"bytes"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"reflect"
 	"testing"
 
@@ -47,12 +48,16 @@ func openEmail(t *testing.T, ctx *testContext, rid string) {
 	if err != nil {
 		t.Fatalf("error requesting /track endpoint: %v", err)
 	}
-	defer resp.Body.Close()
-	got, err := ioutil.ReadAll(resp.Body)
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing /track response body: %v", err)
+		}
+	}()
+	got, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("error reading response body from /track endpoint: %v", err)
 	}
-	expected, err := ioutil.ReadFile("static/images/pixel.png")
+	expected, err := os.ReadFile("static/images/pixel.png")
 	if err != nil {
 		t.Fatalf("error reading local transparent pixel: %v", err)
 	}
@@ -66,7 +71,11 @@ func openEmail404(t *testing.T, ctx *testContext, rid string) {
 	if err != nil {
 		t.Fatalf("error requesting /track endpoint: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing /track response body: %v", err)
+		}
+	}()
 	got := resp.StatusCode
 	expected := http.StatusNotFound
 	if got != expected {
@@ -79,6 +88,11 @@ func reportedEmail(t *testing.T, ctx *testContext, rid string) {
 	if err != nil {
 		t.Fatalf("error requesting /report endpoint: %v", err)
 	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing /report response body: %v", err)
+		}
+	}()
 	got := resp.StatusCode
 	expected := http.StatusNoContent
 	if got != expected {
@@ -91,6 +105,11 @@ func reportEmail404(t *testing.T, ctx *testContext, rid string) {
 	if err != nil {
 		t.Fatalf("error requesting /report endpoint: %v", err)
 	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing /report response body: %v", err)
+		}
+	}()
 	got := resp.StatusCode
 	expected := http.StatusNotFound
 	if got != expected {
@@ -103,8 +122,12 @@ func clickLink(t *testing.T, ctx *testContext, rid string, expectedHTML string) 
 	if err != nil {
 		t.Fatalf("error requesting / endpoint: %v", err)
 	}
-	defer resp.Body.Close()
-	got, err := ioutil.ReadAll(resp.Body)
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing / response body: %v", err)
+		}
+	}()
+	got, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("error reading payload from / endpoint response: %v", err)
 	}
@@ -118,7 +141,11 @@ func clickLink404(t *testing.T, ctx *testContext, rid string) {
 	if err != nil {
 		t.Fatalf("error requesting / endpoint: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing / response body: %v", err)
+		}
+	}()
 	got := resp.StatusCode
 	expected := http.StatusNotFound
 	if got != expected {
@@ -131,7 +158,11 @@ func transparencyRequest(t *testing.T, ctx *testContext, r models.Result, rid, p
 	if err != nil {
 		t.Fatalf("error requesting %s endpoint: %v", path, err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing %s response body: %v", path, err)
+		}
+	}()
 	got := resp.StatusCode
 	expected := http.StatusOK
 	if got != expected {
@@ -241,11 +272,19 @@ func TestNoRecipientID(t *testing.T) {
 	if got != expected {
 		t.Fatalf("invalid status code received for /track endpoint. expected %d got %d", expected, got)
 	}
+	if err := resp.Body.Close(); err != nil {
+		t.Fatalf("error closing /track response body: %v", err)
+	}
 
 	resp, err = http.Get(ctx.phishServer.URL)
 	if err != nil {
 		t.Fatalf("error requesting /track endpoint: %v", err)
 	}
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing / response body: %v", err)
+		}
+	}()
 	got = resp.StatusCode
 	if got != expected {
 		t.Fatalf("invalid status code received for / endpoint. expected %d got %d", expected, got)
@@ -278,7 +317,9 @@ func TestCompletedCampaignClick(t *testing.T) {
 		t.Fatalf("unexpected result status received. expected %s got %s", models.EventOpened, result.Status)
 	}
 
-	models.CompleteCampaign(campaign.Id, 1)
+	if err := models.CompleteCampaign(campaign.Id, 1); err != nil {
+		t.Fatalf("error completing campaign: %v", err)
+	}
 	openEmail404(t, ctx, result.RId)
 	clickLink404(t, ctx, result.RId)
 
@@ -296,14 +337,18 @@ func TestRobotsHandler(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error requesting /robots.txt endpoint: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing /robots.txt response body: %v", err)
+		}
+	}()
 	got := resp.StatusCode
 	expectedStatus := http.StatusOK
 	if got != expectedStatus {
 		t.Fatalf("invalid status code received for /track endpoint. expected %d got %d", expectedStatus, got)
 	}
 	expected := []byte("User-agent: *\nDisallow: /\n")
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
 		t.Fatalf("error reading response body from /robots.txt endpoint: %v", err)
 	}
@@ -399,7 +444,11 @@ func TestRedirectTemplating(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error requesting / endpoint: %v", err)
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing / response body: %v", err)
+		}
+	}()
 	got := resp.StatusCode
 	expectedStatus := http.StatusFound
 	if got != expectedStatus {

@@ -24,7 +24,7 @@ import (
 // Pattern for GoPhish emails e.g ?rid=AbC1234
 // We include the optional quoted-printable 3D at the front, just in case decoding fails. e.g ?rid=3DAbC1234
 // We also include alternative URL encoded representations of '=' and '?' to handle Microsoft ATP URLs e.g %3Frid%3DAbC1234
-var goPhishRegex = regexp.MustCompile("((\\?|%3F)rid(=|%3D)(3D)?([A-Za-z0-9]{7}))")
+var goPhishRegex = regexp.MustCompile(`((\?|%3F)rid(=|%3D)(3D)?([A-Za-z0-9]{7}))`)
 
 // Monitor is a worker that monitors IMAP servers for reported campaign emails
 type Monitor struct {
@@ -134,8 +134,11 @@ func checkForNewEmails(im models.IMAP) {
 		return
 	}
 	// Update last_succesful_login here via im.Host
-	err = models.SuccessfulLogin(&im)
-
+	if err = models.SuccessfulLogin(&im); err != nil {
+		// Not fatal: the emails were fetched successfully, only the bookkeeping
+		// of the login timestamp failed.
+		log.Error(err)
+	}
 	if len(msgs) > 0 {
 		log.Debugf("%d new emails for %s", len(msgs), im.Username)
 		var reportingFailed []uint32 // SeqNums of emails that were unable to be reported to phishing server, mark as unread

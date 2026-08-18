@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"crypto/tls"
 	"fmt"
+	"io"
 	"regexp"
 	"strconv"
 	"time"
@@ -67,7 +68,7 @@ func Validate(s *models.IMAP) error {
 	if err != nil {
 		log.Error(err.Error())
 	} else {
-		imapClient.Logout()
+		_ = imapClient.Logout()
 	}
 	return err
 }
@@ -79,7 +80,7 @@ func (mbox *Mailbox) MarkAsUnread(seqs []uint32) error {
 		return err
 	}
 
-	defer imapClient.Logout()
+	defer func() { _ = imapClient.Logout() }()
 
 	seqSet := new(imap.SeqSet)
 	seqSet.AddNum(seqs...)
@@ -101,7 +102,7 @@ func (mbox *Mailbox) DeleteEmails(seqs []uint32) error {
 		return err
 	}
 
-	defer imapClient.Logout()
+	defer func() { _ = imapClient.Logout() }()
 
 	seqSet := new(imap.SeqSet)
 	seqSet.AddNum(seqs...)
@@ -125,7 +126,7 @@ func (mbox *Mailbox) GetUnread(markAsRead, delete bool) ([]Email, error) {
 		return emails, fmt.Errorf("failed to create IMAP connection: %s", err)
 	}
 
-	defer imapClient.Logout()
+	defer func() { _ = imapClient.Logout() }()
 
 	// Search for unread emails
 	criteria := imap.NewSearchCriteria()
@@ -158,7 +159,12 @@ func (mbox *Mailbox) GetUnread(markAsRead, delete bool) ([]Email, error) {
 		var buf []byte
 		for _, value := range msg.Body {
 			buf = make([]byte, value.Len())
-			value.Read(buf)
+			// A short read would silently leave the tail of buf zeroed, which
+			// then gets parsed as a truncated email.
+			if _, err := io.ReadFull(value, buf); err != nil {
+				log.Error(err)
+				buf = nil
+			}
 			break // There should only ever be one item in this map, but I'm not 100% sure
 		}
 

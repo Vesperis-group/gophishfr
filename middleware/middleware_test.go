@@ -12,7 +12,7 @@ import (
 )
 
 var successHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-	w.Write([]byte("success"))
+	_, _ = w.Write([]byte("success"))
 })
 
 type testContext struct {
@@ -48,7 +48,7 @@ type MiddlewarePermissionTest map[string]int
 func TestEnforceViewOnly(t *testing.T) {
 	setupTest(t)
 	permissionTests := map[string]MiddlewarePermissionTest{
-		models.RoleAdmin: MiddlewarePermissionTest{
+		models.RoleAdmin: {
 			http.MethodGet:     http.StatusOK,
 			http.MethodHead:    http.StatusOK,
 			http.MethodOptions: http.StatusOK,
@@ -56,7 +56,7 @@ func TestEnforceViewOnly(t *testing.T) {
 			http.MethodPut:     http.StatusOK,
 			http.MethodDelete:  http.StatusOK,
 		},
-		models.RoleUser: MiddlewarePermissionTest{
+		models.RoleUser: {
 			http.MethodGet:     http.StatusOK,
 			http.MethodHead:    http.StatusOK,
 			http.MethodOptions: http.StatusOK,

@@ -21,9 +21,12 @@ func attemptLogin(t *testing.T, ctx *testContext, client *http.Client, username,
 		t.Fatalf("invalid status code received. expected %d got %d", expected, got)
 	}
 
-	doc, err := goquery.NewDocumentFromResponse(resp)
+	doc, err := goquery.NewDocumentFromReader(resp.Body)
 	if err != nil {
 		t.Fatalf("error parsing /login response body")
+	}
+	if err := resp.Body.Close(); err != nil {
+		t.Fatalf("error closing /login response body: %v", err)
 	}
 	elem := doc.Find("input[name='csrf_token']").First()
 	token, ok := elem.Attr("value")
@@ -114,7 +117,11 @@ func TestLoginCSRF(t *testing.T) {
 			if err != nil {
 				t.Fatalf("error requesting the /login endpoint: %v", err)
 			}
-			defer resp.Body.Close()
+			defer func() {
+				if err := resp.Body.Close(); err != nil {
+					t.Errorf("error closing /login response body: %v", err)
+				}
+			}()
 
 			if got := resp.StatusCode; got != tt.expected {
 				t.Fatalf("invalid status code received. expected %d got %d", tt.expected, got)
@@ -127,6 +134,11 @@ func TestInvalidCredentials(t *testing.T) {
 	ctx := setupTest(t)
 	defer tearDown(t, ctx)
 	resp := attemptLogin(t, ctx, nil, "admin", "bogus", "")
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing /login response body: %v", err)
+		}
+	}()
 	got := resp.StatusCode
 	expected := http.StatusUnauthorized
 	if got != expected {
@@ -138,6 +150,11 @@ func TestSuccessfulLogin(t *testing.T) {
 	ctx := setupTest(t)
 	defer tearDown(t, ctx)
 	resp := attemptLogin(t, ctx, nil, "admin", "gophish", "")
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing /login response body: %v", err)
+		}
+	}()
 	got := resp.StatusCode
 	expected := http.StatusOK
 	if got != expected {
@@ -154,6 +171,11 @@ func TestSuccessfulRedirect(t *testing.T) {
 			return http.ErrUseLastResponse
 		}}
 	resp := attemptLogin(t, ctx, client, "admin", "gophish", fmt.Sprintf("?next=%s", next))
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing /login response body: %v", err)
+		}
+	}()
 	got := resp.StatusCode
 	expected := http.StatusFound
 	if got != expected {
@@ -172,6 +194,11 @@ func TestAccountLocked(t *testing.T) {
 	ctx := setupTest(t)
 	defer tearDown(t, ctx)
 	resp := attemptLogin(t, ctx, nil, "houdini", "gophish", "")
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			t.Errorf("error closing /login response body: %v", err)
+		}
+	}()
 	got := resp.StatusCode
 	expected := http.StatusUnauthorized
 	if got != expected {

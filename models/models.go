@@ -1,24 +1,22 @@
 package models
 
 import (
-	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
-	"fmt"
-	"io"
-	"io/ioutil"
 	"os"
 	"time"
 
 	"bitbucket.org/liamstask/goose/lib/goose"
 
 	mysql "github.com/go-sql-driver/mysql"
+
 	"github.com/gophish/gophish/auth"
 	"github.com/gophish/gophish/config"
 
-	log "github.com/gophish/gophish/logger"
 	"github.com/jinzhu/gorm"
 	_ "github.com/mattn/go-sqlite3" // Blank import needed to import sqlite3
+
+	log "github.com/gophish/gophish/logger"
 )
 
 var db *gorm.DB
@@ -72,13 +70,6 @@ type Response struct {
 	Message string      `json:"message"`
 	Success bool        `json:"success"`
 	Data    interface{} `json:"data"`
-}
-
-// Copy of auth.GenerateSecureKey to prevent cyclic import with auth library
-func generateSecureKey() string {
-	k := make([]byte, 32)
-	io.ReadFull(rand.Reader, k)
-	return fmt.Sprintf("%x", k)
 }
 
 func chooseDBDriver(name, openStr string) goose.DBDriver {
@@ -151,7 +142,7 @@ func Setup(c *config.Config) error {
 		switch conf.DBName {
 		case "mysql":
 			rootCertPool := x509.NewCertPool()
-			pem, err := ioutil.ReadFile(conf.DBSSLCaPath)
+			pem, err := os.ReadFile(conf.DBSSLCaPath)
 			if err != nil {
 				log.Error(err)
 				return err
@@ -160,9 +151,12 @@ func Setup(c *config.Config) error {
 				log.Error("Failed to append PEM.")
 				return err
 			}
-			mysql.RegisterTLSConfig("ssl_ca", &tls.Config{
+			if err := mysql.RegisterTLSConfig("ssl_ca", &tls.Config{
 				RootCAs: rootCertPool,
-			})
+			}); err != nil {
+				log.Error(err)
+				return err
+			}
 			// Default database is sqlite3, which supports no tls, as connection
 			// is file based
 		default:

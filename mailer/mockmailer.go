@@ -113,7 +113,8 @@ type mockMessage struct {
 
 func newMockMessage(from string, to []string, msg io.WriterTo) *mockMessage {
 	buff := &bytes.Buffer{}
-	msg.WriteTo(buff)
+	// Writing to a bytes.Buffer cannot fail.
+	_, _ = msg.WriteTo(buff)
 	mm := &mockMessage{
 		from:    from,
 		to:      to,

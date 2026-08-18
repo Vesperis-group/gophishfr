@@ -204,8 +204,10 @@ func setupCampaign(b *testing.B, size int) Campaign {
 	campaign.Template = Template{Name: "Test Template"}
 	campaign.Page = Page{Name: "Test Page"}
 	campaign.SMTP = SMTP{Name: "Test Page"}
-	campaign.Groups = []Group{Group{Name: "Test Group"}}
-	PostCampaign(&campaign, 1)
+	campaign.Groups = []Group{{Name: "Test Group"}}
+	if err := PostCampaign(&campaign, 1); err != nil {
+		b.Fatalf("error posting campaign: %v", err)
+	}
 	return campaign
 }
 
@@ -219,7 +221,7 @@ func BenchmarkCampaign100(b *testing.B) {
 		campaign.Template = Template{Name: "Test Template"}
 		campaign.Page = Page{Name: "Test Page"}
 		campaign.SMTP = SMTP{Name: "Test Page"}
-		campaign.Groups = []Group{Group{Name: "Test Group"}}
+		campaign.Groups = []Group{{Name: "Test Group"}}
 
 		b.StartTimer()
 		err := PostCampaign(&campaign, 1)
@@ -244,7 +246,7 @@ func BenchmarkCampaign1000(b *testing.B) {
 		campaign.Template = Template{Name: "Test Template"}
 		campaign.Page = Page{Name: "Test Page"}
 		campaign.SMTP = SMTP{Name: "Test Page"}
-		campaign.Groups = []Group{Group{Name: "Test Group"}}
+		campaign.Groups = []Group{{Name: "Test Group"}}
 
 		b.StartTimer()
 		err := PostCampaign(&campaign, 1)
@@ -269,7 +271,7 @@ func BenchmarkCampaign10000(b *testing.B) {
 		campaign.Template = Template{Name: "Test Template"}
 		campaign.Page = Page{Name: "Test Page"}
 		campaign.SMTP = SMTP{Name: "Test Page"}
-		campaign.Groups = []Group{Group{Name: "Test Group"}}
+		campaign.Groups = []Group{{Name: "Test Group"}}
 
 		b.StartTimer()
 		err := PostCampaign(&campaign, 1)

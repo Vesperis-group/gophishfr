@@ -11,12 +11,12 @@ type PermissionCheck map[string]bool
 func (s *ModelsSuite) TestHasPermission(c *check.C) {
 
 	permissionTests := map[string]PermissionCheck{
-		RoleAdmin: PermissionCheck{
+		RoleAdmin: {
 			PermissionModifySystem:  true,
 			PermissionModifyObjects: true,
 			PermissionViewObjects:   true,
 		},
-		RoleUser: PermissionCheck{
+		RoleUser: {
 			PermissionModifySystem:  false,
 			PermissionModifyObjects: true,
 			PermissionViewObjects:   true,
@@ -33,7 +33,7 @@ func (s *ModelsSuite) TestHasPermission(c *check.C) {
 			ApiKey:   fmt.Sprintf("%s-key", r),
 			RoleID:   role.ID,
 		}
-		PutUser(&user)
+		c.Assert(PutUser(&user), check.Equals, nil)
 
 		// Perform the permission checks
 		for permission, expected := range checks {

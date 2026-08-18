@@ -42,54 +42,11 @@ func setupTest(t *testing.T) *testContext {
 	return ctx
 }
 
-func createTestData(t *testing.T) {
-	// Add a group
-	group := models.Group{Name: "Test Group"}
-	group.Targets = []models.Target{
-		models.Target{BaseRecipient: models.BaseRecipient{Email: "test1@example.com", FirstName: "First", LastName: "Example"}},
-		models.Target{BaseRecipient: models.BaseRecipient{Email: "test2@example.com", FirstName: "Second", LastName: "Example"}},
-	}
-	group.UserId = 1
-	models.PostGroup(&group)
-
-	// Add a template
-	template := models.Template{Name: "Test Template"}
-	template.Subject = "Test subject"
-	template.Text = "Text text"
-	template.HTML = "<html>Test</html>"
-	template.UserId = 1
-	models.PostTemplate(&template)
-
-	// Add a landing page
-	p := models.Page{Name: "Test Page"}
-	p.HTML = "<html>Test</html>"
-	p.UserId = 1
-	models.PostPage(&p)
-
-	// Add a sending profile
-	smtp := models.SMTP{Name: "Test Page"}
-	smtp.UserId = 1
-	smtp.Host = "example.com"
-	smtp.FromAddress = "test@test.com"
-	models.PostSMTP(&smtp)
-
-	// Setup and "launch" our campaign
-	// Set the status such that no emails are attempted
-	c := models.Campaign{Name: "Test campaign"}
-	c.UserId = 1
-	c.Template = template
-	c.Page = p
-	c.SMTP = smtp
-	c.Groups = []models.Group{group}
-	models.PostCampaign(&c, c.UserId)
-	c.UpdateStatus(models.CampaignEmailsSent)
-}
-
 func TestSiteImportBaseHref(t *testing.T) {
 	ctx := setupTest(t)
 	h := "<html><head></head><body><img src=\"/test.png\"/></body></html>"
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		fmt.Fprintln(w, h)
+		_, _ = fmt.Fprintln(w, h)
 	}))
 	expected := fmt.Sprintf("<html><head><base href=\"%s\"/></head><body><img src=\"/test.png\"/>\n</body></html>", ts.URL)
 	defer ts.Close()

@@ -10,7 +10,6 @@ import (
 	"encoding/pem"
 	"fmt"
 	"io"
-	"io/ioutil"
 	"math/big"
 	"net/http"
 	"net/mail"
@@ -18,9 +17,10 @@ import (
 	"regexp"
 	"time"
 
+	"github.com/jordan-wright/email"
+
 	log "github.com/gophish/gophish/logger"
 	"github.com/gophish/gophish/models"
-	"github.com/jordan-wright/email"
 )
 
 var (
@@ -38,7 +38,7 @@ func ParseMail(r *http.Request) (email.Email, error) {
 	if err != nil {
 		fmt.Println(err)
 	}
-	body, err := ioutil.ReadAll(m.Body)
+	body, err := io.ReadAll(m.Body)
 	e.HTML = body
 	return e, err
 }
@@ -59,7 +59,8 @@ func ParseCSV(r *http.Request) ([]models.Target, error) {
 		if part.FileName() == "" {
 			continue
 		}
-		defer part.Close()
+		// The part is only read from, so a failure to close it cannot lose data.
+		defer func() { _ = part.Close() }()
 		reader := csv.NewReader(part)
 		reader.TrimLeadingSpace = true
 		record, err := reader.Read()
@@ -174,8 +175,16 @@ func CheckAndCreateSSL(cp string, kp string) error {
 	if err != nil {
 		return fmt.Errorf("tls certificate generation: failed to open %s for writing: %s", cp, err)
 	}
-	pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes})
-	certOut.Close()
+	// A partially written certificate or key is worse than no file at all: the
+	// server would start against a truncated credential, so these writes and
+	// closes have to be checked.
+	if err := pem.Encode(certOut, &pem.Block{Type: "CERTIFICATE", Bytes: derBytes}); err != nil {
+		_ = certOut.Close()
+		return fmt.Errorf("tls certificate generation: failed to write %s: %s", cp, err)
+	}
+	if err := certOut.Close(); err != nil {
+		return fmt.Errorf("tls certificate generation: failed to close %s: %s", cp, err)
+	}
 
 	keyOut, err := os.OpenFile(kp, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
 	if err != nil {
@@ -184,11 +193,17 @@ func CheckAndCreateSSL(cp string, kp string) error {
 
 	b, err := x509.MarshalECPrivateKey(priv)
 	if err != nil {
+		_ = keyOut.Close()
 		return fmt.Errorf("tls certificate generation: unable to marshal ECDSA private key: %v", err)
 	}
 
-	pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: b})
-	keyOut.Close()
+	if err := pem.Encode(keyOut, &pem.Block{Type: "EC PRIVATE KEY", Bytes: b}); err != nil {
+		_ = keyOut.Close()
+		return fmt.Errorf("tls certificate generation: failed to write %s: %s", kp, err)
+	}
+	if err := keyOut.Close(); err != nil {
+		return fmt.Errorf("tls certificate generation: failed to close %s: %s", kp, err)
+	}
 
 	log.Info("TLS Certificate Generation complete")
 	return nil

@@ -287,8 +287,8 @@ func (s *ModelsSuite) TestMailLogGenerateOverrideTransparencyHeaders(ch *check.C
 		FromAddress: "foo@example.com",
 		UserId:      1,
 		Headers: []Header{
-			Header{Key: "X-Gophish-Contact", Value: ""},
-			Header{Key: "X-Mailer", Value: ""},
+			{Key: "X-Gophish-Contact", Value: ""},
+			{Key: "X-Mailer", Value: ""},
 		},
 	}
 	ch.Assert(PostSMTP(&smtp), check.Equals, nil)
@@ -393,7 +393,7 @@ func (s *ModelsSuite) TestEmbedAttachment(ch *check.C) {
 			Content: "VGVzdCB0ZXh0IGZpbGU=",
 		},
 	}
-	PutTemplate(&campaign.Template)
+	ch.Assert(PutTemplate(&campaign.Template), check.Equals, nil)
 	ch.Assert(PostCampaign(&campaign, campaign.UserId), check.Equals, nil)
 	got := s.emailFromFirstMailLog(campaign, ch)
 
@@ -411,11 +411,15 @@ func BenchmarkMailLogGenerate100(b *testing.B) {
 	if err != nil {
 		b.Fatalf("error getting maillogs for campaign: %v", err)
 	}
-	ms[0].CacheCampaign(&campaign)
+	if err := ms[0].CacheCampaign(&campaign); err != nil {
+		b.Fatalf("error caching campaign: %v", err)
+	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		msg := gomail.NewMessage()
-		ms[0].Generate(msg)
+		if err := ms[0].Generate(msg); err != nil {
+			b.Fatalf("error generating message: %v", err)
+		}
 	}
 	tearDownBenchmark(b)
 }
@@ -427,11 +431,15 @@ func BenchmarkMailLogGenerate1000(b *testing.B) {
 	if err != nil {
 		b.Fatalf("error getting maillogs for campaign: %v", err)
 	}
-	ms[0].CacheCampaign(&campaign)
+	if err := ms[0].CacheCampaign(&campaign); err != nil {
+		b.Fatalf("error caching campaign: %v", err)
+	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		msg := gomail.NewMessage()
-		ms[0].Generate(msg)
+		if err := ms[0].Generate(msg); err != nil {
+			b.Fatalf("error generating message: %v", err)
+		}
 	}
 	tearDownBenchmark(b)
 }
@@ -443,11 +451,15 @@ func BenchmarkMailLogGenerate5000(b *testing.B) {
 	if err != nil {
 		b.Fatalf("error getting maillogs for campaign: %v", err)
 	}
-	ms[0].CacheCampaign(&campaign)
+	if err := ms[0].CacheCampaign(&campaign); err != nil {
+		b.Fatalf("error caching campaign: %v", err)
+	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		msg := gomail.NewMessage()
-		ms[0].Generate(msg)
+		if err := ms[0].Generate(msg); err != nil {
+			b.Fatalf("error generating message: %v", err)
+		}
 	}
 	tearDownBenchmark(b)
 }
@@ -459,11 +471,15 @@ func BenchmarkMailLogGenerate10000(b *testing.B) {
 	if err != nil {
 		b.Fatalf("error getting maillogs for campaign: %v", err)
 	}
-	ms[0].CacheCampaign(&campaign)
+	if err := ms[0].CacheCampaign(&campaign); err != nil {
+		b.Fatalf("error caching campaign: %v", err)
+	}
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		msg := gomail.NewMessage()
-		ms[0].Generate(msg)
+		if err := ms[0].Generate(msg); err != nil {
+			b.Fatalf("error generating message: %v", err)
+		}
 	}
 	tearDownBenchmark(b)
 }
