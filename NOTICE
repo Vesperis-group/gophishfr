@@ -26,7 +26,45 @@ Current GophishFR development is maintained independently in
 https://github.com/Vesperis-group/gophishfr. No synchronization with the
 historical Gophish project is planned.
 
+Third-party frontend components
+===============================
+
+GophishFR distributions include third-party browser libraries under their own
+terms. Their versions, provenance, licenses, usage, and known security status
+are documented in docs/FRONTEND_VENDOR_INVENTORY.md. Generated bundles retain
+available license banners, and complete notices for package-managed frontend
+libraries are emitted beside the generated JavaScript bundles.
+
 The generated frontend vendor bundle includes Chart.js, @kurkle/color,
-chartjs-plugin-zoom, and Hammer.JS under the MIT License. Their complete
-copyright and license notices are distributed in
-`static/js/dist/vendor.min.js.LICENSE.txt`.
+chartjs-plugin-zoom, Hammer.JS, DataTables, Moment.js, Papa Parse, Select2, and
+UAParser.js under the MIT License. Their complete copyright and license notices
+are distributed in `static/js/dist/vendor.min.js.LICENSE.txt`.
+
+The distributed `static/css/flat-ui.css` is a modified derivative of Flat UI
+Free by Designmodo, Sergey Shmidt, and Sergii Iurevych:
+
+    https://github.com/designmodo/Flat-UI
+
+Flat UI Free is distributed under the Creative Commons Attribution 3.0
+Unported and MIT licenses. The exact historical release used by Gophish is not
+known; the modifications are preserved in repository history.
+
+The distributed `static/css/checkbox.css` is a modified derivative of Awesome
+Bootstrap Checkbox 0.3.6:
+
+    Copyright (c) 2014 flatlogic.com
+    https://github.com/flatlogic/awesome-bootstrap-checkbox
+
+It is distributed under the MIT License. The permission and warranty terms are
+reproduced in the root LICENSE file.
+
+The distributed Datamaps browser code is derived from Datamaps:
+
+    Copyright (c) 2012 Mark DiMarco
+    https://github.com/markmarkoh/datamaps
+
+It is distributed under the MIT License. Its exact historical build is
+unknown; this limitation is documented in the frontend inventory.
+
+Highcharts is not distributed by GophishFR. Its historical removal and
+replacement are recorded in the frontend inventory.
