@@ -7,8 +7,8 @@ import (
 	"strings"
 
 	csrf "filippo.io/csrf/gorilla"
-	ctx "github.com/gophish/gophish/context"
-	"github.com/gophish/gophish/models"
+	ctx "github.com/Vesperis-group/gophishfr/context"
+	"github.com/Vesperis-group/gophishfr/models"
 )
 
 // CSRFExemptPrefixes are a list of routes that are exempt from CSRF protection

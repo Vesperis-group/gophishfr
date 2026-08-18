@@ -1,4 +1,4 @@
-module github.com/gophish/gophish
+module github.com/Vesperis-group/gophishfr
 
 go 1.25.0
 

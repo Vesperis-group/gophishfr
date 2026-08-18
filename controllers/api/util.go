@@ -5,9 +5,9 @@ import (
 	"net/http"
 	"net/mail"
 
-	ctx "github.com/gophish/gophish/context"
-	log "github.com/gophish/gophish/logger"
-	"github.com/gophish/gophish/models"
+	ctx "github.com/Vesperis-group/gophishfr/context"
+	log "github.com/Vesperis-group/gophishfr/logger"
+	"github.com/Vesperis-group/gophishfr/models"
 	"github.com/jinzhu/gorm"
 	"github.com/sirupsen/logrus"
 )

@@ -10,10 +10,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Vesperis-group/gophishfr/dialer"
+	log "github.com/Vesperis-group/gophishfr/logger"
+	"github.com/Vesperis-group/gophishfr/mailer"
 	"github.com/gophish/gomail"
-	"github.com/gophish/gophish/dialer"
-	log "github.com/gophish/gophish/logger"
-	"github.com/gophish/gophish/mailer"
 	"github.com/jinzhu/gorm"
 )
 

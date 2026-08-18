@@ -6,9 +6,9 @@ import (
 	"strconv"
 	"time"
 
-	ctx "github.com/gophish/gophish/context"
-	log "github.com/gophish/gophish/logger"
-	"github.com/gophish/gophish/models"
+	ctx "github.com/Vesperis-group/gophishfr/context"
+	log "github.com/Vesperis-group/gophishfr/logger"
+	"github.com/Vesperis-group/gophishfr/models"
 	"github.com/gorilla/mux"
 	"github.com/jinzhu/gorm"
 )

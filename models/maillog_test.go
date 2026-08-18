@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/gophish/gophish/config"
+	"github.com/Vesperis-group/gophishfr/config"
 
 	"github.com/gophish/gomail"
 	"github.com/jordan-wright/email"

@@ -4,7 +4,7 @@ import (
 	"encoding/json"
 	"os"
 
-	log "github.com/gophish/gophish/logger"
+	log "github.com/Vesperis-group/gophishfr/logger"
 )
 
 // AdminServer represents the Admin server configuration details
