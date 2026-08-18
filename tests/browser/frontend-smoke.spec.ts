@@ -187,6 +187,22 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
     await page.locator('a[href="#html"]').click();
     await expect(page.locator("#html")).toHaveClass(/active/);
     await expect(page.locator(".cke")).toBeVisible();
+    await page.locator('#modal .modal-footer button[data-dismiss="modal"]').click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+  });
+
+  await test.step("password strength bundle resolves zxcvbn", async () => {
+    await page.getByRole("link", { name: "User Management" }).click();
+    await expect(page).toHaveURL(/\/users$/);
+    await expect(page.getByRole("heading", { name: "User Management" })).toBeVisible();
+
+    await page.getByRole("button", { name: "New User" }).click();
+    await expect(page.locator("#modal")).toBeVisible();
+    await page.locator("#password").fill("browser fixture password 2026");
+    await expect(page.locator("#password-strength-container")).not.toHaveClass(
+      /hidden/,
+    );
+    await expect(page.locator("#password-strength-description")).not.toBeEmpty();
   });
 
   expect(pageErrors).toEqual([]);
@@ -203,6 +219,8 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
       "/js/dist/app/campaigns.min.js",
       "/js/dist/app/groups.min.js",
       "/js/dist/app/templates.min.js",
+      "/js/dist/app/passwords.min.js",
+      "/js/dist/app/users.min.js",
       "/js/src/vendor/ckeditor/ckeditor.js",
       "/js/src/vendor/ckeditor/adapters/jquery.js",
     ]),

@@ -1,8 +1,8 @@
 # Frontend browser smoke tests
 
 The browser smoke suite is a small functional baseline for the legacy frontend.
-It is intended to detect runtime regressions before the planned Gulp, Webpack,
-and Terser migration without introducing broad end-to-end coverage.
+It protects the maintained build pipeline and future dependency changes without
+introducing broad end-to-end coverage.
 
 ## Tooling
 
@@ -12,10 +12,9 @@ package pins a compatible browser revision, works with the Node version in
 require an independently installed, unpinned system browser; Cypress would add
 a larger runtime for the same smoke-test scope.
 
-`@playwright/test` is pinned to 1.62.1. Its addition leaves the authoritative
-Yarn audit baseline unchanged at 27 vulnerable paths and 7 unique advisories
-(1 critical, 4 high, 1 moderate, and 1 low); none belongs to Playwright or its
-two runtime packages.
+`@playwright/test` is pinned to 1.62.1. The authoritative Yarn audit currently
+reports no dependency advisory; see
+[`FRONTEND_DEPENDENCY_BASELINE.md`](FRONTEND_DEPENDENCY_BASELINE.md).
 
 Install the immutable Node dependency graph and the pinned Chromium revision:
 
@@ -48,6 +47,7 @@ The suite verifies:
   picker;
 - group DataTables rendering and client-side target entry;
 - template DataTables rendering, CKEditor initialization, and Bootstrap tabs;
+- User Management rendering and the bundled zxcvbn password-strength behavior;
 - successful loading of critical CSS, JavaScript, image, and font assets;
 - absence of unexpected JavaScript exceptions, console errors, failed local
   requests, and HTTP error responses.
@@ -69,6 +69,5 @@ to the Internet; every other external request fails the suite. Routing is
 applied to the complete browser context, service workers are blocked, and
 non-loopback WebSockets are rejected.
 
-These tests serve as the browser baseline before migration of the legacy
-frontend toolchain. They are intentionally smoke tests, not an exhaustive E2E
-or visual-regression suite.
+These tests are intentionally smoke tests, not an exhaustive E2E or
+visual-regression suite.
