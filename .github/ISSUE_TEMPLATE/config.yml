@@ -3,9 +3,3 @@ contact_links:
   - name: Report a security vulnerability
     url: https://github.com/Vesperis-group/gophishfr/security/advisories/new
     about: Report privately. Never open a public issue for a suspected vulnerability.
-  - name: Upstream Gophish project
-    url: https://github.com/gophish/gophish/issues
-    about: For bugs and ideas that concern unmodified upstream Gophish rather than GophishFR.
-  - name: Gophish documentation
-    url: https://getgophish.com/documentation/
-    about: Usage questions are usually answered by the upstream documentation.

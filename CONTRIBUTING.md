@@ -5,10 +5,8 @@ Thanks for your interest in GophishFR!
 GophishFR is a derivative of [Gophish](https://github.com/gophish/gophish).
 Before contributing, please read [NOTICE](NOTICE) and [LICENSE](LICENSE).
 
-> **Contributing upstream instead.** If your change is a general Gophish
-> improvement rather than a GophishFR-specific one, please consider sending it
-> to [the Gophish project](https://github.com/gophish/gophish) so every
-> downstream user benefits. We will pick it up on our next upstream sync.
+> **Independent maintenance.** Submit GophishFR changes to this repository.
+> Changes are not imported automatically from the historical Gophish project.
 
 ## Security issues
 
@@ -45,8 +43,6 @@ to humans and AI agents alike. The essentials:
 ```bash
 git clone git@github.com:Vesperis-group/gophishfr.git
 cd gophishfr
-git remote add upstream https://github.com/gophish/gophish.git
-git remote set-url --push upstream DISABLED-NO-PUSH-UPSTREAM
 ```
 
 Build and test:

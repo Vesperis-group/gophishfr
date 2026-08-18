@@ -32,13 +32,14 @@ and handles credentials. Mistakes here have real security consequences.
 ## 2. Remotes
 
 ```text
-origin    = Vesperis-group/gophishfr     (our repository — push here)
-upstream  = gophish/gophish              (read-only — NEVER push)
+origin = Vesperis-group/gophishfr
 ```
 
-Verify `origin` is **not** `gophish/gophish` before every push. Never merge
-`upstream` directly into `main`; always go through `chore/sync-upstream-YYYYMMDD`
-and a PR. See [docs/UPSTREAM_SYNC.md](docs/UPSTREAM_SYNC.md).
+`origin` is the sole source of truth and `main` is the stable branch. GophishFR
+is maintained independently: no upstream remote or synchronization workflow is
+used or planned. Preserve the historical Gophish attribution in `LICENSE` and
+`NOTICE`, but never import changes outside the normal GophishFR branch and PR
+process.
 
 ## 3. Commits
 

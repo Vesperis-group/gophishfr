@@ -14,12 +14,9 @@ campaign data and credentials. Security reports are taken seriously.
 Please do **not** open a public issue, pull request or discussion for a
 suspected vulnerability.
 
-Do **not** report GophishFR vulnerabilities to the upstream Gophish project.
-GophishFR is an independent derivative work; upstream maintainers are not
-responsible for our code. Conversely, if you believe the flaw is in unmodified
-upstream Gophish code, please also report it to
-[the Gophish project](https://github.com/gophish/gophish/security), so that all
-downstream users benefit.
+Report every vulnerability affecting GophishFR through the channel above.
+GophishFR is maintained independently, and the historical Gophish maintainers
+are not responsible for this code.
 
 ### What to include
 
