@@ -1,4 +1,4 @@
-name: Build Gophish Release
+name: Build GophishFR Release
 
 # Least privilege by default: only the upload job may write to the release.
 permissions:
@@ -33,15 +33,15 @@ jobs:
                 include:
                     - os: windows-latest
                       goos: windows
-                      bin: 'gophish.exe'
+                      bin: 'gophishfr.exe'
                       releaseos: windows
                     - os: ubuntu-latest
                       goos: linux
-                      bin: 'gophish'
+                      bin: 'gophishfr'
                       releaseos: linux
                     - os: macos-latest
                       goos: darwin
-                      bin: 'gophish'
+                      bin: 'gophishfr'
                       releaseos: osx
                 # Don't build windows-32bit due to missing MinGW dependencies
                 # Don't build osx-32bit due to eventual drop in Go support
@@ -51,6 +51,10 @@ jobs:
                     - os: macos-latest
                       arch: '386'
         steps:
+            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+              with:
+                persist-credentials: false
+
             - name: Set up Go
               uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
               with:
@@ -70,13 +74,13 @@ jobs:
               env:
                 TAG_NAME: ${{ github.event.release.tag_name }}
                 RELEASE_OS: ${{ matrix.releaseos }}
-              run: echo "RELEASE=gophish-${TAG_NAME}-${RELEASE_OS}-32bit" >> "$GITHUB_ENV"
+              run: echo "RELEASE=gophishfr-${TAG_NAME}-${RELEASE_OS}-32bit" >> "$GITHUB_ENV"
 
             - if: matrix.arch == 'amd64' && matrix.os != 'windows-latest'
               env:
                 TAG_NAME: ${{ github.event.release.tag_name }}
                 RELEASE_OS: ${{ matrix.releaseos }}
-              run: echo "RELEASE=gophish-${TAG_NAME}-${RELEASE_OS}-64bit" >> "$GITHUB_ENV"
+              run: echo "RELEASE=gophishfr-${TAG_NAME}-${RELEASE_OS}-64bit" >> "$GITHUB_ENV"
 
             # https://github.com/actions/runner/issues/1636
             - if: matrix.os == 'windows-latest'
@@ -84,11 +88,7 @@ jobs:
               env:
                 TAG_NAME: ${{ github.event.release.tag_name }}
                 RELEASE_OS: ${{ matrix.releaseos }}
-              run: echo "RELEASE=gophish-$env:TAG_NAME-$env:RELEASE_OS-64bit" | Out-File -FilePath $env:GITHUB_ENV -Append
-
-            - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-              with:
-                persist-credentials: false
+              run: echo "RELEASE=gophishfr-$env:TAG_NAME-$env:RELEASE_OS-64bit" | Out-File -FilePath $env:GITHUB_ENV -Append
 
             # Dependencies come from the committed go.mod/go.sum only.
             - name: Verify module checksums

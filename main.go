@@ -1,7 +1,9 @@
 package main
 
 /*
-gophish - Open-Source Phishing Framework
+GophishFR - Security Awareness Simulation Framework
+
+Derived from Gophish - Open-Source Phishing Framework
 
 The MIT License (MIT)
 
