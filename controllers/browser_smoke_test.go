@@ -164,4 +164,41 @@ func seedBrowserFixtures(t *testing.T, userID int64) {
 	if err := models.PostSMTP(&sendingProfile); err != nil {
 		t.Fatalf("create browser test sending profile: %v", err)
 	}
+
+	campaign := models.Campaign{
+		Name:     "Browser Fixture Campaign",
+		UserId:   userID,
+		Template: emailTemplate,
+		Page:     landingPage,
+		SMTP:     sendingProfile,
+		Groups:   []models.Group{group},
+		URL:      "http://127.0.0.1:1",
+	}
+	if err := models.PostCampaign(&campaign, userID); err != nil {
+		t.Fatalf("create browser test campaign: %v", err)
+	}
+	if len(campaign.Results) != 1 {
+		t.Fatalf("browser test campaign created %d results, want 1", len(campaign.Results))
+	}
+
+	result := &campaign.Results[0]
+	eventDetails := models.EventDetails{}
+	events := []struct {
+		name   string
+		record func() error
+	}{
+		{name: models.EventSent, record: result.HandleEmailSent},
+		{name: models.EventOpened, record: func() error { return result.HandleEmailOpened(eventDetails) }},
+		{name: models.EventClicked, record: func() error { return result.HandleClickedLink(eventDetails) }},
+		{name: models.EventDataSubmit, record: func() error { return result.HandleFormSubmit(eventDetails) }},
+		{name: models.EventReported, record: func() error { return result.HandleEmailReport(eventDetails) }},
+	}
+	for _, event := range events {
+		if err := event.record(); err != nil {
+			t.Fatalf("record browser campaign event %q: %v", event.name, err)
+		}
+	}
+	if err := campaign.UpdateStatus(models.CampaignInProgress); err != nil {
+		t.Fatalf("activate browser test campaign: %v", err)
+	}
 }

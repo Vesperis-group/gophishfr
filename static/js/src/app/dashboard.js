@@ -100,60 +100,13 @@ function deleteCampaign(idx) {
     }
 }
 
-/* Renders a pie chart using the provided chartops */
 function renderPieChart(chartopts) {
-    return Highcharts.chart(chartopts['elemId'], {
-        chart: {
-            type: 'pie',
-            events: {
-                load: function () {
-                    var chart = this,
-                        rend = chart.renderer,
-                        pie = chart.series[0],
-                        left = chart.plotLeft + pie.center[0],
-                        top = chart.plotTop + pie.center[1];
-                    this.innerText = rend.text(chartopts['data'][0].count, left, top).
-                    attr({
-                        'text-anchor': 'middle',
-                        'font-size': '16px',
-                        'font-weight': 'bold',
-                        'fill': chartopts['colors'][0],
-                        'font-family': 'Helvetica,Arial,sans-serif'
-                    }).add();
-                },
-                render: function () {
-                    this.innerText.attr({
-                        text: chartopts['data'][0].count
-                    })
-                }
-            }
-        },
-        title: {
-            text: chartopts['title']
-        },
-        plotOptions: {
-            pie: {
-                innerSize: '80%',
-                dataLabels: {
-                    enabled: false
-                }
-            }
-        },
-        credits: {
-            enabled: false
-        },
-        tooltip: {
-            formatter: function () {
-                if (this.key == undefined) {
-                    return false
-                }
-                return '<span style="color:' + this.color + '">\u25CF</span>' + this.point.name + ': <b>' + this.y + '%</b><br/>'
-            }
-        },
-        series: [{
-            data: chartopts['data'],
-            colors: chartopts['colors'],
-        }]
+    return GophishCharts.renderDoughnut({
+        elemId: chartopts['elemId'],
+        title: chartopts['title'],
+        data: chartopts['data'],
+        colors: chartopts['colors'],
+        centerFontSize: 16
     })
 }
 
@@ -220,75 +173,14 @@ function generateTimelineChart(campaigns) {
             y: campaign.y
         })
     })
-    Highcharts.chart('overview_chart', {
-        chart: {
-            zoomType: 'x',
-            type: 'areaspline'
-        },
-        title: {
-            text: 'Phishing Success Overview'
-        },
-        xAxis: {
-            type: 'datetime',
-            dateTimeLabelFormats: {
-                second: '%l:%M:%S',
-                minute: '%l:%M',
-                hour: '%l:%M',
-                day: '%b %d, %Y',
-                week: '%b %d, %Y',
-                month: '%b %Y'
-            }
-        },
-        yAxis: {
-            min: 0,
-            max: 100,
-            title: {
-                text: "% of Success"
-            }
-        },
-        tooltip: {
-            formatter: function () {
-                return Highcharts.dateFormat('%A, %b %d %l:%M:%S %P', new Date(this.x)) +
-                    '<br>' + this.point.name + '<br>% Success: <b>' + this.y + '%</b>'
-            }
-        },
-        legend: {
-            enabled: false
-        },
-        plotOptions: {
-            series: {
-                marker: {
-                    enabled: true,
-                    symbol: 'circle',
-                    radius: 3
-                },
-                cursor: 'pointer',
-                point: {
-                    events: {
-                        click: function (e) {
-                            window.location.href = "/campaigns/" + this.campaign_id
-                        }
-                    }
-                }
-            }
-        },
-        credits: {
-            enabled: false
-        },
-        series: [{
-            data: overview_data,
-            color: "#f05b4f",
-            fillOpacity: 0.5
-        }]
+    GophishCharts.renderOverview({
+        elemId: 'overview_chart',
+        title: 'Phishing Success Overview',
+        data: overview_data
     })
 }
 
 $(document).ready(function () {
-    Highcharts.setOptions({
-        global: {
-            useUTC: false
-        }
-    })
     api.campaigns.summary()
         .success(function (data) {
             $("#loading").hide()

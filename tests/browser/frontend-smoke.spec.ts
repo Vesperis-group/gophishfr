@@ -6,6 +6,54 @@ const password = requiredEnvironmentVariable("GOPHISHFR_BROWSER_PASSWORD");
 const localOrigin = new URL(baseURL).origin;
 const localServer = new URL(baseURL);
 
+type ChartPoint = {
+  campaign_id?: number;
+  email?: string;
+  message?: string;
+  x: number;
+  y: number;
+};
+
+type CampaignResultsResponse = {
+  results: Array<{ reported: boolean; status: string }>;
+  timeline: Array<{ email: string; message: string; time: string }>;
+};
+
+type RenderedChart = {
+  canvas: HTMLCanvasElement;
+  chartArea: { bottom: number; left: number; right: number; top: number };
+  data: {
+    datasets: Array<{
+      data: Array<number | ChartPoint>;
+      pointBackgroundColor?: string[];
+    }>;
+  };
+  getDatasetMeta: (datasetIndex: number) => {
+    data: Array<{ getCenterPoint: () => { x: number; y: number } }>;
+  };
+  options: {
+    plugins: {
+      title: { text: string };
+      zoom: { zoom: { pinch: { enabled: boolean } } };
+    };
+  };
+  scales: {
+    x: { max: number; min: number; ticks: Array<{ label?: string | string[] }> };
+  };
+  tooltip: {
+    body: Array<{ lines: string[] }>;
+    setActiveElements: (
+      elements: Array<{ datasetIndex: number; index: number }>,
+      position: { x: number; y: number },
+    ) => void;
+  };
+  update: () => void;
+};
+
+type ChartLibrary = {
+  getChart: (elementId: string) => RenderedChart | undefined;
+};
+
 function requiredEnvironmentVariable(name: string): string {
   const value = process.env[name];
   if (!value) {
@@ -116,15 +164,218 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
       page.getByRole("button", { name: "Sign in" }).click(),
     ]);
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
-    await expect(page.locator("#emptyMessage")).toBeVisible();
+    await expect(page.locator("#dashboard")).toBeVisible();
+    await expect(page.locator("#campaignTable")).toContainText(
+      "Browser Fixture Campaign",
+    );
     await expect(page.locator("#navbar-dropdown")).toContainText(username);
+  });
+
+  await test.step("dashboard charts preserve values, labels, and navigation", async () => {
+    const chartIDs = [
+      "overview_chart",
+      "sent_chart",
+      "opened_chart",
+      "clicked_chart",
+      "submitted_data_chart",
+      "email_reported_chart",
+    ];
+    for (const chartID of chartIDs) {
+      await expect(page.locator(`canvas#${chartID}`)).toBeVisible();
+    }
+    await expect(page.locator("#overview_chart")).toHaveAttribute(
+      "aria-label",
+      "Phishing Success Overview: 1 campaigns",
+    );
+    await expect(page.locator("#sent_chart")).toHaveAttribute(
+      "aria-label",
+      "Email Sent: 1 recipients (100%)",
+    );
+
+    const sentChart = await page.evaluate(() => {
+      const charts = (window as Window & { Chart: ChartLibrary }).Chart;
+      const chart = charts.getChart("sent_chart");
+      return {
+        title: chart?.options.plugins.title.text,
+        values: chart?.data.datasets[0].data,
+      };
+    });
+    expect(sentChart).toEqual({ title: "Email Sent", values: [100, 0] });
+
+    const overviewPoint = await page.evaluate(() => {
+      const charts = (window as Window & { Chart: ChartLibrary }).Chart;
+      const chart = charts.getChart("overview_chart");
+      if (!chart) {
+        throw new Error("Overview chart was not initialized");
+      }
+      const point = chart.getDatasetMeta(0).data[0].getCenterPoint();
+      const bounds = chart.canvas.getBoundingClientRect();
+      return { x: bounds.left + point.x, y: bounds.top + point.y };
+    });
+    await page.mouse.click(overviewPoint.x, overviewPoint.y);
+    await expect(page).toHaveURL(/\/campaigns\/\d+$/);
+  });
+
+  await test.step("campaign result charts preserve timeline and status data", async () => {
+    await expect(page.getByRole("heading", { name: "Results for Browser Fixture Campaign" })).toBeVisible();
+    const chartIDs = [
+      "timeline_chart",
+      "sent_chart",
+      "opened_chart",
+      "clicked_chart",
+      "submitted_data_chart",
+      "reported_chart",
+    ];
+    for (const chartID of chartIDs) {
+      await expect(page.locator(`canvas#${chartID}`)).toBeVisible();
+    }
+    await expect(page.locator("#timeline_chart")).toHaveAttribute(
+      "aria-label",
+      "Campaign Timeline: 5 events",
+    );
+    await expect(page.locator("#reported_chart")).toHaveAttribute(
+      "aria-label",
+      "Email Reported: 1 recipients (100%)",
+    );
+
+    const chartData = await page.evaluate(() => {
+      const charts = (window as Window & { Chart: ChartLibrary }).Chart;
+      const chart = charts.getChart("reported_chart");
+      return {
+        title: chart?.options.plugins.title.text,
+        values: chart?.data.datasets[0].data,
+      };
+    });
+    expect(chartData).toEqual({ title: "Email Reported", values: [100, 0] });
+
+    const tooltipLines = await page.evaluate(() => {
+      const charts = (window as Window & { Chart: ChartLibrary }).Chart;
+      const chart = charts.getChart("timeline_chart");
+      if (!chart) {
+        throw new Error("Timeline chart was not initialized");
+      }
+      chart.tooltip.setActiveElements([{ datasetIndex: 0, index: 0 }], { x: 0, y: 0 });
+      chart.update();
+      return chart.tooltip.body.flatMap((item) => item.lines);
+    });
+    expect(tooltipLines).toEqual([
+      "Event: Email Sent",
+      "Email: fixture@localhost.invalid",
+    ]);
+    const timelineConfiguration = await page.evaluate(() => {
+      const charts = (window as Window & { Chart: ChartLibrary }).Chart;
+      const chart = charts.getChart("timeline_chart");
+      if (!chart) {
+        throw new Error("Timeline chart was not initialized");
+      }
+      return {
+        pinchEnabled: chart.options.plugins.zoom.zoom.pinch.enabled,
+        tickLabels: chart.scales.x.ticks.map((tick) => String(tick.label)),
+      };
+    });
+    expect(timelineConfiguration.pinchEnabled).toBe(true);
+    expect(timelineConfiguration.tickLabels.some((label) => label.includes(":"))).toBe(
+      true,
+    );
+
+    const zoomGeometry = await page.evaluate(() => {
+      const charts = (window as Window & { Chart: ChartLibrary }).Chart;
+      const chart = charts.getChart("timeline_chart");
+      if (!chart) {
+        throw new Error("Timeline chart was not initialized");
+      }
+      const bounds = chart.canvas.getBoundingClientRect();
+      const width = chart.chartArea.right - chart.chartArea.left;
+      const y = bounds.top + (chart.chartArea.top + chart.chartArea.bottom) / 2;
+      return {
+        initialRange: chart.scales.x.max - chart.scales.x.min,
+        start: { x: bounds.left + chart.chartArea.left + width * 0.25, y },
+        end: { x: bounds.left + chart.chartArea.left + width * 0.75, y },
+      };
+    });
+    await page.mouse.move(zoomGeometry.start.x, zoomGeometry.start.y);
+    await page.mouse.down();
+    await page.mouse.move(zoomGeometry.end.x, zoomGeometry.end.y);
+    await page.mouse.up();
+    await expect(page.locator(".chart-reset-zoom")).toBeVisible();
+
+    const zoomedRange = await page.evaluate(() => {
+      const charts = (window as Window & { Chart: ChartLibrary }).Chart;
+      const chart = charts.getChart("timeline_chart");
+      if (!chart) {
+        throw new Error("Timeline chart was not initialized");
+      }
+      return chart.scales.x.max - chart.scales.x.min;
+    });
+    expect(zoomedRange).toBeLessThan(zoomGeometry.initialRange);
+
+    await page.getByRole("button", { name: "Reset zoom" }).click();
+    await expect(page.locator(".chart-reset-zoom")).toBeHidden();
+    const resetRange = await page.evaluate(() => {
+      const charts = (window as Window & { Chart: ChartLibrary }).Chart;
+      const chart = charts.getChart("timeline_chart");
+      if (!chart) {
+        throw new Error("Timeline chart was not initialized");
+      }
+      return chart.scales.x.max - chart.scales.x.min;
+    });
+    expect(resetRange).toBeCloseTo(zoomGeometry.initialRange, 5);
+
+    await page.route(/\/api\/campaigns\/\d+\/results/, async (route) => {
+      const response = await route.fetch();
+      const body = (await response.json()) as CampaignResultsResponse;
+      body.results[0].status = "Email Opened";
+      body.results[0].reported = false;
+      body.timeline.push({
+        email: "fixture@localhost.invalid",
+        message: "Email Opened",
+        time: new Date().toISOString(),
+      });
+      await route.fulfill({ response, json: body });
+    });
+    const refreshedResults = page.waitForResponse((response) =>
+      /\/api\/campaigns\/\d+\/results/.test(new URL(response.url()).pathname),
+    );
+    await page.getByRole("button", { name: "Refresh" }).click();
+    expect((await refreshedResults).status()).toBe(200);
+    await expect(page.locator("#reported_chart")).toHaveAttribute(
+      "aria-label",
+      "Email Reported: 0 recipients (0%)",
+    );
+    await expect(page.locator("#timeline_chart")).toHaveAttribute(
+      "aria-label",
+      "Campaign Timeline: 6 events",
+    );
+    const refreshedChartData = await page.evaluate(() => {
+      const charts = (window as Window & { Chart: ChartLibrary }).Chart;
+      const reported = charts.getChart("reported_chart");
+      const timeline = charts.getChart("timeline_chart");
+      return {
+        reportedValues: reported?.data.datasets[0].data,
+        timelineColors: timeline?.data.datasets[0].pointBackgroundColor,
+        timelinePoints: timeline?.data.datasets[0].data.length,
+      };
+    });
+    expect(refreshedChartData).toEqual({
+      reportedValues: [0, 100],
+      timelineColors: [
+        "#1abc9c",
+        "#f9bf3b",
+        "#F39C12",
+        "#f05b4f",
+        "#45d6ef",
+        "#f9bf3b",
+      ],
+      timelinePoints: 6,
+    });
+    await page.unroute(/\/api\/campaigns\/\d+\/results/);
   });
 
   await test.step("campaign controls initialize Bootstrap and jQuery plugins", async () => {
     await page.getByRole("link", { name: "Campaigns", exact: true }).click();
     await expect(page).toHaveURL(/\/campaigns$/);
     await expect(page.getByRole("heading", { name: "Campaigns" })).toBeVisible();
-    await expect(page.locator("#emptyMessage").first()).toBeVisible();
+    await expect(page.locator("#campaignTable")).toContainText("Browser Fixture Campaign");
 
     await page.locator('a[href="#archivedCampaigns"]').click();
     await expect(page.locator("#archivedCampaigns")).toHaveClass(/active/);
@@ -215,7 +466,9 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
       "/css/dist/gophish.css",
       "/js/dist/vendor.min.js",
       "/js/dist/app/gophish.min.js",
+      "/js/dist/app/charts.min.js",
       "/js/dist/app/dashboard.min.js",
+      "/js/dist/app/campaign_results.min.js",
       "/js/dist/app/campaigns.min.js",
       "/js/dist/app/groups.min.js",
       "/js/dist/app/templates.min.js",

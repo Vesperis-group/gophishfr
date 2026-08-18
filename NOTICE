@@ -25,3 +25,8 @@ corresponds to upstream `master` at commit 9561846 (version 0.12.1+).
 Current GophishFR development is maintained independently in
 https://github.com/Vesperis-group/gophishfr. No synchronization with the
 historical Gophish project is planned.
+
+The generated frontend vendor bundle includes Chart.js, @kurkle/color,
+chartjs-plugin-zoom, and Hammer.JS under the MIT License. Their complete
+copyright and license notices are distributed in
+`static/js/dist/vendor.min.js.LICENSE.txt`.

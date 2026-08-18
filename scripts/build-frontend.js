@@ -10,13 +10,27 @@ const webpack = require("webpack");
 const webpackConfig = require("../webpack.config");
 
 const projectRoot = path.resolve(__dirname, "..");
+const chartPackageDirectory = path.resolve(
+  path.dirname(require.resolve("chart.js")),
+  "..",
+);
+const colorPackageDirectory = path.resolve(
+  path.dirname(require.resolve("@kurkle/color")),
+  "..",
+);
+const zoomPackageDirectory = path.resolve(
+  path.dirname(require.resolve("chartjs-plugin-zoom")),
+  "..",
+);
+const hammerPackageDirectory = path.dirname(require.resolve("hammerjs"));
 const zxcvbnDirectory = path.dirname(require.resolve("zxcvbn/package.json"));
 const javascriptSourceDirectory = path.join(projectRoot, "static", "js", "src");
 const javascriptOutputDirectory = path.join(projectRoot, "static", "js", "dist");
+const vendorSourceDirectory = path.join(javascriptSourceDirectory, "vendor");
 const stylesheetSourceDirectory = path.join(projectRoot, "static", "css");
 const stylesheetOutputDirectory = path.join(stylesheetSourceDirectory, "dist");
 
-const vendorScripts = [
+const vendoredScriptNames = [
   "jquery.js",
   "bootstrap.min.js",
   "moment.min.js",
@@ -34,12 +48,23 @@ const vendorScripts = [
   "bootstrap-datetime.js",
   "select2.min.js",
   "core.min.js",
-  "highcharts.js",
   "ua-parser.min.js",
 ];
 
+const vendorScriptPaths = vendoredScriptNames.map((name) =>
+  path.join(vendorSourceDirectory, name),
+);
+vendorScriptPaths.splice(
+  vendorScriptPaths.length - 1,
+  0,
+  path.join(chartPackageDirectory, "dist", "chart.umd.js"),
+  path.join(hammerPackageDirectory, "hammer.min.js"),
+  path.join(zoomPackageDirectory, "dist", "chartjs-plugin-zoom.min.js"),
+);
+
 const applicationScripts = [
   "autocomplete.js",
+  "charts.js",
   "campaign_results.js",
   "campaigns.js",
   "dashboard.js",
@@ -78,12 +103,31 @@ async function minifyJavaScript(source, sourceName) {
 
 async function buildVendorScripts() {
   const sources = await Promise.all(
-    vendorScripts.map((name) =>
-      fs.readFile(path.join(javascriptSourceDirectory, "vendor", name), "utf8"),
-    ),
+    vendorScriptPaths.map((sourcePath) => fs.readFile(sourcePath, "utf8")),
   );
   const output = await minifyJavaScript(sources.join("\n"), "vendor scripts");
   await fs.writeFile(path.join(javascriptOutputDirectory, "vendor.min.js"), output);
+}
+
+async function buildVendorLicense() {
+  const notices = await Promise.all(
+    [
+      chartPackageDirectory,
+      colorPackageDirectory,
+      zoomPackageDirectory,
+      hammerPackageDirectory,
+    ].map(async (directory) => {
+      const packageMetadata = JSON.parse(
+        await fs.readFile(path.join(directory, "package.json"), "utf8"),
+      );
+      const license = await fs.readFile(path.join(directory, "LICENSE.md"), "utf8");
+      return `${packageMetadata.name} ${packageMetadata.version}\n\n${license.trim()}\n`;
+    }),
+  );
+  await fs.writeFile(
+    path.join(javascriptOutputDirectory, "vendor.min.js.LICENSE.txt"),
+    notices.join("\n"),
+  );
 }
 
 async function buildApplicationScripts() {
@@ -186,6 +230,7 @@ async function build() {
   ]);
   await Promise.all([
     buildVendorScripts(),
+    buildVendorLicense(),
     buildApplicationScripts(),
     buildStylesheets(),
     buildPasswordScript(),
