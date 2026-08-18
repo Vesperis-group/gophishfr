@@ -9,7 +9,6 @@ var gulp = require('gulp'),
     concat = require('gulp-concat'),
     uglify = require('gulp-uglify-es').default,
     cleanCSS = require('gulp-clean-css'),
-    babel = require('gulp-babel'),
 
     js_directory = 'static/js/src/',
     css_directory = 'static/css/',
