@@ -56,9 +56,8 @@ Messages describe the limit that was exceeded. They never echo uploaded
 content, a file name, a file system path, a database detail, or a parser
 internal. Oversized values are rejected, never truncated silently.
 
-The field limit applies to the records that become targets, including a value a
-record inherits from an earlier record because it does not carry that column
-itself. A record skipped for an unusable address never fails the upload.
+The field limit applies to the records that become targets. A record skipped
+for an unusable address never fails the upload.
 
 ## Preserved behaviour
 
@@ -70,6 +69,8 @@ The accepted CSV shape is unchanged:
   as `Name <user@example.invalid>` are accepted;
 - records with a varying number of fields are accepted, and extra columns are
   ignored;
+- a record that stops short of a mapped column reads that column as empty
+  rather than inheriting the previous record's value;
 - a record whose address cannot be parsed is skipped rather than failing the
   request, even when one of its other fields is too long;
 - a file whose header matches none of the four columns contributes no target;
@@ -134,9 +135,20 @@ No limit existed before this change. The multipart and CSV libraries impose no
 size, record, or field bound of their own on a streamed request, so the earlier
 behaviour was genuinely unbounded rather than implicitly limited.
 
-## Known limitation
+## Record isolation
 
-When a record omits a column that an earlier record provided, the importer
-reuses the previous value for that column. This predates the limits and is
-preserved here so this change stays confined to hardening. It is recorded as a
-candidate for a follow-up correctness change.
+Every target is built from the header and its own record only. A column a
+record does not reach reads as an empty value, exactly like a column the record
+carries empty, so a shorter record never inherits a value from the record
+before it.
+
+Because the address follows the same rule, a record that stops short of the
+email column is skipped like any record whose address cannot be parsed, instead
+of being imported under the previous record's address.
+
+| Record | Result |
+| --- | --- |
+| `alice@example.invalid,Alice,Martin,Engineer` | imported with all four values |
+| `bob@example.invalid,Bob` | imported as Bob with an empty last name and position |
+| `Bob,Roe` under an `Email` header | skipped: no address in this record |
+| `bob@example.invalid,Bob,,` | imported, identical to the shorter form above |

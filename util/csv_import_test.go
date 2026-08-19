@@ -2,11 +2,13 @@ package util
 
 import (
 	"bytes"
+	"encoding/csv"
 	"errors"
 	"fmt"
 	"io"
 	"mime/multipart"
 	"net/http"
+	"net/mail"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -51,6 +53,116 @@ func parseImportRequest(t *testing.T, files map[string]string) ([]models.Target,
 
 // TestParseCSVAcceptsSupportedContent locks the import contract that existed
 // before the limits were introduced.
+// TestParseCSVTargetsDoesNotCarryValuesBetweenRows is the regression test for a
+// record inheriting a column from the record before it. Each target must be
+// built only from the header and its own record.
+func TestParseCSVTargetsDoesNotCarryValuesBetweenRows(t *testing.T) {
+	tests := []struct {
+		name    string
+		content string
+		want    []models.BaseRecipient
+	}{
+		{
+			name:    "complete record then shorter record",
+			content: "Email,First Name,Last Name,Position\nalice@example.invalid,Alice,Martin,Engineer\nbob@example.invalid,Bob\n",
+			want: []models.BaseRecipient{
+				{Email: "alice@example.invalid", FirstName: "Alice", LastName: "Martin", Position: "Engineer"},
+				{Email: "bob@example.invalid", FirstName: "Bob"},
+			},
+		},
+		{
+			name:    "successive shorter records",
+			content: "Email,First Name,Last Name,Position\nalice@example.invalid,Alice,Martin,Engineer\nbob@example.invalid,Bob\ncarol@example.invalid\n",
+			want: []models.BaseRecipient{
+				{Email: "alice@example.invalid", FirstName: "Alice", LastName: "Martin", Position: "Engineer"},
+				{Email: "bob@example.invalid", FirstName: "Bob"},
+				{Email: "carol@example.invalid"},
+			},
+		},
+		{
+			name:    "missing optional column only",
+			content: "First Name,Last Name,Email,Position\nAlice,Martin,alice@example.invalid,Engineer\nBob,Roe,bob@example.invalid\n",
+			want: []models.BaseRecipient{
+				{FirstName: "Alice", LastName: "Martin", Email: "alice@example.invalid", Position: "Engineer"},
+				{FirstName: "Bob", LastName: "Roe", Email: "bob@example.invalid"},
+			},
+		},
+		{
+			name:    "record too short to carry an address is skipped",
+			content: "First Name,Last Name,Email\nAlice,Martin,alice@example.invalid\nBob,Roe\nCarol,Doe,carol@example.invalid\n",
+			want: []models.BaseRecipient{
+				{FirstName: "Alice", LastName: "Martin", Email: "alice@example.invalid"},
+				{FirstName: "Carol", LastName: "Doe", Email: "carol@example.invalid"},
+			},
+		},
+		{
+			name:    "skipped record does not leak into the next one",
+			content: "First Name,Last Name,Email\nAlice,Martin,not-an-address\nBob,Roe,bob@example.invalid\n",
+			want: []models.BaseRecipient{
+				{FirstName: "Bob", LastName: "Roe", Email: "bob@example.invalid"},
+			},
+		},
+		{
+			name:    "absent column matches a present empty column",
+			content: "First Name,Last Name,Email,Position\nAlice,Martin,alice@example.invalid,Engineer\nBob,Roe,bob@example.invalid,\nCarol,Doe,carol@example.invalid\n",
+			want: []models.BaseRecipient{
+				{FirstName: "Alice", LastName: "Martin", Email: "alice@example.invalid", Position: "Engineer"},
+				{FirstName: "Bob", LastName: "Roe", Email: "bob@example.invalid"},
+				{FirstName: "Carol", LastName: "Doe", Email: "carol@example.invalid"},
+			},
+		},
+		{
+			name:    "empty values never inherit an earlier record",
+			content: "First Name,Last Name,Email\nAlice,Martin,alice@example.invalid\n,,bob@example.invalid\n",
+			want: []models.BaseRecipient{
+				{FirstName: "Alice", LastName: "Martin", Email: "alice@example.invalid"},
+				{Email: "bob@example.invalid"},
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, err := parseImportRequest(t, map[string]string{"targets.csv": test.content})
+			if err != nil {
+				t.Fatalf("ParseCSV() error = %v", err)
+			}
+			if len(got) != len(test.want) {
+				t.Fatalf("ParseCSV() returned %d targets, want %d: %+v", len(got), len(test.want), got)
+			}
+			for i, want := range test.want {
+				if got[i].BaseRecipient != want {
+					t.Fatalf("target %d = %+v, want %+v", i, got[i].BaseRecipient, want)
+				}
+			}
+		})
+	}
+}
+
+// TestParseCSVTargetsIsolatesRecordsAcrossFiles checks the last record of one
+// uploaded file cannot supply a value to the first record of the next file.
+func TestParseCSVTargetsIsolatesRecordsAcrossFiles(t *testing.T) {
+	first, err := parseCSVTargets(strings.NewReader(
+		"Email,First Name,Last Name,Position\nalice@example.invalid,Alice,Martin,Engineer\n",
+	), MaxImportRecords)
+	if err != nil {
+		t.Fatalf("parseCSVTargets() first file error = %v", err)
+	}
+	second, err := parseCSVTargets(strings.NewReader(
+		"Email,First Name,Last Name,Position\nbob@example.invalid,Bob\n",
+	), MaxImportRecords)
+	if err != nil {
+		t.Fatalf("parseCSVTargets() second file error = %v", err)
+	}
+	if len(first) != 1 || len(second) != 1 {
+		t.Fatalf("parsed %d and %d targets, want 1 each", len(first), len(second))
+	}
+	want := models.BaseRecipient{Email: "bob@example.invalid", FirstName: "Bob"}
+	if second[0].BaseRecipient != want {
+		t.Fatalf("second file target = %+v, want %+v", second[0].BaseRecipient, want)
+	}
+}
+
 func TestParseCSVAcceptsSupportedContent(t *testing.T) {
 	tests := []struct {
 		name    string
@@ -378,16 +490,21 @@ func TestParseCSVFieldLimitOnlyRejectsImportedRecords(t *testing.T) {
 	}
 }
 
-// TestParseCSVFieldLimitCoversCarriedValues checks the limit still applies when
-// a record inherits an oversized value from an earlier, skipped record because
-// it does not carry that column itself.
-func TestParseCSVFieldLimitCoversCarriedValues(t *testing.T) {
+// TestParseCSVFieldLimitIgnoresSkippedRecords proves an oversized value in a
+// record that is skipped for an unusable address reaches neither the response
+// nor the record that follows it.
+func TestParseCSVFieldLimitIgnoresSkippedRecords(t *testing.T) {
 	content := fmt.Sprintf(
 		"Email,Last Name,First Name\nnot-an-address,Doe,%s\njane.roe@example.invalid,Roe\n",
 		strings.Repeat("a", MaxImportFieldCharacters+1),
 	)
-	if _, err := parseImportRequest(t, map[string]string{"targets.csv": content}); !errors.Is(err, ErrCSVFieldTooLong) {
-		t.Fatalf("ParseCSV() error = %v, want %v", err, ErrCSVFieldTooLong)
+	got, err := parseImportRequest(t, map[string]string{"targets.csv": content})
+	if err != nil {
+		t.Fatalf("ParseCSV() error = %v", err)
+	}
+	want := models.BaseRecipient{Email: "jane.roe@example.invalid", LastName: "Roe"}
+	if len(got) != 1 || got[0].BaseRecipient != want {
+		t.Fatalf("ParseCSV() = %+v, want a single %+v", got, want)
 	}
 }
 
@@ -629,6 +746,11 @@ func FuzzParseCSVTargets(f *testing.F) {
 	f.Add("column a,column b\nvalue a,value b\n")
 	f.Add("First Name,Last Name,Email\n")
 	f.Add("")
+	// Records that stop short of a mapped column: the shape that used to make a
+	// target inherit values, including the address, from the record before it.
+	f.Add("Email,First Name,Last Name,Position\nalice@example.invalid,Alice,Martin,Engineer\nbob@example.invalid,Bob\ncarol@example.invalid\n")
+	f.Add("First Name,Last Name,Email\nAlice,Martin,alice@example.invalid\nBob,Roe\nCarol,Doe,carol@example.invalid\n")
+	f.Add("First Name,Last Name,Email,Position\nAlice,Martin,alice@example.invalid,Engineer\nBob,Roe,bob@example.invalid,\n")
 
 	f.Fuzz(func(t *testing.T, content string) {
 		got, err := parseCSVTargets(strings.NewReader(content), MaxImportRecords)
@@ -645,7 +767,107 @@ func FuzzParseCSVTargets(f *testing.F) {
 				}
 			}
 		}
+		if err != nil {
+			return
+		}
+		// Row isolation: every target must match the one built from its own
+		// record alone. A value taken from an earlier record fails here.
+		want, referenceErr := referenceParseCSVTargets(content)
+		if referenceErr != nil {
+			return
+		}
+		if len(want) != len(got) {
+			t.Fatalf("parseCSVTargets() returned %d targets, want %d", len(got), len(want))
+		}
+		for i := range got {
+			if got[i].BaseRecipient != want[i] {
+				t.Fatalf("target %d = %+v, want %+v", i, got[i].BaseRecipient, want[i])
+			}
+		}
 	})
+}
+
+// referenceParseCSVTargets rebuilds the expected targets with an implementation
+// that has no state shared between records, so it can only ever describe a
+// record using that record's own values. It reproduces the success path only
+// and reports an error whenever the parser is allowed to reject the input.
+func referenceParseCSVTargets(content string) ([]models.BaseRecipient, error) {
+	reader := csv.NewReader(strings.NewReader(content))
+	reader.TrimLeadingSpace = true
+	reader.FieldsPerRecord = -1
+
+	header, err := reader.Read()
+	if err != nil {
+		return nil, err
+	}
+	if len(header) > MaxImportColumns {
+		return nil, ErrCSVTooManyColumns
+	}
+	indexes := map[string]int{"first": -1, "last": -1, "email": -1, "position": -1}
+	for i, value := range header {
+		switch {
+		case firstNameRegex.MatchString(value):
+			indexes["first"] = i
+		case lastNameRegex.MatchString(value):
+			indexes["last"] = i
+		case emailRegex.MatchString(value):
+			indexes["email"] = i
+		case positionRegex.MatchString(value):
+			indexes["position"] = i
+		}
+	}
+	mapped := false
+	for _, index := range indexes {
+		if index != -1 {
+			mapped = true
+		}
+	}
+	if !mapped {
+		return []models.BaseRecipient{}, nil
+	}
+
+	value := func(record []string, index int) string {
+		if index < 0 || index >= len(record) {
+			return ""
+		}
+		return record[index]
+	}
+
+	want := []models.BaseRecipient{}
+	for {
+		record, err := reader.Read()
+		if err == io.EOF {
+			break
+		}
+		if err != nil {
+			return nil, err
+		}
+		if len(record) > MaxImportColumns {
+			return nil, ErrCSVTooManyColumns
+		}
+		recipient := models.BaseRecipient{
+			FirstName: value(record, indexes["first"]),
+			LastName:  value(record, indexes["last"]),
+			Position:  value(record, indexes["position"]),
+		}
+		if indexes["email"] != -1 {
+			address, err := mail.ParseAddress(value(record, indexes["email"]))
+			if err != nil {
+				continue
+			}
+			recipient.Email = address.Address
+		}
+		for _, field := range []string{recipient.FirstName, recipient.LastName, recipient.Email, recipient.Position} {
+			if len([]rune(field)) > MaxImportFieldCharacters {
+				return nil, ErrCSVFieldTooLong
+			}
+		}
+		if len(want) >= MaxImportRecords {
+			return nil, ErrCSVTooManyRecords
+		}
+		want = append(want, recipient)
+	}
+	return want, nil
 }
 
 func isExpectedImportError(err error) bool {
