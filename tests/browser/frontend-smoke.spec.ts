@@ -856,41 +856,6 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   });
 
 
-  await test.step("datetimepicker opens with Font Awesome icons and toggles panes", async () => {
-    await page.getByRole("link", { name: "Campaigns", exact: true }).click();
-    await expect(page).toHaveURL(/\/campaigns$/);
-    await page.waitForFunction(() => typeof window.bootstrap !== "undefined");
-    await page.getByRole("button", { name: "New Campaign" }).click();
-    await expect(page.locator("#modal")).toHaveClass(/show/);
-
-    // Click on launch date input to open datetimepicker
-    const picker = page.locator(".bootstrap-datetimepicker-widget:visible");
-    await page.evaluate(() => {
-      const dateTimePicker = window.jQuery("#launch_date").data("DateTimePicker");
-      if (!dateTimePicker) {
-        throw new Error("Launch date DateTimePicker was not initialized");
-      }
-      dateTimePicker.show();
-    });
-    await expect(picker).toBeVisible();
-
-    // Verify Font Awesome icons (no glyphicon)
-    expect(await picker.locator(".fa").count()).toBeGreaterThan(0);
-    expect(await picker.locator("[class*=glyphicon]").count()).toBe(0);
-
-    // Verify date pane is initially visible (collapse show)
-    const datePaneVisible = await picker.locator("li.collapse.show .datepicker").count();
-    expect(datePaneVisible).toBe(1);
-
-    // Click the toggle action to switch to time pane
-    await picker.locator('[data-action="togglePicker"]').click();
-    await expect(picker.locator("li.collapse.show .timepicker")).toBeVisible();
-    await expect(picker.locator("li.collapse:not(.show) .datepicker")).toHaveCount(1);
-
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
-    await expect(page.locator("#modal")).not.toBeVisible();
-  });
-
   await test.step("nested modal stacking z-index is correct", async () => {
     await page.getByRole("button", { name: "New Campaign" }).click();
     await expect(page.locator("#modal")).toHaveClass(/show/);
@@ -1239,6 +1204,14 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       dateTimePicker.show();
     });
     await expect(picker).toBeVisible();
+
+    expect(await picker.locator(".fa").count()).toBeGreaterThan(0);
+    expect(await picker.locator("[class*=glyphicon]").count()).toBe(0);
+    await expect(picker.locator("li.collapse.show .datepicker")).toBeVisible();
+    await picker.locator('[data-action="togglePicker"]').click();
+    await expect(picker.locator("li.collapse.show .timepicker")).toBeVisible();
+    await picker.locator('[data-action="togglePicker"]').click();
+    await expect(picker.locator("li.collapse.show .datepicker")).toBeVisible();
 
     // Click a definitely different current-month day: scan the visible days
     // and pick the first one whose text does not match the currently
