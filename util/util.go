@@ -163,10 +163,6 @@ func parseCSVTargets(r io.Reader, maxRecords int) ([]models.Target, error) {
 	li := -1
 	ei := -1
 	pi := -1
-	fn := ""
-	ln := ""
-	ea := ""
-	ps := ""
 	for i, v := range record {
 		switch {
 		case firstNameRegex.MatchString(v):
@@ -196,21 +192,19 @@ func parseCSVTargets(r io.Reader, maxRecords int) ([]models.Target, error) {
 		if len(record) > MaxImportColumns {
 			return ts, ErrCSVTooManyColumns
 		}
-		if fi != -1 && len(record) > fi {
-			fn = record[fi]
-		}
-		if li != -1 && len(record) > li {
-			ln = record[li]
-		}
-		if ei != -1 && len(record) > ei {
-			csvEmail, err := mail.ParseAddress(record[ei])
+		// Every value is derived from this record alone. A column the record
+		// does not reach reads as empty, exactly like a column it carries
+		// empty, so a shorter record can never inherit the previous one.
+		fn := columnValue(record, fi)
+		ln := columnValue(record, li)
+		ps := columnValue(record, pi)
+		ea := ""
+		if ei != -1 {
+			csvEmail, err := mail.ParseAddress(columnValue(record, ei))
 			if err != nil {
 				continue
 			}
 			ea = csvEmail.Address
-		}
-		if pi != -1 && len(record) > pi {
-			ps = record[pi]
 		}
 		// Only a record that would become a target can fail the import, so a
 		// record skipped above never aborts the upload because of its length.
@@ -231,6 +225,16 @@ func parseCSVTargets(r io.Reader, maxRecords int) ([]models.Target, error) {
 		ts = append(ts, t)
 	}
 	return ts, nil
+}
+
+// columnValue returns the value a record carries for a mapped column. A column
+// the header does not declare, or that this record stops short of, reads as an
+// empty value rather than whatever an earlier record held.
+func columnValue(record []string, index int) string {
+	if index < 0 || index >= len(record) {
+		return ""
+	}
+	return record[index]
 }
 
 // checkImportFields rejects a target the columns could not store. Values are
