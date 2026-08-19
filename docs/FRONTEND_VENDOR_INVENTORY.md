@@ -8,6 +8,24 @@ the normal Yarn dependency graph. Generated files under `static/js/dist` and
 scripts under `static/js/src/app` and the project-specific stylesheets
 `main.css`, `dashboard.css`, and `docs.css` are first-party sources.
 
+## Update (jQuery modernization, 2026-08-19)
+
+- The vendored jQuery 1.10.2 runtime was replaced by the exact Yarn dependency
+  `jquery@3.7.1`. Its direct version satisfies the DataTables and jQuery UI
+  ranges, so Yarn resolves one package and the browser exposes one
+  `window.jQuery === window.$` instance.
+- The vendored jQuery UI Widget Factory 1.11.1 was replaced by
+  `jquery-ui@1.14.2`; only `ui/widget.js` is bundled for blueimp File Upload.
+  No jQuery UI CSS, theme, or other widget is distributed.
+- First-party jqXHR callbacks use `.done()`/`.fail()`/`.always()`.
+  DateTimePicker uses `.length` instead of removed `.size()`, and blueimp File
+  Upload uses jQuery 3 Deferred `.then()` instead of removed `.pipe()`.
+- jQuery Migrate 3.6.0 was evaluated but not added or shipped. Static analysis
+  identified the incompatibilities directly, and the production browser suite
+  completes with no JavaScript exception or console error.
+- Retire.js 5.4.3 progressed from 9 findings before migration, to 4 after the
+  jQuery core replacement, to 0 after Widget Factory 1.14.2.
+
 ## Update (Bootstrap 5 migration, 2026-08-19)
 
 Bootstrap and the DataTables Bootstrap integration moved from manually
@@ -68,14 +86,14 @@ exists.
 
 | Component | Version and evidence | Distribution | Usage and retained form | Provenance and license | Security and action |
 | --- | --- | --- | --- | --- | --- |
-| jQuery | 1.10.2, source banner | `static/js/src/vendor/jquery.js` | `USED` globally; minified-only historical copy | [jquery/jquery](https://github.com/jquery/jquery), MIT banner retained | `VULNERABLE`, `UNMAINTAINED`; migrate the legacy plug-in stack to jQuery 3.5+ |
+| jQuery | 1.10.2 — **superseded**: vendored copy deleted, replaced by exact Yarn dependency `jquery@3.7.1` (see Yarn-managed table below) | `static/js/src/vendor/jquery.js` (deleted) | Formerly used globally; now supplied from `node_modules/jquery/dist/jquery.js` as the single runtime instance | [jquery/jquery](https://github.com/jquery/jquery), MIT | Migrated to 3.7.1; CVE-2015-9251, CVE-2019-11358, CVE-2020-11022, CVE-2020-11023 remediated |
 | Bootstrap | JS 3.0.2; CSS and Glyphicons 3.3.7, file banners — **superseded**: removed, replaced by the exact Yarn dependency `bootstrap@5.3.8` (see update note above) | `bootstrap.min.js`, `bootstrap.min.css`, `static/font/glyphicons-*` (all deleted) | Formerly used for layout, modal, tabs, tooltip; minified-only | [twbs/bootstrap](https://github.com/twbs/bootstrap); JS Apache-2.0, CSS MIT, Glyphicons' Bootstrap-specific grant | Migrated; see `docs/BOOTSTRAP5_MIGRATION_BASELINE.md` |
 | normalize.css | 3.0.3, embedded banner | Embedded in `bootstrap.min.css` | `USED` as Bootstrap reset; minified-only | [necolas/normalize.css](https://github.com/necolas/normalize.css), MIT | `CLEAN`; keep with Bootstrap CSS |
 | D3 | 3.5.3, embedded `version` and exact npm package hash | `static/js/src/vendor/d3.min.js` | `LEGACY_BUT_REQUIRED` by Datamaps; minified-only | [d3/d3](https://github.com/d3/d3), BSD-3-Clause | `CLEAN`, old release line; migrate with Datamaps |
 | TopoJSON | 1.6.9, embedded `version` | `static/js/src/vendor/topojson.min.js` | `LEGACY_BUT_REQUIRED` by Datamaps; minified-only | [topojson/topojson](https://github.com/topojson/topojson), BSD-3-Clause | `CLEAN`, old release line; migrate with Datamaps |
 | Datamaps | `UNKNOWN`; hash does not match official npm 0.3.6 through 0.5.10 world bundles | `static/js/src/vendor/datamaps.min.js` | `USED` by the campaign-results map; minified-only | Historical import `a78e92a`; [markmarkoh/datamaps](https://github.com/markmarkoh/datamaps), MIT | `UNKNOWN_VERSION`, archived upstream; replace with a maintained map implementation |
 | DataTables datetime-moment plug-in | `UNKNOWN`; no version marker | `static/js/src/vendor/datetime-moment.js` | `USED` for date sorting; readable source retained | [DataTables plug-in](https://datatables.net/plug-ins/sorting/datetime-moment), MIT | `UNKNOWN_VERSION`, deprecated upstream; replace with DataTables' current date renderer |
-| jQuery UI Widget Factory | 1.11.1, source banner | `static/js/src/vendor/jquery.ui.widget.js` | `LEGACY_BUT_REQUIRED` by blueimp File Upload; readable source retained | [jquery/jquery-ui](https://github.com/jquery/jquery-ui), MIT | Retire.js matches four advisories for absent Datepicker, Position, and Checkboxradio modules: `NOT_APPLICABLE`; migrate with file upload |
+| jQuery UI Widget Factory | 1.11.1 — **superseded**: vendored copy deleted, replaced by exact Yarn dependency `jquery-ui@1.14.2` (only `ui/widget.js` is bundled) | `static/js/src/vendor/jquery.ui.widget.js` (deleted) | Widget Factory module only; required by blueimp File Upload | [jquery/jquery-ui](https://github.com/jquery/jquery-ui), MIT | Migrated to 1.14.2; Retire.js advisories (Datepicker/Position/Checkboxradio) remain `NOT_APPLICABLE` as those modules are not bundled |
 | blueimp jQuery File Upload | 5.42.3; iframe transport 1.8.3, source banners | `jquery.fileupload.js`, `jquery.iframe-transport.js` | `USED` by group CSV import; readable source retained | [blueimp/jQuery-File-Upload](https://github.com/blueimp/jQuery-File-Upload), MIT | Browser modules have no applicable advisory; CVE-2018-9206 affected upstream server handlers, which are not shipped; migrate with jQuery |
 | SweetAlert2 | 8.17.1, exact npm package hash | `sweetalert2.min.js`, `sweetalert2.min.css` | `USED` for confirmations and status dialogs; minified-only | [sweetalert2/sweetalert2](https://github.com/sweetalert2/sweetalert2), MIT | `CLEAN`, old major; preserve pending UI-stack migration |
 | Bootstrap DateTimePicker | JS 4.17.37; CSS 4.15.35, banners | `bootstrap-datetime.js`, `bootstrap-datetime.css` | `USED` for campaign scheduling; readable JS, CSS source; locally modified: Collapse calls use native Bootstrap 5 API (`bootstrap.Collapse.getOrCreateInstance`), default icons changed from Glyphicon to Font Awesome | [Eonasdan/bootstrap-datetimepicker](https://github.com/Eonasdan/bootstrap-datetimepicker), MIT | `UNMAINTAINED`; mismatched patch versions, no applicable advisory found; migrate with Bootstrap |
@@ -98,10 +116,12 @@ them in a fixed order, and emits their complete license texts in
 
 | Component | Version | Usage | License | Audit status |
 | --- | --- | --- | --- | --- |
+| jQuery | 3.7.1 | Single global runtime instance for legacy plugins (DataTables, Select2, DateTimePicker, blueimp File Upload); the exact direct dependency naturally satisfies and deduplicates all transitive ranges | MIT | `CLEAN`; remediates CVE-2015-9251, CVE-2019-11358, CVE-2020-11022, CVE-2020-11023 from 1.10.2 |
+| jQuery UI Widget Factory | 1.14.2 (only `ui/widget.js` bundled) | Required by blueimp File Upload; no CSS/theme/other widgets included | MIT | `CLEAN`; Retire.js advisories for Datepicker/Position/Checkboxradio are `NOT_APPLICABLE` |
 | Chart.js / `@kurkle/color` | 4.5.1 / 0.3.4 | Dashboard and campaign charts | MIT | `CLEAN` |
 | chartjs-plugin-zoom / Hammer.JS | 2.2.0 / 2.0.8 | Timeline pan and zoom | MIT | `CLEAN` |
 | Bootstrap / Popper | 5.3.8 / 2.11.8 | Global layout, navbar, modal, tabs, dropdown, tooltip | MIT | `CLEAN`; exact Yarn dependencies replacing the manually vendored Bootstrap 3 JS/CSS above |
-| DataTables / Bootstrap 5 integration (`datatables.net-bs5`) | 1.13.11 | Admin tables | MIT | `CLEAN`; `jquery@4.0.0` is a lockfile-only transitive dependency and is not bundled because browser mode uses the existing global jQuery |
+| DataTables / Bootstrap 5 integration (`datatables.net-bs5`) | 1.13.11 | Admin tables | MIT | `CLEAN`; its jQuery range resolves to the single direct `jquery@3.7.1` installation |
 | Moment.js | 2.30.1 | Date parsing and formatting | MIT | `CLEAN`, maintenance mode |
 | Papa Parse | 5.6.0 | CSV import and export | MIT | `CLEAN` |
 | Select2 | 4.0.13 | Campaign and role selectors | MIT | `CLEAN` |
@@ -109,9 +129,9 @@ them in a fixed order, and emits their complete license texts in
 | zxcvbn | 4.4.2 | Password-strength feedback | MIT | `CLEAN`, old release |
 | CodeMirror / Lezer | CodeMirror packages 6.x; Lezer packages 1.x, exact versions in `yarn.lock` | Canonical full-document HTML source editing, syntax highlighting, search, keyboard commands, and GophishFR placeholder completion | MIT | `CLEAN`; self-hosted Webpack bundle, no remote service or license key |
 
-Yarn audit reports zero advisories across 112 resolved dependencies. A
+Yarn audit reports zero advisories across 114 resolved dependencies. A
 temporary npm resolution, created outside the worktree without retaining a
-`package-lock.json`, reports zero advisories across 108 dependencies. GitHub
+`package-lock.json`, reports zero advisories across 109 dependencies. GitHub
 reports zero open Dependabot alerts.
 
 ## Changes made by this audit
@@ -136,12 +156,12 @@ bundle, or runtime reference is distributed.
 
 ## Known findings and deferred migrations
 
-Before this migration, Retire.js 5.4.3 reported 16 source signatures: 14
-medium and 2 low across Bootstrap, jQuery, and jQuery UI Widget Factory. After
-removing Bootstrap 3, it reports 9 source signatures: 8 medium and 1 low, all
-limited to jQuery and jQuery UI. No Bootstrap finding remains. The four jQuery
-UI findings are false component matches because the affected widgets are
-absent. Retire.js reports no critical or high-severity finding.
+Before the Bootstrap migration, Retire.js 5.4.3 reported 16 source signatures:
+14 medium and 2 low across Bootstrap, jQuery, and jQuery UI. Bootstrap removal
+reduced that baseline to 9 findings (8 medium, 1 low). Replacing jQuery core
+reduced it to the 4 Widget Factory false-component matches, and replacing
+Widget Factory 1.11.1 with 1.14.2 reduced the final runtime-source scan to
+zero findings.
 
 ### CKEditor 4.11.1
 
@@ -151,12 +171,30 @@ read-only iframe provides visual preview with scripts, same-origin access,
 forms, navigation, and external resources disabled. The candidate and security
 analysis is documented in `docs/HTML_EDITOR_MIGRATION.md`.
 
-### jQuery 1.10.2
+### jQuery 1.10.2 → 3.7.1 (migrated)
 
-Applicable findings include CVE-2015-9251, CVE-2019-11358,
-CVE-2020-11022, and CVE-2020-11023. The latter two are fixed in jQuery 3.5.0.
-The application and all legacy plug-ins require compatibility testing across
-that major-version jump.
+Applicable findings CVE-2015-9251, CVE-2019-11358, CVE-2020-11022, and
+CVE-2020-11023 are all remediated by upgrading to jQuery 3.7.1 (the
+compatibility bridge release). First-party `.success()`/`.error()`/`.complete()`
+calls replaced with `.done()`/`.fail()`/`.always()`. Vendored DateTimePicker
+`.size()` replaced with `.length`. Vendored blueimp File Upload `.pipe()`
+replaced with `.then()`. Select2 4.0.13, DataTables 1.13.11, DateTimePicker
+4.17.37, and blueimp File Upload 5.42.3 confirmed compatible under jQuery 3.7.1.
+
+jQuery Migrate 3.6.0 was evaluated as a temporary diagnostic option but was
+not added or loaded: the static audit identified the removed APIs directly,
+and production-representative Playwright coverage runs with zero JavaScript
+exception or console error. No Migrate code is present in the runtime,
+manifest, lockfile, or test dependencies.
+
+**JQUERY4_BLOCKED reasons** (preliminary):
+- Select2 4.0.13: uses internal jQuery APIs removed in 4.x (`$.expr[':']`)
+- blueimp File Upload: depends on Widget Factory and Deferred patterns
+- DateTimePicker: unmaintained, uses deprecated `$.isFunction` removed in 4.x
+- DataTables 1.x: uses `$.camelCase` and other internals removed in 4.x
+- jQuery UI Widget Factory: the 1.14.x line supports jQuery <5 but 4.x requires
+  testing all consumers
+- Resolution: remain on 3.7.1 until plugin majors are upgraded or replaced
 
 ### Bootstrap JS 3.0.2
 
@@ -184,14 +222,15 @@ CVE-2024-6485. The durable remediation is a supported Bootstrap migration.
 
 ## Reproducibility
 
-The Bootstrap 5 frontend build contains 19 generated files and 2,933,334
-bytes. The pre-migration build contained the same 19 files and 2,858,432
-bytes, for a 74,902-byte increase. Two independent immutable installations
-and clean builds produced the same per-file hashes, left `yarn.lock`
-unchanged, and produced this aggregate SHA-256 manifest:
+The jQuery 3.7.1 frontend build contains 19 generated files and 2,932,107
+bytes, 1,227 bytes smaller than the Bootstrap 5 pre-jQuery baseline of
+2,933,334 bytes. The vendor bundle decreased from 1,115,960 to 1,111,872
+bytes. Two independent immutable installations and clean builds produced the
+same per-file hashes, left `yarn.lock` unchanged, and produced this aggregate
+SHA-256 manifest:
 
 ```text
-186509d8f87341b50bf7051d8d44f817376bff49b66074883f9b357d92fa4323
+dd6c25dc3755a89f745cb2eede9c15fc5ebc7dd0f5bda60b281abe5d9647029b
 ```
 
 Webpack reports performance-budget warnings for the approximately 532 KiB

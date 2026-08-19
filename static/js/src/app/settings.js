@@ -2,12 +2,12 @@ $(document).ready(function () {
     bsInitTooltips();
     $("#apiResetForm").submit(function (e) {
         api.reset()
-            .success(function (response) {
+            .done(function (response) {
                 user.api_key = response.data
                 successFlash(response.message)
                 $("#api_key").val(user.api_key)
             })
-            .error(function (data) {
+            .fail(function (data) {
                 errorFlash(data.message)
             })
         return false
@@ -69,7 +69,7 @@ $(document).ready(function () {
                     errorFlash("Unable to update IMAP settings.")
                 }
             })
-            .success(function (data){
+            .done(function (data){
                 loadIMAPSettings()
             })
             .fail(function (data) {
@@ -197,7 +197,7 @@ $(document).ready(function () {
 
     function loadIMAPSettings(){
         api.IMAP.get()
-        .success(function (imap) {
+        .done(function (imap) {
             if (imap.length == 0){
                 $('#lastlogindiv').hide()
             } else {
@@ -223,7 +223,7 @@ $(document).ready(function () {
             }
 
         })
-        .error(function () {
+        .fail(function () {
             errorFlash("Error fetching IMAP settings")
         })
     }

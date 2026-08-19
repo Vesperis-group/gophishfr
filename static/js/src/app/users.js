@@ -20,26 +20,26 @@ const save = (id) => {
         // we need to PUT /user/:id
         user.id = id
         api.userId.put(user)
-            .success((data) => {
+            .done((data) => {
                 successFlash("User " + escapeHtml(user.username) + " updated successfully!")
                 load()
                 dismiss()
                 bsModalHide("#modal")
             })
-            .error((data) => {
+            .fail((data) => {
                 modalError(data.responseJSON.message)
             })
     } else {
         // Else, if this is a new user, POST it
         // to /user
         api.users.post(user)
-            .success((data) => {
+            .done((data) => {
                 successFlash("User " + escapeHtml(user.username) + " registered successfully!")
                 load()
                 dismiss()
                 bsModalHide("#modal")
             })
-            .error((data) => {
+            .fail((data) => {
                 modalError(data.responseJSON.message)
             })
     }
@@ -68,7 +68,7 @@ const edit = (id) => {
     } else {
         $("#userModalLabel").text("Edit User")
         api.userId.get(id)
-            .success((user) => {
+            .done((user) => {
                 $("#username").val(user.username)
                 $("#role").val(user.role.slug)
                 $("#role").trigger("change")
@@ -78,7 +78,7 @@ const edit = (id) => {
                     $("#username").attr("disabled", true);
                 }
             })
-            .error(function () {
+            .fail(function () {
                 errorFlash("Error fetching user")
             })
     }
@@ -110,10 +110,10 @@ const deleteUser = (id) => {
         preConfirm: function () {
             return new Promise((resolve, reject) => {
                 api.userId.delete(id)
-                    .success((msg) => {
+                    .done((msg) => {
                         resolve()
                     })
-                    .error((data) => {
+                    .fail((data) => {
                         reject(data.responseJSON.message)
                     })
             })
@@ -189,7 +189,7 @@ const load = () => {
     $("#userTable").hide()
     $("#loading").show()
     api.users.get()
-        .success((us) => {
+        .done((us) => {
             users = us
             $("#loading").hide()
             $("#userTable").show()
@@ -225,7 +225,7 @@ const load = () => {
             })
             userTable.rows.add(userRows).draw();
         })
-        .error(() => {
+        .fail(() => {
             errorFlash("Error fetching users")
         })
 }

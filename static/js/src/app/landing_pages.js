@@ -18,7 +18,7 @@ function save(idx) {
     if (idx != -1) {
         page.id = pages[idx].id
         api.pageId.put(page)
-            .success(function (data) {
+            .done(function (data) {
                 successFlash("Page edited successfully!")
                 load()
                 dismiss()
@@ -26,12 +26,12 @@ function save(idx) {
     } else {
         // Submit the page
         api.pages.post(page)
-            .success(function (data) {
+            .done(function (data) {
                 successFlash("Page added successfully!")
                 load()
                 dismiss()
             })
-            .error(function (data) {
+            .fail(function (data) {
                 modalError(data.responseJSON.message)
             })
     }
@@ -67,10 +67,10 @@ var deletePage = function (idx) {
         preConfirm: function () {
             return new Promise(function (resolve, reject) {
                 api.pageId.delete(pages[idx].id)
-                    .success(function (msg) {
+                    .done(function (msg) {
                         resolve()
                     })
-                    .error(function (data) {
+                    .fail(function (data) {
                         reject(data.responseJSON.message)
                     })
             })
@@ -98,12 +98,12 @@ function importSite() {
                 url: url,
                 include_resources: false
             })
-            .success(function (data) {
+            .done(function (data) {
                 htmlEditor.setData(data.html)
                 htmlEditor.showPreview()
                 bsModalHide("#importSiteModal")
             })
-            .error(function (data) {
+            .fail(function (data) {
                 modalError(data.responseJSON.message)
             })
     }
@@ -153,7 +153,7 @@ function load() {
     $("#emptyMessage").hide()
     $("#loading").show()
     api.pages.get()
-        .success(function (ps) {
+        .done(function (ps) {
             pages = ps
             $("#loading").hide()
             if (pages.length > 0) {
@@ -188,7 +188,7 @@ function load() {
                 $("#emptyMessage").show()
             }
         })
-        .error(function () {
+        .fail(function () {
             $("#loading").hide()
             errorFlash("Error fetching pages")
         })

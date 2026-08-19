@@ -39,6 +39,28 @@ type HTMLEditorRegistry = {
   get: (id: string) => HTMLEditorHandle | undefined;
 };
 
+// Minimal shape of a jQuery jqXHR-derived deferred, matching what
+// static/js/src/app/gophish.js's query() (a $.ajax() wrapper) returns and
+// what static/js/src/app/groups.js consumes via .done()/.fail().
+type JQueryDeferredLike<T> = {
+  done: (callback: (data: T) => void) => JQueryDeferredLike<T>;
+  fail: (callback: (jqXHR: { responseJSON?: { message?: string } }) => void) => JQueryDeferredLike<T>;
+};
+
+type GroupSummary = {
+  id: number;
+  name: string;
+};
+
+type GophishGroupsApi = {
+  groupId: {
+    delete: (id: number) => JQueryDeferredLike<{ message?: string }>;
+  };
+  groups: {
+    get: () => JQueryDeferredLike<GroupSummary[]>;
+  };
+};
+
 const seededEmailHTML =
   '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{{.FirstName}} browser fixture</title><style>.browser-cta{color:#123456!important;background-image:url(https://preview.invalid/background.png)}</style></head><body class="email-body" data-fixture="editor-round-trip"><table role="presentation" style="border-collapse:collapse;width:100%"><tr><td><p>Hello <strong>{{.FirstName}}</strong></p><a id="browser-cta" class="browser-cta" data-rid="{{.RId}}" aria-label="Open for {{.FirstName}}" href="{{.URL}}?rid={{.RId}}">Open</a><img src="https://preview.invalid/pixel.png" onerror="window.__previewHandlerExecuted=true" alt="Tracking pixel"><script>window.__previewScriptExecuted=true</script>{{.Tracker}}</td></tr></table></body></html>';
 
@@ -1056,6 +1078,199 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     const barClasses = await strengthBar.getAttribute("class");
     expect(barClasses).toMatch(/bg-(success|warning|danger)/);
     await expect(page.locator("#password-strength-description")).not.toBeEmpty();
+    await page.locator('#modal [data-bs-dismiss="modal"]').first().click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+  });
+
+  await test.step("blueimp CSV file upload: rejected extension and successful CSV import", async () => {
+    await page.getByRole("link", { name: "Users & Groups" }).click();
+    await expect(page).toHaveURL(/\/groups$/);
+    await page.getByRole("button", { name: "New Group" }).click();
+    await expect(page.locator("#modal")).toBeVisible();
+
+    // Rejected extension: try uploading a .exe file (should not populate targets)
+    const fileInput = page.locator('#modal input[type="file"]');
+    const targetsBeforeExe = await page.locator("#targetsTable tbody tr").count();
+    await fileInput.setInputFiles({
+      name: "malicious.exe",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from("MZ fake executable content"),
+    });
+    // The file upload should not add rows to the target table for invalid extensions
+    await page.waitForTimeout(500);
+    const targetsAfterExe = await page.locator("#targetsTable tbody tr").count();
+    expect(targetsAfterExe).toBe(targetsBeforeExe);
+
+    // Successful CSV import with valid data
+    const csvContent = "First Name,Last Name,Email,Position\nCSVTest,User,csvtest@localhost.invalid,Tester\nCSVSecond,Person,csvsecond@localhost.invalid,Dev";
+    await fileInput.setInputFiles({
+      name: "targets.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(csvContent),
+    });
+    await expect(page.locator("#targetsTable")).toContainText("csvtest@localhost.invalid");
+    await expect(page.locator("#targetsTable")).toContainText("csvsecond@localhost.invalid");
+    await expect(page.locator("#targetsTable")).toContainText("CSVTest");
+
+    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+  });
+
+  await test.step("AJAX save/update path with synthetic fixture data", async () => {
+    // Drive the real first-party UI flow on /groups so the group is actually
+    // created through api.groups.post(...).done/.fail inside groups.js, not
+    // a raw fetch() that bypasses the jQuery AJAX client entirely.
+    const groupName = `BrowserTestGroup_${Date.now()}`;
+
+    await page.getByRole("button", { name: "New Group" }).click();
+    await expect(page.locator("#modal")).toBeVisible();
+    await page.locator("#name").fill(groupName);
+    await page.locator("#firstName").fill("Ajax");
+    await page.locator("#lastName").fill("Test");
+    await page.locator("#email").fill("ajaxtest@localhost.invalid");
+    await page.locator("#position").fill("Fixture");
+    await page.locator("#targetForm").getByRole("button", { name: "Add" }).click();
+    await expect(page.locator("#targetsTable")).toContainText("ajaxtest@localhost.invalid");
+
+    await page.locator("#modalSubmit").click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+    await expect(page.locator("#groupTable")).toContainText(groupName);
+
+    // Discover the created group's id through the first-party window.api
+    // client (the same jqXHR-backed client groups.js uses), wrapping its
+    // .done()/.fail() callbacks in a native Promise so Playwright can await it.
+    const groupId = await page.evaluate(
+      (name) =>
+        new Promise<number>((resolve, reject) => {
+          const api = (window as Window & { api: GophishGroupsApi }).api;
+          api.groups
+            .get()
+            .done((groups) => {
+              const created = groups.find((group) => group.name === name);
+              if (created) {
+                resolve(created.id);
+              } else {
+                reject(new Error(`Group "${name}" not found via api.groups.get()`));
+              }
+            })
+            .fail((jqXHR) => {
+              reject(new Error(jqXHR.responseJSON?.message ?? "api.groups.get() request failed"));
+            });
+        }),
+      groupName,
+    );
+    expect(Number.isInteger(groupId)).toBe(true);
+
+    // Cleanup via the same first-party jqXHR-backed client, also wrapped in
+    // a native Promise.
+    await page.evaluate(
+      (id) =>
+        new Promise<void>((resolve, reject) => {
+          const api = (window as Window & { api: GophishGroupsApi }).api;
+          api.groupId
+            .delete(id)
+            .done(() => resolve())
+            .fail((jqXHR) => {
+              reject(new Error(jqXHR.responseJSON?.message ?? "api.groupId.delete() request failed"));
+            });
+        }),
+      groupId,
+    );
+  });
+
+  await test.step("Select2 keyboard search and multi-select behavior", async () => {
+    await page.getByRole("link", { name: "Campaigns", exact: true }).click();
+    await expect(page).toHaveURL(/\/campaigns$/);
+    await page.getByRole("button", { name: "New Campaign" }).click();
+    await expect(page.locator("#modal")).toHaveClass(/show/);
+
+    // Select2 keyboard search on the sending profile single-select
+    const profileContainer = page.locator('select#profile + .select2-container, select#profile ~ .select2-container').first();
+    await profileContainer.click();
+    await expect(page.locator('.select2-dropdown')).toBeVisible();
+    // Type a search query
+    await page.locator('.select2-search__field').fill("Browser Fixture");
+    await expect(page.locator('.select2-results__option')).toContainText("Browser Fixture Sending Profile");
+    // Select via Enter key
+    await page.keyboard.press("Enter");
+    await expect(profileContainer.locator('.select2-selection__rendered')).toContainText('Browser Fixture Sending Profile');
+
+    // Multi-select keyboard behavior on groups
+    const groupContainer = page.locator('select#users + .select2-container, select#users ~ .select2-container').first();
+    await groupContainer.click();
+    await expect(page.locator('.select2-dropdown')).toBeVisible();
+    await page.locator('.select2-search__field').fill("Browser");
+    await expect(page.locator('.select2-results__option')).toContainText("Browser Fixture Group");
+    await page.keyboard.press("Enter");
+    // Verify the selection appears as a tag in multi-select
+    await expect(groupContainer.locator('.select2-selection__choice')).toContainText("Browser Fixture Group");
+
+    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+  });
+
+  await test.step("DateTimePicker value update and interaction", async () => {
+    await page.getByRole("button", { name: "New Campaign" }).click();
+    await expect(page.locator("#modal")).toHaveClass(/show/);
+
+    // The launch_date should have a value (auto-populated)
+    const initialValue = await page.locator("#launch_date").inputValue();
+    expect(initialValue.length).toBeGreaterThan(0);
+    // format is "MMMM Do YYYY, h:mm a" (e.g. "June 15th 2024, 2:30 pm"); the
+    // datepicker's day cells render the bare day number (see currentDate.date()
+    // in static/js/src/vendor/bootstrap-datetime.js), so strip the ordinal
+    // suffix to compare against cell text.
+    const initialDayMatch = initialValue.match(/\b(\d{1,2})(?:st|nd|rd|th)\b/);
+    expect(initialDayMatch).not.toBeNull();
+    const initialDay = initialDayMatch === null ? "" : initialDayMatch[1];
+
+    // Click the datetimepicker to open it
+    await page.locator("#launch_date").click();
+    const picker = page.locator(".bootstrap-datetimepicker-widget");
+    await expect(picker).toBeVisible();
+
+    // Click a definitely different current-month day: scan the visible days
+    // and pick the first one whose text does not match the currently
+    // selected day, instead of a fixed index that could coincide with it (or
+    // not exist), so the change-detection assertion always runs.
+    const currentMonthDays = picker.locator(".datepicker-days td.day:not(.old):not(.new)");
+    const dayCount = await currentMonthDays.count();
+    expect(dayCount).toBeGreaterThan(1);
+    const dayTexts: string[] = [];
+    for (let i = 0; i < dayCount; i += 1) {
+      dayTexts.push((await currentMonthDays.nth(i).innerText()).trim());
+    }
+    const targetIndex = dayTexts.findIndex((text) => text !== initialDay);
+    expect(targetIndex).toBeGreaterThanOrEqual(0);
+
+    await currentMonthDays.nth(targetIndex).click();
+    const updatedValue = await page.locator("#launch_date").inputValue();
+    expect(updatedValue.length).toBeGreaterThan(0);
+    // Value must differ from initial: a different day was definitely selected.
+    expect(updatedValue).not.toBe(initialValue);
+
+    // Verify the widget data object is functional
+    const dpData = await page.evaluate(() => {
+      const dp = window.jQuery("#launch_date").data("DateTimePicker");
+      return {
+        exists: dp !== undefined,
+        hasDate: dp?.date() !== undefined && dp?.date() !== null,
+      };
+    });
+    expect(dpData.exists).toBe(true);
+    expect(dpData.hasDate).toBe(true);
+
+    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+  });
+
+  await test.step("jQuery 3.7.1 runtime identity confirmed", async () => {
+    const jQueryInfo = await page.evaluate(() => ({
+      version: window.jQuery.fn.jquery,
+      singleInstance: window.jQuery === window.$,
+    }));
+    expect(jQueryInfo.version).toBe("3.7.1");
+    expect(jQueryInfo.singleInstance).toBe(true);
   });
 
   expect(pageErrors).toEqual([]);
