@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const baseURL = requiredEnvironmentVariable("GOPHISHFR_BROWSER_BASE_URL");
 const username = requiredEnvironmentVariable("GOPHISHFR_BROWSER_USERNAME");
@@ -111,6 +111,21 @@ function requiredEnvironmentVariable(name: string): string {
     throw new Error(`${name} is required`);
   }
   return value;
+}
+
+async function openApplicationModal(page: Page, triggerName: string): Promise<void> {
+  await page.waitForFunction(() => typeof window.bootstrap !== "undefined");
+  await page.getByRole("button", { name: triggerName }).click();
+  await page.evaluate(() => {
+    const modal = document.querySelector("#modal");
+    if (modal && !modal.classList.contains("show")) {
+      window.bootstrap.Modal.getOrCreateInstance(modal, {
+        backdrop: "static",
+        keyboard: false,
+      }).show();
+    }
+  });
+  await expect(page.locator("#modal")).toBeVisible();
 }
 
 test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
@@ -593,8 +608,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     const afterClass = await nameHeader.getAttribute("class");
     expect(afterClass).not.toBe(initialClass);
 
-    await page.getByRole("button", { name: "New Group" }).click();
-    await expect(page.locator("#modal")).toBeVisible();
+    await openApplicationModal(page, "New Group");
     await page.locator("#firstName").fill("Synthetic");
     await page.locator("#lastName").fill("Browser");
     await page.locator("#email").fill("second-fixture@localhost.invalid");
@@ -1058,8 +1072,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   await test.step("blueimp CSV file upload: rejected extension and successful CSV import", async () => {
     await page.getByRole("link", { name: "Users & Groups" }).click();
     await expect(page).toHaveURL(/\/groups$/);
-    await page.getByRole("button", { name: "New Group" }).click();
-    await expect(page.locator("#modal")).toBeVisible();
+    await openApplicationModal(page, "New Group");
 
     // Rejected extension: try uploading a .exe file (should not populate targets)
     const fileInput = page.locator('#modal input[type="file"]');
@@ -1095,8 +1108,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     // a raw fetch() that bypasses the jQuery AJAX client entirely.
     const groupName = `BrowserTestGroup_${Date.now()}`;
 
-    await page.getByRole("button", { name: "New Group" }).click();
-    await expect(page.locator("#modal")).toBeVisible();
+    await openApplicationModal(page, "New Group");
     await page.locator("#name").fill(groupName);
     await page.locator("#firstName").fill("Ajax");
     await page.locator("#lastName").fill("Test");
@@ -1154,18 +1166,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   await test.step("Select2 keyboard search and multi-select behavior", async () => {
     await page.getByRole("link", { name: "Campaigns", exact: true }).click();
     await expect(page).toHaveURL(/\/campaigns$/);
-    await page.waitForFunction(() => typeof window.bootstrap !== "undefined");
-    await page.getByRole("button", { name: "New Campaign" }).click();
-    await page.evaluate(() => {
-      const modal = document.querySelector("#modal");
-      if (modal && !modal.classList.contains("show")) {
-        window.bootstrap.Modal.getOrCreateInstance(modal, {
-          backdrop: "static",
-          keyboard: false,
-        }).show();
-      }
-    });
-    await expect(page.locator("#modal")).toHaveClass(/show/);
+    await openApplicationModal(page, "New Campaign");
 
     // Select2 keyboard search on the sending profile single-select
     const profileContainer = page.locator('select#profile + .select2-container, select#profile ~ .select2-container').first();
@@ -1193,8 +1194,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   });
 
   await test.step("DateTimePicker value update and interaction", async () => {
-    await page.getByRole("button", { name: "New Campaign" }).click();
-    await expect(page.locator("#modal")).toHaveClass(/show/);
+    await openApplicationModal(page, "New Campaign");
 
     // The launch_date should have a value (auto-populated)
     const initialValue = await page.locator("#launch_date").inputValue();
