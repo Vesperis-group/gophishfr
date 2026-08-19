@@ -561,16 +561,31 @@ table.dataTable {
     cursor: pointer;
 }
 
-.cke_chrome {
-    border-top: 0 !important;
+.gophish-editor-tabs {
+    margin-bottom: 10px;
 }
 
-.cke_autocomplete_panel {
-    width: 400px !important;
+.gophish-code-editor {
+    border: 1px solid #ccc;
+    border-radius: 4px;
 }
 
-.cke_autocomplete_panel>li {
-    padding: 10px 5px !important;
+.gophish-code-editor .cm-editor {
+    min-height: 360px;
+    max-height: 60vh;
+}
+
+.gophish-code-editor .cm-scroller {
+    font-family: "Courier New", monospace;
+    overflow: auto;
+}
+
+.gophish-html-editor iframe[data-editor-preview] {
+    background: #fff;
+    border: 1px solid #ccc;
+    border-radius: 4px;
+    height: 420px;
+    width: 100%;
 }
 
 #password-strength {

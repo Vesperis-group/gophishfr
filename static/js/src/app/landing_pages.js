@@ -4,14 +4,14 @@
 	Author: Jordan Wright <github.com/jordan-wright>
 */
 var pages = []
+var htmlEditor
 
 
 // Save attempts to POST to /templates/
 function save(idx) {
     var page = {}
     page.name = $("#name").val()
-    editor = CKEDITOR.instances["html_editor"]
-    page.html = editor.getData()
+    page.html = htmlEditor.getData()
     page.capture_credentials = $("#capture_credentials_checkbox").prop("checked")
     page.capture_passwords = $("#capture_passwords_checkbox").prop("checked")
     page.redirect_url = $("#redirect_url_input").val()
@@ -41,6 +41,10 @@ function dismiss() {
     $("#modal\\.flashes").empty()
     $("#name").val("")
     $("#html_editor").val("")
+    if (htmlEditor) {
+        htmlEditor.setData("")
+        htmlEditor.showSource()
+    }
     $("#url").val("")
     $("#redirect_url_input").val("")
     $("#modal").find("input[type='checkbox']").prop("checked", false)
@@ -95,8 +99,8 @@ function importSite() {
                 include_resources: false
             })
             .success(function (data) {
-                $("#html_editor").val(data.html)
-                CKEDITOR.instances["html_editor"].setMode('wysiwyg')
+                htmlEditor.setData(data.html)
+                htmlEditor.showPreview()
                 $("#importSiteModal").modal("hide")
             })
             .error(function (data) {
@@ -109,14 +113,13 @@ function edit(idx) {
     $("#modalSubmit").unbind('click').click(function () {
         save(idx)
     })
-    $("#html_editor").ckeditor()
-    setupAutocomplete(CKEDITOR.instances["html_editor"])
+    htmlEditor = GophishHTMLEditor.create("html_editor")
     var page = {}
     if (idx != -1) {
         $("#modalLabel").text("Edit Landing Page")
         page = pages[idx]
         $("#name").val(page.name)
-        $("#html_editor").val(page.html)
+        htmlEditor.setData(page.html)
         $("#capture_credentials_checkbox").prop("checked", page.capture_credentials)
         $("#capture_passwords_checkbox").prop("checked", page.capture_passwords)
         $("#redirect_url_input").val(page.redirect_url)
@@ -126,17 +129,20 @@ function edit(idx) {
         }
     } else {
         $("#modalLabel").text("New Landing Page")
+        htmlEditor.setData("")
     }
+    htmlEditor.showSource()
 }
 
 function copy(idx) {
     $("#modalSubmit").unbind('click').click(function () {
         save(-1)
     })
-    $("#html_editor").ckeditor()
+    htmlEditor = GophishHTMLEditor.create("html_editor")
     var page = pages[idx]
     $("#name").val("Copy of " + page.name)
-    $("#html_editor").val(page.html)
+    htmlEditor.setData(page.html)
+    htmlEditor.showSource()
 }
 
 function load() {
@@ -212,21 +218,6 @@ $(document).ready(function () {
         $('.modal-backdrop').not('.fv-modal-stack').css('z-index', 1039 + (10 * $('body').data('fv_open_modals')));
         $('.modal-backdrop').not('fv-modal-stack').addClass('fv-modal-stack');
     });
-    $.fn.modal.Constructor.prototype.enforceFocus = function () {
-        $(document)
-            .off('focusin.bs.modal') // guard against infinite focus loop
-            .on('focusin.bs.modal', $.proxy(function (e) {
-                if (
-                    this.$element[0] !== e.target && !this.$element.has(e.target).length
-                    // CKEditor compatibility fix start.
-                    &&
-                    !$(e.target).closest('.cke_dialog, .cke').length
-                    // CKEditor compatibility fix end.
-                ) {
-                    this.$element.trigger('focus');
-                }
-            }, this));
-    };
     // Scrollbar fix - https://stackoverflow.com/questions/19305821/multiple-modals-overlay
     $(document).on('hidden.bs.modal', '.modal', function () {
         $('.modal:visible').length && $(document.body).addClass('modal-open');
@@ -238,21 +229,5 @@ $(document).ready(function () {
         $("#capture_passwords").toggle()
         $("#redirect_url").toggle()
     })
-    CKEDITOR.on('dialogDefinition', function (ev) {
-        // Take the dialog name and its definition from the event data.
-        var dialogName = ev.data.name;
-        var dialogDefinition = ev.data.definition;
-
-        // Check if the definition is from the dialog window you are interested in (the "Link" dialog window).
-        if (dialogName == 'link') {
-            dialogDefinition.minWidth = 500
-            dialogDefinition.minHeight = 100
-
-            // Remove the linkType field
-            var infoTab = dialogDefinition.getContents('info');
-            infoTab.get('linkType').hidden = true;
-        }
-    });
-
     load()
 })

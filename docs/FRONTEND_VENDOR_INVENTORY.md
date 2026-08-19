@@ -1,6 +1,6 @@
 # Frontend third-party inventory
 
-Audit date: 2026-08-18
+Audit date: 2026-08-19
 
 This inventory covers browser libraries and precompiled assets shipped outside
 the normal Yarn dependency graph. Generated files under `static/js/dist` and
@@ -44,7 +44,6 @@ exists.
 | Bootstrap DateTimePicker | JS 4.17.37; CSS 4.15.35, banners | `bootstrap-datetime.js`, `bootstrap-datetime.css` | `USED` for campaign scheduling; readable JS, CSS source | [Eonasdan/bootstrap-datetimepicker](https://github.com/Eonasdan/bootstrap-datetimepicker), MIT | `UNMAINTAINED`; mismatched patch versions, no applicable advisory found; migrate with Bootstrap |
 | Select2 Bootstrap Theme | 0.1.0-beta.9, banner | `static/css/select2-bootstrap.min.css` | `USED` for Select2 presentation; minified-only CSS | [select2-bootstrap-theme](https://github.com/select2/select2-bootstrap-theme), MIT | `CLEAN`, archived upstream; migrate with Bootstrap |
 | core-js browser bundle | 2.4.1, source banner | `static/js/src/vendor/core.min.js` | `LEGACY_BUT_REQUIRED` Promise polyfill; minified-only | [zloirock/core-js](https://github.com/zloirock/core-js), MIT | `UNMAINTAINED`; no applicable runtime advisory found; reassess with browser policy |
-| CKEditor | 4.11.1 custom standard build, embedded version/revision | `static/js/src/vendor/ckeditor/**` | `USED` by landing-page and email-template editors; historical distribution with partial source and license files | [ckeditor/ckeditor4](https://github.com/ckeditor/ckeditor4), GPL-2.0-or-later, LGPL-2.1-or-later, or MPL-1.1 | `VULNERABLE`, `UNMAINTAINED`; migrate to CKEditor 5 or a licensed CKEditor 4 LTS build |
 | Font Awesome | 4.7.0, CSS banner | `font-awesome.min.css`, `static/font/fontawesome-*` | `USED` across the admin UI; minified CSS and font binaries | [FortAwesome/Font-Awesome](https://github.com/FortAwesome/Font-Awesome), CSS MIT and fonts SIL OFL 1.1 | `CLEAN`, old release line; migrate with UI stack |
 | Flat UI-derived CSS | `UNKNOWN`; imported in 2014 and subsequently modified | `static/css/flat-ui.css` | `USED` for global Bootstrap theme overrides; readable derived source retained | [Designmodo Flat UI Free](https://github.com/designmodo/Flat-UI), CC BY 3.0 and MIT upstream terms; Gophish modifications recorded in history | `UNKNOWN_VERSION`; no known advisory, but provenance prevents byte-for-byte reconstruction |
 | Bootstrap Switch CSS embedded in Flat UI | 1.3, embedded banner | Section in `static/css/flat-ui.css` | `UNUSED`; no matching class or JavaScript reference | Apache-2.0 banner retained | `CLEAN`, old release line; remove only during Flat UI cleanup |
@@ -73,8 +72,9 @@ them in a fixed order, and emits their complete license texts in
 | Select2 | 4.0.13 | Campaign and role selectors | MIT | `CLEAN` |
 | UAParser.js | 0.7.41 | Recipient-controlled user-agent parsing | MIT | `CLEAN` |
 | zxcvbn | 4.4.2 | Password-strength feedback | MIT | `CLEAN`, old release |
+| CodeMirror / Lezer | CodeMirror packages 6.x; Lezer packages 1.x, exact versions in `yarn.lock` | Canonical full-document HTML source editing, syntax highlighting, search, keyboard commands, and GophishFR placeholder completion | MIT | `CLEAN`; self-hosted Webpack bundle, no remote service or license key |
 
-Yarn audit reports zero advisories across 87 resolved dependencies. A temporary
+Yarn audit reports zero advisories across 110 resolved dependencies. A temporary
 npm resolution, created outside the worktree without retaining a
 `package-lock.json`, also reports zero advisories. GitHub reports zero open
 Dependabot alerts.
@@ -91,6 +91,7 @@ Dependabot alerts.
 | Chartist | Vendored JS 0.9.2, CSS, and dead first-party selectors | Removed | `SAFE_REMOVE` | No runtime reference; Chart.js had already replaced the chart stack |
 | DataTables standalone CSS | Unreferenced source files | Removed | `SAFE_REMOVE` | Bootstrap integration CSS is the only stylesheet built |
 | Empty vendor script | Zero-byte `sending_profiles.js` | Removed | `SAFE_REMOVE` | No reference; the first-party application script is separate |
+| CKEditor | Vendored 4.11.1 custom build | Removed and replaced by exact-pinned CodeMirror 6 packages | `SECURITY_REPLACEMENT` | Removes an EOL editor with applicable XSS advisories while preserving the full-document source contract |
 
 Highcharts 5.0.14 was removed and replaced by Chart.js in PR #18 before this
 audit was reconciled. It remains documentation-only: no Highcharts source,
@@ -98,26 +99,22 @@ bundle, or runtime reference is distributed.
 
 ## Known findings and deferred migrations
 
-Retire.js 5.4.3 reports 25 signatures: 18 medium and 7 low. They occur in four
-files: Bootstrap, jQuery, jQuery UI Widget Factory, and CKEditor. The four
-jQuery UI findings are false component matches because the affected widgets
-are absent. Retire.js reports no critical or high-severity finding, but the
-active HTML-processing surfaces make the following migrations security
-priorities. Scanning source and generated JavaScript reports 41 signatures;
+After the CKEditor removal, Retire.js 5.4.3 reports 16 source signatures: 14
+medium and 2 low. They occur in Bootstrap, jQuery, and jQuery UI Widget Factory.
+The four jQuery UI findings are false component matches because the affected
+widgets are absent. Retire.js reports no critical or high-severity finding, but
+the remaining legacy UI stack still makes the following migrations security
+priorities. Scanning source and generated JavaScript reports 32 signatures;
 the 16 additional matches are duplicates for the same Bootstrap, jQuery, and
 jQuery UI code inside `vendor.min.js`, not new components or advisories.
 
 ### CKEditor 4.11.1
 
-The template editor is affected by multiple XSS advisories, including
-CVE-2021-32808, CVE-2021-32809, CVE-2021-37695, CVE-2021-41164,
-CVE-2021-41165, CVE-2022-24728, and CVE-2023-28439. Manual review also finds
-CVE-2024-24815 and CVE-2024-24816, fixed only in the commercial
-4.24.0-lts line. CVE-2024-24815 is directly relevant because this build enables
-`fullPage` and unrestricted `allowedContent`; the preview plug-in implicated by
-CVE-2024-24816 is also shipped. Open-source CKEditor 4 reached end of life in
-2023. A complete free remediation requires a functional migration to CKEditor
-5.
+The vulnerable, end-of-life CKEditor distribution was removed. CodeMirror 6
+now edits the canonical HTML text without parsing or normalizing it. A derived,
+read-only iframe provides visual preview with scripts, same-origin access,
+forms, navigation, and external resources disabled. The candidate and security
+analysis is documented in `docs/HTML_EDITOR_MIGRATION.md`.
 
 ### jQuery 1.10.2
 
@@ -145,25 +142,27 @@ CVE-2024-6485. The durable remediation is a supported Bootstrap migration.
   but its exact starting release is not.
 - `checkbox.css` is now identified as a modified Awesome Bootstrap Checkbox
   0.3.6 file under MIT; its local changes affect eleven diff lines.
-- CKEditor carries its historical license files. Remaining source banners are
-  preserved where available, and the package-managed components' complete MIT
-  notices are generated beside `vendor.min.js`.
+- Package-managed components' complete notices are generated beside their
+  bundles. CodeMirror and Lezer notices are emitted as
+  `static/js/dist/app/html_editor.min.js.LICENSE.txt`.
 
 ## Reproducibility
 
-The final frontend build contains 18 generated files and 2,297,264 bytes.
-Relative to the post-Chart.js `main` baseline, only `vendor.min.js`, its
-license notice, `gophish.css`, `campaign_results.min.js`, and
-`dashboard.min.js` change. All other generated files remain byte-identical.
+The final frontend build contains 17 generated files and 1,789,478 bytes. The
+migration adds `html_editor.min.js` and its generated license notice, updates
+the email-template and landing-page application bundles, and removes the
+obsolete autocomplete bundle.
 Two independent clean installations and builds produced the same per-file
 hashes and aggregate SHA-256 manifest:
 
 ```text
-fe5d3816c5f53f8f21d2dfc06389cafbca7b45dd30cc2cc81664a24d6a7d8849
+084e0073eb3da1fdfa0f8144caeabe5a240f1fac7e798a43ab67fe06addc0415
 ```
 
-The existing Webpack warning for the approximately 801 KiB password-strength
-bundle is unchanged and outside this audit.
+Webpack reports performance-budget warnings for the approximately 532 KiB
+CodeMirror bundle and the pre-existing approximately 801 KiB password-strength
+bundle. Both are self-hosted, deterministic build outputs; splitting them is a
+performance concern, not part of this security replacement.
 
 ## Future security ratchet
 

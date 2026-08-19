@@ -284,21 +284,6 @@ $(document).ready(function () {
         $('.modal-backdrop').not('.fv-modal-stack').css('z-index', 1039 + (10 * $('body').data('fv_open_modals')));
         $('.modal-backdrop').not('fv-modal-stack').addClass('fv-modal-stack');
     });
-    $.fn.modal.Constructor.prototype.enforceFocus = function () {
-        $(document)
-            .off('focusin.bs.modal') // guard against infinite focus loop
-            .on('focusin.bs.modal', $.proxy(function (e) {
-                if (
-                    this.$element[0] !== e.target && !this.$element.has(e.target).length
-                    // CKEditor compatibility fix start.
-                    &&
-                    !$(e.target).closest('.cke_dialog, .cke').length
-                    // CKEditor compatibility fix end.
-                ) {
-                    this.$element.trigger('focus');
-                }
-            }, this));
-    };
     // Scrollbar fix - https://stackoverflow.com/questions/19305821/multiple-modals-overlay
     $(document).on('hidden.bs.modal', '.modal', function () {
         $('.modal:visible').length && $(document.body).addClass('modal-open');

@@ -120,6 +120,9 @@ func browserProjectRoot(t *testing.T) string {
 func seedBrowserFixtures(t *testing.T, userID int64) {
 	t.Helper()
 
+	const emailTemplateHTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>{{.FirstName}} browser fixture</title><style>.browser-cta{color:#123456!important;background-image:url(https://preview.invalid/background.png)}</style></head><body class="email-body" data-fixture="editor-round-trip"><table role="presentation" style="border-collapse:collapse;width:100%"><tr><td><p>Hello <strong>{{.FirstName}}</strong></p><a id="browser-cta" class="browser-cta" data-rid="{{.RId}}" aria-label="Open for {{.FirstName}}" href="{{.URL}}?rid={{.RId}}">Open</a><img src="https://preview.invalid/pixel.png" onerror="window.__previewHandlerExecuted=true" alt="Tracking pixel"><script>window.__previewScriptExecuted=true</script>{{.Tracker}}</td></tr></table></body></html>`
+	const landingPageHTML = `<!doctype html><html lang="en"><head><meta charset="utf-8"><title>Browser landing page</title><style>.browser-form{max-width:24rem}</style></head><body data-fixture="editor-round-trip"><form class="browser-form" data-purpose="synthetic" action="/ignored"><label for="browser-user">User</label><input id="browser-user" name="username" value="{{.FirstName}}"><label for="browser-password">Password</label><input id="browser-password" name="password" type="password"><button type="submit">Continue</button></form></body></html>`
+
 	group := models.Group{
 		Name:   "Browser Fixture Group",
 		UserId: userID,
@@ -139,7 +142,7 @@ func seedBrowserFixtures(t *testing.T, userID int64) {
 		Name:    "Browser Fixture Template",
 		Subject: "Synthetic browser fixture",
 		Text:    "Synthetic browser fixture",
-		HTML:    "<html><body>Synthetic browser fixture</body></html>",
+		HTML:    emailTemplateHTML,
 		UserId:  userID,
 	}
 	if err := models.PostTemplate(&emailTemplate); err != nil {
@@ -147,9 +150,10 @@ func seedBrowserFixtures(t *testing.T, userID int64) {
 	}
 
 	landingPage := models.Page{
-		Name:   "Browser Fixture Landing Page",
-		HTML:   "<html><body>Synthetic browser fixture</body></html>",
-		UserId: userID,
+		Name:               "Browser Fixture Landing Page",
+		HTML:               landingPageHTML,
+		CaptureCredentials: true,
+		UserId:             userID,
 	}
 	if err := models.PostPage(&landingPage); err != nil {
 		t.Fatalf("create browser test landing page: %v", err)

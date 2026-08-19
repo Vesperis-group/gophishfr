@@ -8,6 +8,7 @@ module.exports = {
   devtool: false,
   context: path.resolve(__dirname, "static", "js", "src", "app"),
   entry: {
+    html_editor: "./html_editor.js",
     passwords: "./passwords.js",
   },
   output: {
