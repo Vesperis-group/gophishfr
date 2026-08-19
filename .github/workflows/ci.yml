@@ -216,7 +216,7 @@ jobs:
         run: yarn install --frozen-lockfile --non-interactive
 
       - name: Install Chromium
-        run: yarn playwright install --with-deps chromium
+        run: yarn playwright install chromium
 
       - name: Run browser smoke tests
         run: yarn test:browser
