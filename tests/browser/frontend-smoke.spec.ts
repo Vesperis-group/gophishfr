@@ -865,13 +865,8 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
 
     // Click on launch date input to open datetimepicker
     const picker = page.locator(".bootstrap-datetimepicker-widget:visible");
-    await expect(async () => {
-      if (!(await picker.isVisible())) {
-        await page.locator("#name").focus();
-        await page.locator("#launch_date").focus();
-      }
-      await expect(picker).toBeVisible({ timeout: 1_000 });
-    }).toPass({ timeout: 5_000 });
+    await page.evaluate(() => window.jQuery("#launch_date").trigger("focus"));
+    await expect(picker).toBeVisible();
 
     // Verify Font Awesome icons (no glyphicon)
     expect(await picker.locator(".fa").count()).toBeGreaterThan(0);
@@ -1230,13 +1225,8 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     const initialDay = initialDayMatch === null ? "" : initialDayMatch[1];
 
     const picker = page.locator(".bootstrap-datetimepicker-widget:visible");
-    await expect(async () => {
-      if (!(await picker.isVisible())) {
-        await page.locator("#name").focus();
-        await page.locator("#launch_date").focus();
-      }
-      await expect(picker).toBeVisible({ timeout: 1_000 });
-    }).toPass({ timeout: 5_000 });
+    await page.evaluate(() => window.jQuery("#launch_date").trigger("focus"));
+    await expect(picker).toBeVisible();
 
     // Click a definitely different current-month day: scan the visible days
     // and pick the first one whose text does not match the currently
