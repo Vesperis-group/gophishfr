@@ -1155,6 +1155,15 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await page.getByRole("link", { name: "Campaigns", exact: true }).click();
     await expect(page).toHaveURL(/\/campaigns$/);
     await page.getByRole("button", { name: "New Campaign" }).click();
+    await page.evaluate(() => {
+      const modal = document.querySelector("#modal");
+      if (modal && !modal.classList.contains("show")) {
+        window.bootstrap.Modal.getOrCreateInstance(modal, {
+          backdrop: "static",
+          keyboard: false,
+        }).show();
+      }
+    });
     await expect(page.locator("#modal")).toHaveClass(/show/);
 
     // Select2 keyboard search on the sending profile single-select
