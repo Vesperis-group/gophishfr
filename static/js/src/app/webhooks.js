@@ -21,7 +21,7 @@ const saveWebhook = (id) => {
             .success(function(data) {
                 dismiss();
                 load();
-                $("#modal").modal("hide");
+                bsModalHide("#modal");
                 successFlash(`Webhook "${escapeHtml(wh.name)}" has been updated successfully!`);
             })
             .error(function(data) {
@@ -32,7 +32,7 @@ const saveWebhook = (id) => {
             .success(function(data) {
                 load();
                 dismiss();
-                $("#modal").modal("hide");
+                bsModalHide("#modal");
                 successFlash(`Webhook "${escapeHtml(wh.name)}" has been created successfully!`);
             })
             .error(function(data) {
@@ -63,11 +63,11 @@ const load = () => {
                     escapeHtml(webhook.url),
                     escapeHtml(webhook.is_active),
                     `
-                      <div class="pull-right">
+                      <div class="float-end">
                         <button class="btn btn-primary ping_button" data-webhook-id="${webhook.id}">
                           Ping
                         </button>
-                        <button class="btn btn-primary edit_button" data-toggle="modal" data-backdrop="static" data-target="#modal" data-webhook-id="${webhook.id}">
+                        <button class="btn btn-primary edit_button" data-bs-toggle="modal" data-bs-target="#modal" data-webhook-id="${webhook.id}">
                           <i class="fa fa-pencil"></i>
                         </button>
                         <button class="btn btn-danger delete_button" data-webhook-id="${webhook.id}">
@@ -167,7 +167,7 @@ const pingUrl = (btn, whId) => {
 
 $(document).ready(function() {
     load();
-    $("#modal").on("hide.bs.modal", function() {
+    document.getElementById('modal').addEventListener('hide.bs.modal', function() {
         dismiss();
     });
     $("#new_button").on("click", function() {

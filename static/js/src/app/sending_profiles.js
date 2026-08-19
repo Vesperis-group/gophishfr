@@ -94,7 +94,7 @@ function dismiss() {
     $("#password").val("")
     $("#ignore_cert_errors").prop("checked", true)
     $("#headersTable").dataTable().DataTable().clear().draw()
-    $("#modal").modal('hide')
+    bsModalHide("#modal")
 }
 
 var dismissSendTestEmailModal = function () {
@@ -209,19 +209,19 @@ function load() {
                         escapeHtml(profile.name),
                         profile.interface_type,
                         moment(profile.modified_date).format('MMMM Do YYYY, h:mm:ss a'),
-                        "<div class='pull-right'><span data-toggle='modal' data-backdrop='static' data-target='#modal'><button class='btn btn-primary' data-toggle='tooltip' data-placement='left' title='Edit Profile' onclick='edit(" + i + ")'>\
+                        "<div class='float-end'><span data-bs-toggle='modal' data-bs-target='#modal'><button class='btn btn-primary' data-bs-toggle='tooltip' data-bs-placement='left' title='Edit Profile' onclick='edit(" + i + ")'>\
                     <i class='fa fa-pencil'></i>\
                     </button></span>\
-		    <span data-toggle='modal' data-target='#modal'><button class='btn btn-primary' data-toggle='tooltip' data-placement='left' title='Copy Profile' onclick='copy(" + i + ")'>\
+		    <span data-bs-toggle='modal' data-bs-target='#modal'><button class='btn btn-primary' data-bs-toggle='tooltip' data-bs-placement='left' title='Copy Profile' onclick='copy(" + i + ")'>\
                     <i class='fa fa-copy'></i>\
                     </button></span>\
-                    <button class='btn btn-danger' data-toggle='tooltip' data-placement='left' title='Delete Profile' onclick='deleteProfile(" + i + ")'>\
+                    <button class='btn btn-danger' data-bs-toggle='tooltip' data-bs-placement='left' title='Delete Profile' onclick='deleteProfile(" + i + ")'>\
                     <i class='fa fa-trash-o'></i>\
                     </button></div>"
                     ])
                 })
                 profileTable.rows.add(profileRows).draw()
-                $('[data-toggle="tooltip"]').tooltip()
+                bsInitTooltips()
             } else {
                 $("#emptyMessage").show()
             }
@@ -261,37 +261,11 @@ function addCustomHeader(header, value) {
 }
 
 $(document).ready(function () {
-    // Setup multiple modals
-    // Code based on http://miles-by-motorcycle.com/static/bootstrap-modal/index.html
-    $('.modal').on('hidden.bs.modal', function (event) {
-        $(this).removeClass('fv-modal-stack');
-        $('body').data('fv_open_modals', $('body').data('fv_open_modals') - 1);
-    });
-    $('.modal').on('shown.bs.modal', function (event) {
-        // Keep track of the number of open modals
-        if (typeof ($('body').data('fv_open_modals')) == 'undefined') {
-            $('body').data('fv_open_modals', 0);
-        }
-        // if the z-index of this modal has been set, ignore.
-        if ($(this).hasClass('fv-modal-stack')) {
-            return;
-        }
-        $(this).addClass('fv-modal-stack');
-        // Increment the number of open modals
-        $('body').data('fv_open_modals', $('body').data('fv_open_modals') + 1);
-        // Setup the appropriate z-index
-        $(this).css('z-index', 1040 + (10 * $('body').data('fv_open_modals')));
-        $('.modal-backdrop').not('.fv-modal-stack').css('z-index', 1039 + (10 * $('body').data('fv_open_modals')));
-        $('.modal-backdrop').not('fv-modal-stack').addClass('fv-modal-stack');
-    });
-    // Scrollbar fix - https://stackoverflow.com/questions/19305821/multiple-modals-overlay
-    $(document).on('hidden.bs.modal', '.modal', function () {
-        $('.modal:visible').length && $(document.body).addClass('modal-open');
-    });
-    $('#modal').on('hidden.bs.modal', function (event) {
+    // Modal dismiss handlers (native Bootstrap 5 events, no jQuery bridge)
+    document.getElementById('modal').addEventListener('hidden.bs.modal', function (event) {
         dismiss()
     });
-    $("#sendTestEmailModal").on("hidden.bs.modal", function (event) {
+    document.getElementById('sendTestEmailModal').addEventListener('hidden.bs.modal', function (event) {
         dismissSendTestEmailModal()
     })
     // Code to deal with custom email headers

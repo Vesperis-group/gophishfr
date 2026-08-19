@@ -1,5 +1,5 @@
 {{define "body"}}
-<div class="col-sm-9 col-sm-offset-3 col-md-10 col-md-offset-2 main">
+<div class="col-sm-9 offset-sm-3 col-md-10 offset-md-2 main">
     <div class="row">
         <h1 class="page-header">
             Email Templates
@@ -7,8 +7,8 @@
     </div>
     <div id="flashes" class="row"></div>
     <div class="row">
-        <button type="button" class="btn btn-primary" onclick="edit(-1)" data-toggle="modal" data-backdrop="static"
-            data-target="#modal"><i class="fa fa-plus"></i> New Template</button>
+        <button type="button" class="btn btn-primary" onclick="edit(-1)" data-bs-toggle="modal"
+            data-bs-target="#modal"><i class="fa fa-plus"></i> New Template</button>
     </div>
     &nbsp;
     <div id="loading">
@@ -34,39 +34,39 @@
     </div>
 </div>
 <!-- Modal -->
-<div class="modal fade" id="modal" tabindex="-1" role="dialog" aria-labelledby="modalLabel">
-    <div class="modal-dialog" role="document">
+<div class="modal fade" id="modal" tabindex="-1" role="dialog" aria-labelledby="templateModalLabel"
+    aria-modal="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-scrollable" role="document">
         <div class="modal-content">
             <!-- New Template Modal -->
             <div class="modal-header">
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close" onclick="dismiss()"><span
-                        aria-hidden="true">&times;</span></button>
                 <h4 class="modal-title" id="templateModalLabel">New Template</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" onclick="dismiss()"></button>
             </div>
             <div class="modal-body">
                 <div class="row" id="modal.flashes"></div>
-                <label class="control-label" for="name">Name:</label>
-                <div class="form-group">
+                <label class="form-label" for="name">Name:</label>
+                <div class="mb-3">
                     <input type="text" class="form-control" ng-model="template.name" placeholder="Template name" id="name"
                         autofocus />
                 </div>
-                <div class="form-group">
-                    <button class="btn btn-danger" data-toggle="modal" data-backdrop="static" data-target="#importEmailModal"><i
+                <div class="mb-3">
+                    <button class="btn btn-danger" onclick="bsModalShow('#importEmailModal', this)"><i
                             class="fa fa-envelope"></i>
                         Import Email</button>
                 </div>
-                <label class="control-label" for="envelope-sender">Envelope Sender: <i class="fa fa-question-circle" data-toggle="tooltip" data-placement="right" title="This sender is shown to the user by most email clients. Defaults to the SMTP From as defined in the Sending Profile."></i></label>
-                <div class="form-group">
+                <label class="form-label" for="envelope-sender">Envelope Sender: <i class="fa fa-question-circle" data-bs-toggle="tooltip" data-bs-placement="right" title="This sender is shown to the user by most email clients. Defaults to the SMTP From as defined in the Sending Profile."></i></label>
+                <div class="mb-3">
                     <input type="text" class="form-control" placeholder="First Last <test@example.com>" id="envelope-sender" />
                 </div>
-                <label class="control-label" for="subject">Subject:</label>
-                <div class="form-group">
+                <label class="form-label" for="subject">Subject:</label>
+                <div class="mb-3">
                     <input type="text" class="form-control" placeholder="Email Subject" id="subject" />
                 </div>
                 <!-- Nav tabs -->
                 <ul class="nav nav-tabs" role="tablist">
-                    <li class="active" role="text"><a href="#text" aria-controls="text" role="tab" data-toggle="tab">Text</a></li>
-                    <li role="html"><a href="#html" aria-controls="html" role="tab" data-toggle="tab">HTML</a></li>
+                    <li class="nav-item" role="presentation"><a class="nav-link active" href="#text" aria-controls="text" role="tab" data-bs-toggle="tab">Text</a></li>
+                    <li class="nav-item" role="presentation"><a class="nav-link" href="#html" aria-controls="html" role="tab" data-bs-toggle="tab">HTML</a></li>
                 </ul>
                 <!-- Tab panes -->
                 <div class="tab-content">
@@ -76,16 +76,16 @@
                     <div role="tabpanel" class="tab-pane" id="html">
                         <div class="gophish-html-editor" data-html-editor>
                             <div class="btn-group gophish-editor-tabs" role="tablist" aria-label="HTML editor view">
-                                <button type="button" class="btn btn-default active" role="tab" aria-selected="true"
+                                <button type="button" class="btn btn-secondary active" role="tab" aria-selected="true"
                                     data-editor-view="source">HTML Code</button>
-                                <button type="button" class="btn btn-default" role="tab" aria-selected="false"
+                                <button type="button" class="btn btn-secondary" role="tab" aria-selected="false"
                                     data-editor-view="preview">Preview</button>
                             </div>
                             <div data-editor-panel="source">
                                 <textarea id="html_editor" data-editor-label="Email template HTML source"></textarea>
                             </div>
                             <div data-editor-panel="preview" hidden>
-                                <p class="help-block">Scripts, forms, links, and external resources are disabled in this preview.</p>
+                                <p class="form-text">Scripts, forms, links, and external resources are disabled in this preview.</p>
                                 <iframe data-editor-preview title="Email template preview" sandbox
                                     referrerpolicy="no-referrer"></iframe>
                             </div>
@@ -117,25 +117,25 @@
                 <hr>
             </div>
             <div class="modal-footer">
-                <button type="button" data-dismiss="modal" class="btn btn-default" onclick="dismiss()">Cancel</button>
+                <button type="button" data-bs-dismiss="modal" class="btn btn-secondary" onclick="dismiss()">Cancel</button>
                 <button type="button" class="btn btn-primary" id="modalSubmit">Save Template</button>
             </div>
         </div>
     </div>
 </div>
 <!-- Modal -->
-<div class="modal fade" id="importEmailModal" tabindex="-1" role="dialog" aria-labelledby="modalLabel">
-    <div class="modal-dialog" role="document">
+<div class="modal fade" id="importEmailModal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="importEmailModalLabel">
+    <div class="modal-dialog modal-dialog-scrollable" role="document">
         <div class="modal-content">
             <!-- New Email Modal -->
             <div class="modal-header">
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
                 <h4 class="modal-title" id="importEmailModalLabel">Import Email</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="row" id="modal.flashes"></div>
-                <label class="control-label" for="email">Email Content:</label>
-                <div class="form-group">
+                <label class="form-label" for="email">Email Content:</label>
+                <div class="mb-3">
                     <textarea rows="10" id="email_content" class="gophish-editor form-control" placeholder="Raw Email Source"></textarea>
                 </div>
                 <div class="checkbox checkbox-primary">
@@ -144,7 +144,7 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" data-dismiss="modal" class="btn btn-default">Cancel</button>
+                <button type="button" data-bs-dismiss="modal" class="btn btn-secondary">Cancel</button>
                 <button type="button" class="btn btn-primary" id="modalSubmit" onclick="importEmail()">Import</button>
             </div>
         </div>

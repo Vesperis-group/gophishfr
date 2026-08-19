@@ -1,0 +1,175 @@
+/*
+ * GophishFR theme
+ *
+ * First-party Bootstrap 5 overrides for the GophishFR
+ * visual layer. This stylesheet provides global typography (system font stack,
+ * no external CDN), link colors, the dark navbar palette, the primary
+ * button/badge accent color, form focus styling, and table/alert accents.
+ * See docs/BOOTSTRAP5_MIGRATION_BASELINE.md for the migration history.
+ */
+
+:root {
+  --gophishfr-ink: #283f50;
+  --gophishfr-navbar-bg: #283f50;
+  --gophishfr-navbar-border: #2f4154;
+  --gophishfr-accent: #1abc9c;
+  --gophishfr-accent-hover: #48c9b0;
+  --gophishfr-accent-active: #16a085;
+  --gophishfr-clicked: #f39c12;
+}
+
+body {
+  font-family:
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    Roboto,
+    "Helvetica Neue",
+    Arial,
+    "Noto Sans",
+    sans-serif,
+    "Apple Color Emoji",
+    "Segoe UI Emoji",
+    "Segoe UI Symbol",
+    "Noto Color Emoji";
+  color: var(--gophishfr-ink);
+  padding-top: var(--gophishfr-navbar-height, 56px);
+}
+
+a {
+  color: var(--gophishfr-accent-active);
+  transition: color 0.25s;
+}
+
+a:hover,
+a:focus {
+  color: var(--gophishfr-accent);
+}
+
+/* Dark navbar palette, applied alongside Bootstrap's .navbar-dark */
+.navbar-gophishfr {
+  background-color: var(--gophishfr-navbar-bg);
+}
+
+.navbar-gophishfr .navbar-brand,
+.navbar-gophishfr .navbar-text {
+  color: #fff;
+}
+
+.navbar-gophishfr .navbar-brand:hover,
+.navbar-gophishfr .navbar-brand:focus {
+  color: var(--gophishfr-accent);
+}
+
+.navbar-gophishfr .navbar-nav .nav-link {
+  color: #fff;
+}
+
+.navbar-gophishfr .navbar-nav .nav-link:hover,
+.navbar-gophishfr .navbar-nav .nav-link:focus {
+  color: var(--gophishfr-accent);
+}
+
+.navbar-gophishfr .navbar-nav .nav-link.active,
+.navbar-gophishfr .navbar-nav .show > .nav-link {
+  color: #fff;
+  background-color: var(--gophishfr-accent);
+  border-radius: 0.25rem;
+}
+
+.navbar-gophishfr .navbar-toggler {
+  color: #fff;
+  border-color: var(--gophishfr-navbar-border);
+}
+
+.navbar-gophishfr .navbar-toggler-icon {
+  background-image: url("data:image/svg+xml,%3csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 30'%3e%3cpath stroke='rgba(255, 255, 255, 0.85)' stroke-linecap='round' stroke-miterlimit='10' stroke-width='2' d='M4 7h22M4 15h22M4 23h22'/%3e%3c/svg%3e");
+}
+
+.navbar-gophishfr .dropdown-menu {
+  background-color: var(--gophishfr-navbar-bg);
+}
+
+.navbar-gophishfr .dropdown-menu .dropdown-item {
+  color: #e1e4e7;
+}
+
+.navbar-gophishfr .dropdown-menu .dropdown-item:hover,
+.navbar-gophishfr .dropdown-menu .dropdown-item:focus {
+  color: #fff;
+  background-color: var(--gophishfr-accent);
+}
+
+.navbar-gophishfr .dropdown-divider {
+  border-color: var(--gophishfr-navbar-border);
+}
+
+/* Primary button/badge accent, expressed with Bootstrap 5 component variables */
+.btn-primary {
+  --bs-btn-bg: var(--gophishfr-accent);
+  --bs-btn-border-color: var(--gophishfr-accent);
+  --bs-btn-hover-bg: var(--gophishfr-accent-hover);
+  --bs-btn-hover-border-color: var(--gophishfr-accent-hover);
+  --bs-btn-active-bg: var(--gophishfr-accent-active);
+  --bs-btn-active-border-color: var(--gophishfr-accent-active);
+  --bs-btn-disabled-bg: var(--gophishfr-accent);
+  --bs-btn-disabled-border-color: var(--gophishfr-accent);
+}
+
+.bg-primary {
+  --bs-bg-opacity: 1;
+  background-color: var(--gophishfr-accent) !important;
+}
+
+.text-primary {
+  color: var(--gophishfr-accent-active) !important;
+}
+
+.text-bg-clicked {
+  color: #fff;
+  background-color: var(--gophishfr-clicked);
+}
+
+/* Form focus styling */
+.form-control:focus,
+.form-select:focus {
+  border-color: var(--gophishfr-accent);
+  box-shadow: 0 0 0 0.25rem rgba(26, 188, 156, 0.25);
+}
+
+.form-check-input:focus {
+  border-color: var(--gophishfr-accent);
+  box-shadow: 0 0 0 0.25rem rgba(26, 188, 156, 0.25);
+}
+
+.form-check-input:checked {
+  background-color: var(--gophishfr-accent);
+  border-color: var(--gophishfr-accent);
+}
+
+/* Nav tabs accent */
+.nav-tabs .nav-link.active {
+  color: var(--gophishfr-ink);
+  border-bottom-color: var(--gophishfr-accent);
+}
+
+/* Table accents (sort icons keep their color in main.css) */
+.table > thead {
+  color: var(--gophishfr-ink);
+}
+
+/* Select2 (default theme) focus accent, replacing the removed Bootstrap 3 theme */
+.select2-container--default.select2-container--focus .select2-selection--single,
+.select2-container--default .select2-selection--single:focus,
+.select2-container--default.select2-container--open .select2-selection--single {
+  border-color: var(--gophishfr-accent);
+}
+
+.select2-container--default .select2-results__option--highlighted[aria-selected] {
+  background-color: var(--gophishfr-accent);
+}
+
+/* Alerts: soften the default Bootstrap borders to match prior spacing */
+.alert {
+  border-width: 1px;
+}

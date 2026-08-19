@@ -1,3 +1,77 @@
+/*
+ * Bootstrap 5 helpers.
+ *
+ * These call Bootstrap's native JS API (window.bootstrap, exposed by
+ * bootstrap.bundle.min.js) instead of the optional jQuery plugin bridge, so
+ * that Bootstrap is invoked directly rather than through jQuery.
+ */
+function bsModalHide(selector) {
+    var el = typeof selector === "string" ? document.querySelector(selector) : selector;
+    if (!el) return;
+    var modal = bootstrap.Modal.getInstance(el);
+    if (modal) modal.hide();
+}
+window.bsModalHide = bsModalHide;
+
+function bsInitTooltips(root) {
+    (root || document).querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
+        if (el.getClientRects().length === 0) {
+            return;
+        }
+        if (!bootstrap.Tooltip.getInstance(el)) {
+            new bootstrap.Tooltip(el, { animation: false });
+        }
+    });
+}
+window.bsInitTooltips = bsInitTooltips;
+
+function bsHideTooltips(root) {
+    (root || document).querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
+        var tooltip = bootstrap.Tooltip.getInstance(el);
+        if (tooltip) {
+            tooltip.hide();
+            tooltip.dispose();
+        }
+    });
+}
+
+// bsHideTooltip hides a visible-element's tooltip before the element is hidden
+// with something like jQuery's .hide(). Bootstrap 5's
+// Tooltip.show() throws if its trigger has inline style="display: none",
+// which can happen when a pending hover-triggered show fires after the
+// trigger element itself is hidden.
+function bsHideTooltip(selector) {
+    var el = typeof selector === "string" ? document.querySelector(selector) : selector;
+    if (!el) return;
+    var tooltip = bootstrap.Tooltip.getInstance(el);
+    if (tooltip) {
+        tooltip.hide();
+        tooltip.dispose();
+    }
+}
+window.bsHideTooltip = bsHideTooltip;
+
+
+function bsModalShow(selector, trigger) {
+    var target = typeof selector === "string" ? document.querySelector(selector) : selector;
+    if (!target) return;
+    var triggerEl = trigger && trigger.nodeType === 1 ? trigger : null;
+    if (triggerEl && !target.__fvRestoreFocusHandler) {
+        target.__fvRestoreFocusHandler = function () {
+            if (target.__fvModalTrigger && typeof target.__fvModalTrigger.focus === "function") {
+                target.__fvModalTrigger.focus();
+            }
+            target.__fvModalTrigger = null;
+        };
+        target.addEventListener("hidden.bs.modal", target.__fvRestoreFocusHandler);
+    }
+    if (triggerEl) {
+        target.__fvModalTrigger = triggerEl;
+    }
+    bootstrap.Modal.getOrCreateInstance(target, { backdrop: "static", keyboard: false }).show();
+}
+window.bsModalShow = bsModalShow;
+
 function errorFlash(message) {
     $("#flashes").empty()
     $("#flashes").append("<div style=\"text-align:center\" class=\"alert alert-danger\">\
@@ -15,17 +89,17 @@ function errorFlashFade(message, fade) {
     $("#flashes").empty()
     $("#flashes").append("<div style=\"text-align:center\" class=\"alert alert-danger\">\
         <i class=\"fa fa-exclamation-circle\"></i> " + message + "</div>")
-    setTimeout(function(){ 
-        $("#flashes").empty() 
+    setTimeout(function(){
+        $("#flashes").empty()
     }, fade * 1000);
 }
 // Fade message after n seconds
-function successFlashFade(message, fade) {  
+function successFlashFade(message, fade) {
     $("#flashes").empty()
     $("#flashes").append("<div style=\"text-align:center\" class=\"alert alert-success\">\
         <i class=\"fa fa-check-circle\"></i> " + message + "</div>")
-    setTimeout(function(){ 
-        $("#flashes").empty() 
+    setTimeout(function(){
+        $("#flashes").empty()
     }, fade * 1000);
 
 }
@@ -59,9 +133,9 @@ function unescapeHtml(html) {
 }
 
 /**
- * 
+ *
  * @param {string} string - The input string to capitalize
- * 
+ *
  */
 var capitalize = function (string) {
     return string.charAt(0).toUpperCase() + string.slice(1);
@@ -308,5 +382,40 @@ $(document).ready(function () {
     })
     $.fn.dataTable.moment('MMMM Do YYYY, h:mm:ss a');
     // Setup tooltips
-    $('[data-toggle="tooltip"]').tooltip()
+    bsInitTooltips()
+
+    // Centralized Bootstrap 5 modal-stack management (native events, no jQuery bridge).
+    // Handles z-index stacking for multiple simultaneous modals and the scrollbar fix.
+    // BS5 base: modal 1055, backdrop 1050; each additional layer adds 10.
+    document.addEventListener('hide.bs.modal', function (event) {
+        bsHideTooltips(event.target);
+    });
+    document.addEventListener('hidden.bs.modal', function (event) {
+        var modal = event.target;
+        if (!modal.classList.contains('modal')) return;
+        modal.classList.remove('fv-modal-stack');
+        modal.style.zIndex = '';
+        var count = parseInt(document.body.getAttribute('data-fv-open-modals') || '0', 10);
+        count = Math.max(0, count - 1);
+        document.body.setAttribute('data-fv-open-modals', String(count));
+        if (document.querySelector('.modal.show')) {
+            document.body.classList.add('modal-open');
+        }
+    });
+    document.addEventListener('shown.bs.modal', function (event) {
+        var modal = event.target;
+        if (!modal.classList.contains('modal')) return;
+        bsInitTooltips(modal);
+        if (modal.classList.contains('fv-modal-stack')) return;
+        modal.classList.add('fv-modal-stack');
+        var count = parseInt(document.body.getAttribute('data-fv-open-modals') || '0', 10);
+        count++;
+        document.body.setAttribute('data-fv-open-modals', String(count));
+        modal.style.zIndex = String(1045 + (10 * count));
+        var backdrops = document.querySelectorAll('.modal-backdrop:not(.fv-modal-stack)');
+        backdrops.forEach(function (backdrop) {
+            backdrop.style.zIndex = String(1040 + (10 * count));
+            backdrop.classList.add('fv-modal-stack');
+        });
+    });
 });

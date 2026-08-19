@@ -1,5 +1,5 @@
 {{define "body"}}
-<div class="col-sm-9 col-sm-offset-3 col-md-10 col-md-offset-2 main">
+<div class="col-sm-9 offset-sm-3 col-md-10 offset-md-2 main">
     <div class="row">
         <h1 class="page-header">
             {{.Title}}
@@ -9,8 +9,8 @@
         {{template "flashes" .Flashes}}
     </div>
     <div class="row">
-        <button type="button" class="btn btn-primary" id="new_button" data-toggle="modal" data-backdrop="static"
-            data-user-id="-1" data-target="#modal">
+        <button type="button" class="btn btn-primary" id="new_button" data-bs-toggle="modal"
+            data-user-id="-1" data-bs-target="#modal">
             <i class="fa fa-plus"></i> New User</button>
     </div>
     &nbsp;
@@ -33,33 +33,32 @@
     </div>
 </div>
 <!-- Modal -->
-<div class="modal fade" id="modal" tabindex="-1" role="dialog" aria-labelledby="modalLabel">
-    <div class="modal-dialog" role="document">
+<div class="modal fade" id="modal" tabindex="-1" role="dialog" aria-labelledby="userModalLabel"
+    aria-modal="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-scrollable" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
                 <h4 class="modal-title" id="userModalLabel">New User</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body" id="modal_body">
                 <div class="row" id="modal.flashes"></div>
-                <label class="control-label" for="username">Username:</label>
-                <div class="form-group">
+                <label class="form-label" for="username">Username:</label>
+                <div class="mb-3">
                     <input type="text" class="form-control" placeholder="Username" id="username" autofocus />
                 </div>
-                <label class="control-label" for="password">Password:</label>
-                <div class="form-group">
+                <label class="form-label" for="password">Password:</label>
+                <div class="mb-3">
                     <input type="password" class="form-control" autocomplete="new-password" placeholder="Password" id="password" required />
-                    <div class="hidden" id="password-strength-container">
+                    <div class="d-none" id="password-strength-container">
                         <div class="progress" id="password-strength">
                             <div id="password-strength-bar" class="progress-bar" role="progressbar" aria-valuenow="0" aria-valuemin="0" aria-valuemax="100"></div>
                         </div>
                         <span id="password-strength-description"></span>
                     </div>
                 </div>
-                <label class="control-label" for="confirm_password">Confirm Password:</label>
-                <div class="form-group">
+                <label class="form-label" for="confirm_password">Confirm Password:</label>
+                <div class="mb-3">
                     <input type="password" class="form-control" placeholder="Confirm Password" id="confirm_password"
                         required />
                 </div>
@@ -71,16 +70,16 @@
                     <input id="account_locked_checkbox" type="checkbox">
                     <label for="account_locked_checkbox">Account Locked</label>
                 </div>
-                <label class="control-label" for="role">Role:</label>
-                <div class="form-group" id="role-select">
-                    <select class="form-control" placeholder="" id="role" />
+                <label class="form-label" for="role">Role:</label>
+                <div class="mb-3" id="role-select">
+                    <select class="form-control" placeholder="" id="role">
                     <option value="admin">Admin</option>
                     <option value="user">User</option>
                     </select>
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-default" data-dismiss="modal">Close</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Close</button>
                 <button type="button" class="btn btn-primary" id="modalSubmit">Save changes</button>
             </div>
         </div>

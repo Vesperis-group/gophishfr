@@ -2,22 +2,118 @@
 
 Audit date: 2026-08-19
 
-This document maps the current Bootstrap and Flat UI surface. It does not
-migrate Bootstrap, jQuery, markup, or visual design.
+This document records the COMPLETE Bootstrap 5 migration status. All runtime
+Bootstrap 3, Flat UI, and Glyphicon dependencies have been removed and replaced.
+
+## Migration status (2026-08-19)
+
+The Bootstrap 5 migration described as future work below is complete:
+
+- Bootstrap 3.3.7 CSS and Bootstrap 3.0.2 JS were removed. Bootstrap 5.3.8 and
+  its `@popperjs/core` 2.11.8 peer are exact Yarn dependencies, built from
+  `node_modules/bootstrap` via
+  `scripts/build-frontend.js` (`bootstrap.min.css` and
+  `bootstrap.bundle.min.js`, which includes Popper).
+- `static/css/flat-ui.css` was deleted from the repository. Historical
+  attribution is preserved in NOTICE. `static/css/gophishfr-theme.css`
+  is the new first-party stylesheet that replaces its runtime role: global
+  typography (system font stack), link colors, the dark navbar palette, the
+  primary button/badge accent color, form focus styling, and Select2 accents.
+- `static/css/select2-bootstrap.min.css` (a Bootstrap 3 Select2 theme) was
+  removed; Select2 now uses its bundled `default` theme, restyled in
+  `gophishfr-theme.css`.
+- DataTables' Bootstrap integration moved from `datatables.net-bs` 1.13.11 to
+  `datatables.net-bs5` 1.13.11.
+- Glyphicon font files were removed. Bootstrap DateTimePicker (kept, still
+  jQuery-based) has its vendored default icons changed from Glyphicon to Font
+  Awesome, and every initialization supplies explicit `icons: faIcons`.
+- Bootstrap DateTimePicker's Collapse calls were replaced with native
+  `bootstrap.Collapse.getOrCreateInstance()` API (no jQuery bridge dependency).
+- All templates were migrated to Bootstrap 5 markup: `data-bs-*` attributes,
+  `navbar-expand-lg`/`navbar-dark` navbar structure (with a first-party
+  `navbar-gophishfr` color class replacing the old `navbar-inverse` override),
+  `btn-close`, restructured modal headers, `nav-item`/`nav-link` tabs,
+  `offset-*` grid classes, `float-end`/`float-start`, `btn-secondary`,
+  `form-label`/`form-text`/`mb-3`, `table-sm`, and `badge`/`bg-*` (or
+  `text-bg-*` for colored status pills) in place of `label`/`label-*`.
+- Bootstrap does NOT use its optional jQuery plugin bridge. `data-bs-no-jquery`
+  is set on all `<body>` elements, preventing Bootstrap from registering
+  `$.fn.modal`, `$.fn.tooltip`, etc. All Bootstrap lifecycle event listeners
+  (`hidden.bs.modal`, `shown.bs.modal`, `hide.bs.modal`) use native
+  `addEventListener` (centralized modal-stack logic in `gophish.js`, per-page
+  dismiss handlers in each page script).
+- Google Fonts external stylesheet links were removed. Typography uses a
+  system-local font stack — no CDN or external runtime asset is loaded.
+- `tests/browser/frontend-smoke.spec.ts` asserts the jQuery bridge is absent
+  (`$.fn.modal` is not a function), native Bootstrap API works, and blocks
+  any unexpected external request (no fonts.googleapis.com special-case).
 
 ## Current stack
 
-The generated stylesheet is built in this order:
+The generated stylesheet (`static/css/dist/gophish.css`) is built in this order:
+
+1. Bootstrap 5.3.8 CSS (from `node_modules/bootstrap`);
+2. first-party GophishFR styles (`main.css`, `dashboard.css`, `gophishfr-theme.css`);
+3. DataTables Bootstrap 5 integration CSS;
+4. Font Awesome, Bootstrap DateTimePicker CSS, checkbox.css, SweetAlert2, Select2.
+
+The browser vendor bundle (`static/js/dist/vendor.min.js`) includes jQuery
+1.10.2, Bootstrap 5.3.8 bundle (with Popper), and legacy jQuery plugins
+(generated in that order by `scripts/build-frontend.js`).
+Bootstrap's optional jQuery bridge is disabled via `data-bs-no-jquery` on
+`<body>`. All Bootstrap lifecycle event listeners use native `addEventListener`.
+No external CDN, fonts, or runtime assets are loaded. Typography uses a
+system-local font stack.
+
+**Remaining jQuery/jQuery UI debt:** jQuery 1.10.2 (vulnerable, unmaintained)
+remains required by DataTables, Select2, DateTimePicker, blueimp File Upload,
+SweetAlert2, and first-party DOM manipulation (`$(...)`). jQuery UI Widget
+Factory 1.11.1 is retained for blueimp File Upload.
+
+**Flat UI:** Deleted from the repository. Historical attribution in NOTICE.
+
+## Build and size result
+
+| Artifact | Bootstrap 3 baseline | Bootstrap 5 result | Delta |
+| --- | ---: | ---: | ---: |
+| Generated files | 19 | 19 | 0 |
+| All generated frontend assets | 2,858,432 bytes | 2,933,334 bytes | +74,902 bytes |
+| `static/css/dist/gophish.css` | 318,028 bytes | 338,328 bytes | +20,300 bytes |
+| `static/js/dist/vendor.min.js` | 1,063,275 bytes | 1,115,960 bytes | +52,685 bytes |
+
+Two immutable clean-room installations and builds produce identical files.
+The Bootstrap 5 aggregate SHA-256 manifest is:
+
+```text
+781757968ebb37421146e4b6a6f21bd121955498326c35eb2314dae9f5085ff2
+```
+
+The size increase is explained by replacing the smaller Bootstrap 3 runtime
+with Bootstrap 5.3.8's bundle and CSS. No new runtime asset or external
+network dependency was introduced.
+
+Retire.js 5.4.3 decreased from 16 source findings (14 medium, 2 low) to
+9 findings (8 medium, 1 low). No Bootstrap finding remains; all remaining
+findings are limited to the intentionally deferred jQuery and jQuery UI stack.
+Yarn and npm audits both report zero known dependency vulnerability, and
+Dependabot reports zero open alert.
+
+## Pre-migration stack (historical appendix)
+
+**The following section describes the state audited on 2026-08-19 before the
+Bootstrap 5 migration was applied. It is preserved for historical evidence.**
+
+The generated stylesheet was built in this order:
 
 1. Bootstrap CSS 3.3.7;
 2. first-party GophishFR styles;
 3. the locally modified Flat UI stylesheet;
 4. DataTables Bootstrap integration and the remaining component styles.
 
-The browser bundle includes Bootstrap JavaScript 3.0.2 and jQuery 1.10.2.
-Flat UI JavaScript is not distributed. The resulting UI therefore combines
-Bootstrap 3.3.7 CSS, older Bootstrap 3.0.2 plugins, and Flat UI overrides based
-on Bootstrap 3.1.0 selectors.
+The browser bundle included Bootstrap JavaScript 3.0.2 and jQuery 1.10.2.
+Flat UI JavaScript was not distributed. The resulting UI combined Bootstrap
+3.3.7 CSS, older Bootstrap 3.0.2 plugins, and Flat UI overrides based on
+Bootstrap 3.1.0 selectors.
 
 ## Flat UI provenance
 
@@ -134,6 +230,8 @@ The browser smoke test protects functional rather than pixel-perfect behavior:
 
 ## Bootstrap 5 blockers and recommended order
 
+Completed in `refactor/migrate-bootstrap5` (see "Migration status" above):
+
 1. Replace the Flat UI monolith with explicit GophishFR design tokens and
    component overrides; do not attempt to load it over Bootstrap 5.
 2. Migrate Bootstrap modal, tab, collapse, dropdown, tooltip, navbar, grid, and
@@ -142,9 +240,13 @@ The browser smoke test protects functional rather than pixel-perfect behavior:
    Awesome or move to one maintained icon set.
 4. Upgrade or replace DataTables Bootstrap integration, Select2 Bootstrap
    theme, DateTimePicker, File Upload, and checkbox presentation.
+
+Deferred (jQuery itself, and the plugins that still require it, are unchanged
+by this migration):
+
 5. Refactor first-party jQuery usage after plugin dependencies have been
    removed.
 6. Remove jQuery and the remaining jQuery UI Widget Factory last.
 
-The future implementation belongs in `refactor/migrate-bootstrap5`; this audit
-does not start that migration.
+The Bootstrap 5 migration was implemented in `refactor/migrate-bootstrap5`;
+this audit originally only mapped the pre-migration surface.
