@@ -865,7 +865,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
 
     // Click on launch date input to open datetimepicker
     await page.locator("#launch_date").click();
-    const picker = page.locator(".bootstrap-datetimepicker-widget");
+    const picker = page.locator(".bootstrap-datetimepicker-widget:visible");
     await expect(picker).toBeVisible();
 
     // Verify Font Awesome icons (no glyphicon)
@@ -1226,7 +1226,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
 
     // Click the datetimepicker to open it
     await page.locator("#launch_date").click();
-    const picker = page.locator(".bootstrap-datetimepicker-widget");
+    const picker = page.locator(".bootstrap-datetimepicker-widget:visible");
     await expect(picker).toBeVisible();
 
     // Click a definitely different current-month day: scan the visible days
