@@ -1172,8 +1172,8 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await profileContainer.click();
     await expect(page.locator('.select2-dropdown')).toBeVisible();
     // Type a search query
-    await page.locator('.select2-search__field').fill("Browser Fixture");
-    await expect(page.locator('.select2-results__option')).toContainText("Browser Fixture Sending Profile");
+    await page.locator('.select2-search__field:visible').fill("Browser Fixture");
+    await expect(page.locator('.select2-results__option:visible')).toContainText("Browser Fixture Sending Profile");
     // Select via Enter key
     await page.keyboard.press("Enter");
     await expect(profileContainer.locator('.select2-selection__rendered')).toContainText('Browser Fixture Sending Profile');
@@ -1182,8 +1182,8 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     const groupContainer = page.locator('select#users + .select2-container, select#users ~ .select2-container').first();
     await groupContainer.click();
     await expect(page.locator('.select2-dropdown')).toBeVisible();
-    await page.locator('.select2-search__field').fill("Browser");
-    await expect(page.locator('.select2-results__option')).toContainText("Browser Fixture Group");
+    await page.locator('.select2-search__field:visible').fill("Browser");
+    await expect(page.locator('.select2-results__option:visible')).toContainText("Browser Fixture Group");
     await page.keyboard.press("Enter");
     // Verify the selection appears as a tag in multi-select
     await expect(groupContainer.locator('.select2-selection__choice')).toContainText("Browser Fixture Group");
