@@ -8,19 +8,69 @@ the normal Yarn dependency graph. Generated files under `static/js/dist` and
 scripts under `static/js/src/app` and the project-specific stylesheets
 `main.css`, `dashboard.css`, and `docs.css` are first-party sources.
 
+## Update (blueimp File Upload removal, 2026-08-19)
+
+The manually vendored blueimp jQuery File Upload 5.42.3 and iframe transport
+1.8.3 were removed. Group CSV import now uses the browser-native file input,
+`FormData`, and `fetch` APIs. No replacement dependency, CDN, telemetry, upload
+framework, or runtime download was added.
+
+The existing application behavior required only file selection, multiple
+`.csv`/`.txt` files, client-side extension feedback, one authenticated multipart
+POST per file, and insertion of the returned targets. The migration deliberately
+does not recreate blueimp's implicit document-wide drag/drop, old-browser iframe
+transport, progress, preview, cancel, chunking, resumable, or cross-domain
+features.
+
+| Capability | Blueimp supports | Used by GophishFR | Required after migration |
+| --- | --- | --- | --- |
+| Simple file selection | Yes | Yes | Yes, native file input |
+| Multipart upload | Yes | Yes, `files[]` to `/api/import/group` | Yes, native `FormData` |
+| Multiple files | Yes | Yes, one request per selected file | Yes |
+| Drag/drop | Yes, implicitly on `document` | No dedicated UI or application callback | No |
+| Progress | Yes | No progress UI or callback | No |
+| Validation | Yes | Per-file extension feedback for `.csv` and `.txt` | Yes, first-party; invalid files do not block valid selections |
+| Preview | Yes with optional modules | No | No |
+| Cancel | Yes | No | No |
+| Chunking | Yes | No | No |
+| Resumable | Possible with chunking | No | No |
+| Cross-domain | Yes, including iframe fallback | No | No |
+
+The backend contract is unchanged: authenticated users with object-modification
+permission POST `multipart/form-data` to `/api/import/group`, using `files[]`,
+and receive a JSON array of target records. The browser continues to send the
+API key in the `Authorization: Bearer` header. The endpoint streams CSV content
+without persisting the upload or using its filename, so filename path traversal
+and permanent upload storage are not applicable.
+
+Browser extension and `accept` checks are usability controls, not a security
+boundary. The server remains authoritative for CSV parsing and email-address
+validation. A separate backend-hardening change should add an explicit POST-only
+route, request and record-count limits, multipart part-count limits, and a
+documented server-side content policy; the current endpoint has none of those
+limits. That independent work is intentionally not hidden in this frontend
+replacement.
+
+Removing blueimp eliminated the only Widget Factory consumer. The exact
+`jquery-ui@1.14.2` dependency, its lockfile entry, bundled `ui/widget.js`, and
+generated license notice were therefore removed. jQuery UI is no longer
+distributed. jQuery 3.7.1 remains unchanged for DataTables, Select2,
+DateTimePicker, and first-party code; 11 first-party application scripts still
+contain jQuery usage.
+
 ## Update (jQuery modernization, 2026-08-19)
 
 - The vendored jQuery 1.10.2 runtime was replaced by the exact Yarn dependency
-  `jquery@3.7.1`. Its direct version satisfies the DataTables and jQuery UI
-  ranges, so Yarn resolves one package and the browser exposes one
+  `jquery@3.7.1`. Its direct version satisfies the DataTables range, so Yarn
+  resolves one package and the browser exposes one
   `window.jQuery === window.$` instance.
-- The vendored jQuery UI Widget Factory 1.11.1 was replaced by
-  `jquery-ui@1.14.2`; only `ui/widget.js` is bundled for blueimp File Upload.
-  No jQuery UI CSS, theme, or other widget is distributed.
+- The vendored jQuery UI Widget Factory 1.11.1 was initially replaced by
+  `jquery-ui@1.14.2` for blueimp File Upload. That intermediate dependency was
+  removed with blueimp; no jQuery UI code is now distributed.
 - First-party jqXHR callbacks use `.done()`/`.fail()`/`.always()`.
   DateTimePicker uses `.length` instead of removed `.size()` and inserts its
-  detached widget before showing it under jQuery 3; blueimp File Upload uses
-  jQuery 3 Deferred `.then()` instead of removed `.pipe()`.
+  detached widget before showing it under jQuery 3. The former blueimp
+  `.pipe()` compatibility patch disappeared with the plugin.
 - jQuery Migrate 3.6.0 was evaluated but not added or shipped. Static analysis
   identified the incompatibilities directly, and the production browser suite
   completes with no JavaScript exception or console error.
@@ -50,8 +100,8 @@ vendored/inventoried components to exact Yarn dependencies as part of
   new first-party Bootstrap 5 theme (system font stack, no external CDN).
 - Bootstrap does NOT use its optional jQuery bridge (`data-bs-no-jquery` is set
   on `<body>`). All Bootstrap lifecycle events are handled via native
-  `addEventListener`. jQuery remains for legacy plugins (DataTables, Select2,
-  DateTimePicker, blueimp File Upload, SweetAlert2) only.
+  `addEventListener`. jQuery remains for DataTables, Select2, DateTimePicker,
+  and first-party application code.
 - Bootstrap DateTimePicker's vendored source (`bootstrap-datetime.js`) was
   locally modified to: (1) replace Collapse jQuery calls with native
   `bootstrap.Collapse.getOrCreateInstance()` API, and (2) change default icon
@@ -94,8 +144,8 @@ exists.
 | TopoJSON | 1.6.9, embedded `version` | `static/js/src/vendor/topojson.min.js` | `LEGACY_BUT_REQUIRED` by Datamaps; minified-only | [topojson/topojson](https://github.com/topojson/topojson), BSD-3-Clause | `CLEAN`, old release line; migrate with Datamaps |
 | Datamaps | `UNKNOWN`; hash does not match official npm 0.3.6 through 0.5.10 world bundles | `static/js/src/vendor/datamaps.min.js` | `USED` by the campaign-results map; minified-only | Historical import `a78e92a`; [markmarkoh/datamaps](https://github.com/markmarkoh/datamaps), MIT | `UNKNOWN_VERSION`, archived upstream; replace with a maintained map implementation |
 | DataTables datetime-moment plug-in | `UNKNOWN`; no version marker | `static/js/src/vendor/datetime-moment.js` | `USED` for date sorting; readable source retained | [DataTables plug-in](https://datatables.net/plug-ins/sorting/datetime-moment), MIT | `UNKNOWN_VERSION`, deprecated upstream; replace with DataTables' current date renderer |
-| jQuery UI Widget Factory | 1.11.1 — **superseded**: vendored copy deleted, replaced by exact Yarn dependency `jquery-ui@1.14.2` (only `ui/widget.js` is bundled) | `static/js/src/vendor/jquery.ui.widget.js` (deleted) | Widget Factory module only; required by blueimp File Upload | [jquery/jquery-ui](https://github.com/jquery/jquery-ui), MIT | Migrated to 1.14.2; Retire.js advisories (Datepicker/Position/Checkboxradio) remain `NOT_APPLICABLE` as those modules are not bundled |
-| blueimp jQuery File Upload | 5.42.3; iframe transport 1.8.3, source banners | `jquery.fileupload.js`, `jquery.iframe-transport.js` | `USED` by group CSV import; readable source retained | [blueimp/jQuery-File-Upload](https://github.com/blueimp/jQuery-File-Upload), MIT | Browser modules have no applicable advisory; CVE-2018-9206 affected upstream server handlers, which are not shipped; migrate with jQuery |
+| jQuery UI Widget Factory | 1.11.1, later Yarn-managed 1.14.2 — **removed** | Former vendored file and package-managed `ui/widget.js` are deleted | Its only consumer was blueimp File Upload | [jquery/jquery-ui](https://github.com/jquery/jquery-ui), MIT | `REMOVED`; jQuery UI is no longer distributed |
+| blueimp jQuery File Upload | 5.42.3; iframe transport 1.8.3 — **removed** | `jquery.fileupload.js`, `jquery.iframe-transport.js` (deleted) | Formerly used only by group CSV import; replaced with first-party native browser APIs | [blueimp/jQuery-File-Upload](https://github.com/blueimp/jQuery-File-Upload), MIT | `REMOVED`; CVE-2018-9206 concerned upstream server handlers, which were never shipped |
 | SweetAlert2 | 8.17.1, exact npm package hash | `sweetalert2.min.js`, `sweetalert2.min.css` | `USED` for confirmations and status dialogs; minified-only | [sweetalert2/sweetalert2](https://github.com/sweetalert2/sweetalert2), MIT | `CLEAN`, old major; preserve pending UI-stack migration |
 | Bootstrap DateTimePicker | JS 4.17.37; CSS 4.15.35, banners | `bootstrap-datetime.js`, `bootstrap-datetime.css` | `USED` for campaign scheduling; readable JS, CSS source; locally modified: Collapse calls use native Bootstrap 5 API (`bootstrap.Collapse.getOrCreateInstance`), default icons changed from Glyphicon to Font Awesome, and detached widgets are inserted before jQuery 3 shows them | [Eonasdan/bootstrap-datetimepicker](https://github.com/Eonasdan/bootstrap-datetimepicker), MIT | `UNMAINTAINED`; mismatched patch versions, no applicable advisory found; migrate with Bootstrap |
 | Select2 Bootstrap Theme | 0.1.0-beta.9, banner — **superseded**: removed; Select2 now uses its bundled `default` theme, restyled in `static/css/gophishfr-theme.css` | `static/css/select2-bootstrap.min.css` (deleted) | Formerly used for Select2 presentation; minified-only CSS | [select2-bootstrap-theme](https://github.com/select2/select2-bootstrap-theme), MIT | Migrated; see `docs/BOOTSTRAP5_MIGRATION_BASELINE.md` |
@@ -117,8 +167,7 @@ them in a fixed order, and emits their complete license texts in
 
 | Component | Version | Usage | License | Audit status |
 | --- | --- | --- | --- | --- |
-| jQuery | 3.7.1 | Single global runtime instance for legacy plugins (DataTables, Select2, DateTimePicker, blueimp File Upload); the exact direct dependency naturally satisfies and deduplicates all transitive ranges | MIT | `CLEAN`; remediates CVE-2015-9251, CVE-2019-11358, CVE-2020-11022, CVE-2020-11023 from 1.10.2 |
-| jQuery UI Widget Factory | 1.14.2 (only `ui/widget.js` bundled) | Required by blueimp File Upload; no CSS/theme/other widgets included | MIT | `CLEAN`; Retire.js advisories for Datepicker/Position/Checkboxradio are `NOT_APPLICABLE` |
+| jQuery | 3.7.1 | Single global runtime instance for DataTables, Select2, DateTimePicker, and first-party code; the exact direct dependency naturally satisfies all transitive ranges | MIT | `CLEAN`; remediates CVE-2015-9251, CVE-2019-11358, CVE-2020-11022, CVE-2020-11023 from 1.10.2 |
 | Chart.js / `@kurkle/color` | 4.5.1 / 0.3.4 | Dashboard and campaign charts | MIT | `CLEAN` |
 | chartjs-plugin-zoom / Hammer.JS | 2.2.0 / 2.0.8 | Timeline pan and zoom | MIT | `CLEAN` |
 | Bootstrap / Popper | 5.3.8 / 2.11.8 | Global layout, navbar, modal, tabs, dropdown, tooltip | MIT | `CLEAN`; exact Yarn dependencies replacing the manually vendored Bootstrap 3 JS/CSS above |
@@ -130,9 +179,9 @@ them in a fixed order, and emits their complete license texts in
 | zxcvbn | 4.4.2 | Password-strength feedback | MIT | `CLEAN`, old release |
 | CodeMirror / Lezer | CodeMirror packages 6.x; Lezer packages 1.x, exact versions in `yarn.lock` | Canonical full-document HTML source editing, syntax highlighting, search, keyboard commands, and GophishFR placeholder completion | MIT | `CLEAN`; self-hosted Webpack bundle, no remote service or license key |
 
-Yarn audit reports zero advisories across 114 resolved dependencies. A
+Yarn audit reports zero advisories across 113 resolved dependencies. A
 temporary npm resolution, created outside the worktree without retaining a
-`package-lock.json`, reports zero advisories across 109 dependencies. GitHub
+`package-lock.json`, reports zero advisories across 108 dependencies. GitHub
 reports zero open Dependabot alerts.
 
 ## Changes made by this audit
@@ -180,9 +229,9 @@ compatibility bridge release). First-party `.success()`/`.error()`/`.complete()`
 calls replaced with `.done()`/`.fail()`/`.always()`. Vendored DateTimePicker
 `.size()` was replaced with `.length`, and its detached widget is inserted
 before `.show()` so jQuery 3 can override Bootstrap's hidden dropdown state.
-Vendored blueimp File Upload `.pipe()` was replaced with `.then()`. Select2
-4.0.13, DataTables 1.13.11, DateTimePicker
-4.17.37, and blueimp File Upload 5.42.3 confirmed compatible under jQuery 3.7.1.
+Vendored blueimp File Upload `.pipe()` was temporarily replaced with `.then()`
+before the plugin was removed. Select2 4.0.13, DataTables 1.13.11, and
+DateTimePicker 4.17.37 remain confirmed compatible under jQuery 3.7.1.
 
 jQuery Migrate 3.6.0 was evaluated as a temporary diagnostic option but was
 not added or loaded: the static audit identified the removed APIs directly,
@@ -192,11 +241,9 @@ manifest, lockfile, or test dependencies.
 
 **JQUERY4_BLOCKED reasons** (preliminary):
 - Select2 4.0.13: uses internal jQuery APIs removed in 4.x (`$.expr[':']`)
-- blueimp File Upload: depends on Widget Factory and Deferred patterns
 - DateTimePicker: unmaintained, uses deprecated `$.isFunction` removed in 4.x
 - DataTables 1.x: uses `$.camelCase` and other internals removed in 4.x
-- jQuery UI Widget Factory: the 1.14.x line supports jQuery <5 but 4.x requires
-  testing all consumers
+- first-party application scripts still use jQuery for Ajax, DOM, and events
 - Resolution: remain on 3.7.1 until plugin majors are upgraded or replaced
 
 ### Bootstrap JS 3.0.2
@@ -225,15 +272,15 @@ CVE-2024-6485. The durable remediation is a supported Bootstrap migration.
 
 ## Reproducibility
 
-The jQuery 3.7.1 frontend build contains 19 generated files and 2,932,111
-bytes, 1,223 bytes smaller than the Bootstrap 5 pre-jQuery baseline of
-2,933,334 bytes. The vendor bundle decreased from 1,115,960 to 1,111,876
-bytes. Two independent immutable installations and clean builds produced the
+The post-blueimp frontend build contains 19 generated files and 2,902,066
+bytes, 30,045 bytes smaller than the pre-removal jQuery 3 build. The vendor
+bundle decreased from 1,111,876 to 1,083,088 bytes. Two independent immutable
+installations and clean builds produced the
 same per-file hashes, left `yarn.lock` unchanged, and produced this aggregate
 SHA-256 manifest:
 
 ```text
-456499aa3ed940bca633ab8ce6853889291d358dcb78277afb128971707a4781
+d30bb094b005dd8112f7fc85c9c4001a435a55bcdb6bf439db01598b20975e46
 ```
 
 Webpack reports performance-budget warnings for the approximately 532 KiB

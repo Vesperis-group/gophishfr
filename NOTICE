@@ -36,7 +36,7 @@ available license banners, and complete notices for package-managed frontend
 libraries are emitted beside the generated JavaScript bundles.
 
 The package-managed components in the generated frontend vendor bundle include
-jQuery, jQuery UI Widget Factory, Bootstrap, Popper, Chart.js, @kurkle/color,
+jQuery, Bootstrap, Popper, Chart.js, @kurkle/color,
 chartjs-plugin-zoom, Hammer.JS, DataTables, Moment.js, Papa Parse, Select2,
 and UAParser.js under the MIT License. Their complete copyright and license
 notices are distributed in `static/js/dist/vendor.min.js.LICENSE.txt`. Manually
