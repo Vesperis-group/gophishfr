@@ -30,6 +30,7 @@ function bsHideTooltips(root) {
         var tooltip = bootstrap.Tooltip.getInstance(el);
         if (tooltip) {
             tooltip.hide();
+            tooltip.dispose();
         }
     });
 }
@@ -43,7 +44,10 @@ function bsHideTooltip(selector) {
     var el = typeof selector === "string" ? document.querySelector(selector) : selector;
     if (!el) return;
     var tooltip = bootstrap.Tooltip.getInstance(el);
-    if (tooltip) tooltip.hide();
+    if (tooltip) {
+        tooltip.hide();
+        tooltip.dispose();
+    }
 }
 window.bsHideTooltip = bsHideTooltip;
 
