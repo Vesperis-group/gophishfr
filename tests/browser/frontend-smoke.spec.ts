@@ -1154,6 +1154,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   await test.step("Select2 keyboard search and multi-select behavior", async () => {
     await page.getByRole("link", { name: "Campaigns", exact: true }).click();
     await expect(page).toHaveURL(/\/campaigns$/);
+    await page.waitForFunction(() => typeof window.bootstrap !== "undefined");
     await page.getByRole("button", { name: "New Campaign" }).click();
     await page.evaluate(() => {
       const modal = document.querySelector("#modal");
