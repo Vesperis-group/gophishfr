@@ -865,7 +865,13 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
 
     // Click on launch date input to open datetimepicker
     const picker = page.locator(".bootstrap-datetimepicker-widget:visible");
-    await page.evaluate(() => window.jQuery("#launch_date").trigger("focus"));
+    await page.evaluate(() => {
+      const dateTimePicker = window.jQuery("#launch_date").data("DateTimePicker");
+      if (!dateTimePicker) {
+        throw new Error("Launch date DateTimePicker was not initialized");
+      }
+      dateTimePicker.show();
+    });
     await expect(picker).toBeVisible();
 
     // Verify Font Awesome icons (no glyphicon)
@@ -1225,7 +1231,13 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     const initialDay = initialDayMatch === null ? "" : initialDayMatch[1];
 
     const picker = page.locator(".bootstrap-datetimepicker-widget:visible");
-    await page.evaluate(() => window.jQuery("#launch_date").trigger("focus"));
+    await page.evaluate(() => {
+      const dateTimePicker = window.jQuery("#launch_date").data("DateTimePicker");
+      if (!dateTimePicker) {
+        throw new Error("Launch date DateTimePicker was not initialized");
+      }
+      dateTimePicker.show();
+    });
     await expect(picker).toBeVisible();
 
     // Click a definitely different current-month day: scan the visible days
