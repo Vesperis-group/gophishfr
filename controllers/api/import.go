@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 	"strings"
 
@@ -41,12 +42,59 @@ type emailResponse struct {
 
 // ImportGroup imports a CSV of group members
 func (as *Server) ImportGroup(w http.ResponseWriter, r *http.Request) {
+	if r.Method != "POST" {
+		JSONResponse(w, models.Response{Success: false, Message: "Method not allowed"}, http.StatusBadRequest)
+		return
+	}
+	if !isMultipartFormData(r.Header.Get("Content-Type")) {
+		JSONResponse(w, models.Response{Success: false, Message: "Expected a multipart/form-data upload"}, http.StatusUnsupportedMediaType)
+		return
+	}
+	// Bound the body before it is parsed so an oversized upload is rejected
+	// while it streams instead of being buffered.
+	r.Body = http.MaxBytesReader(w, r.Body, util.MaxImportRequestBytes)
 	ts, err := util.ParseCSV(r)
 	if err != nil {
-		JSONResponse(w, models.Response{Success: false, Message: "Error parsing CSV"}, http.StatusInternalServerError)
+		status, message := importGroupError(err)
+		JSONResponse(w, models.Response{Success: false, Message: message}, status)
 		return
 	}
 	JSONResponse(w, ts, http.StatusOK)
+}
+
+// isMultipartFormData reports whether the declared media type is the multipart
+// upload this endpoint accepts. The extension of the uploaded file is metadata
+// only and is never used as a control.
+func isMultipartFormData(contentType string) bool {
+	mediaType, params, err := mime.ParseMediaType(contentType)
+	if err != nil {
+		return false
+	}
+	if mediaType != "multipart/form-data" {
+		return false
+	}
+	return params["boundary"] != ""
+}
+
+// importGroupError maps an import failure onto a status code and a message that
+// describes the limit without echoing any uploaded content.
+func importGroupError(err error) (int, string) {
+	var maxBytesError *http.MaxBytesError
+	if errors.As(err, &maxBytesError) {
+		return http.StatusRequestEntityTooLarge, fmt.Sprintf("The uploaded data is larger than %d bytes", util.MaxImportRequestBytes)
+	}
+	switch {
+	case errors.Is(err, util.ErrCSVTooManyParts),
+		errors.Is(err, util.ErrCSVTooManyFiles),
+		errors.Is(err, util.ErrCSVTooManyRecords),
+		errors.Is(err, util.ErrCSVTooManyColumns),
+		errors.Is(err, util.ErrCSVFieldTooLong),
+		errors.Is(err, util.ErrCSVMalformed):
+		return http.StatusBadRequest, err.Error()
+	}
+	// Every remaining failure comes from a malformed request body, so the
+	// client is told what to fix without exposing the underlying error.
+	return http.StatusBadRequest, "Error parsing CSV"
 }
 
 // ImportEmail allows for the importing of email.

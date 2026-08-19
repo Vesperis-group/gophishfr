@@ -78,6 +78,8 @@ installs and launches Chromium. See
 [`docs/FRONTEND_BROWSER_TESTS.md`](docs/FRONTEND_BROWSER_TESTS.md).
 The HTML source editor and isolated preview security model are documented in
 [`docs/HTML_EDITOR_MIGRATION.md`](docs/HTML_EDITOR_MIGRATION.md).
+The limits enforced when importing group members from a CSV file are documented
+in [`docs/GROUP_IMPORT_LIMITS.md`](docs/GROUP_IMPORT_LIMITS.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements and
 [SECURITY.md](SECURITY.md) for responsible vulnerability reporting.
