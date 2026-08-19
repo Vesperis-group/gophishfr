@@ -1,4 +1,4 @@
-import { expect, test, type Page } from "@playwright/test";
+import { expect, test, type Page, type Request } from "@playwright/test";
 
 const baseURL = requiredEnvironmentVariable("GOPHISHFR_BROWSER_BASE_URL");
 const username = requiredEnvironmentVariable("GOPHISHFR_BROWSER_USERNAME");
@@ -1077,10 +1077,29 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator("#modal")).not.toBeVisible();
   });
 
-  await test.step("blueimp CSV file upload: rejected extension and successful CSV import", async () => {
+  await test.step("native CSV upload preserves validation and multipart behavior", async () => {
     await page.getByRole("link", { name: "Users & Groups" }).click();
     await expect(page).toHaveURL(/\/groups$/);
     await openApplicationModal(page, "New Group");
+
+    const importRequests: Array<{
+      authorization: string;
+      body: string;
+      contentType: string;
+      method: string;
+    }> = [];
+    const captureImportRequest = (request: Request) => {
+      if (new URL(request.url()).pathname !== "/api/import/group") {
+        return;
+      }
+      importRequests.push({
+        authorization: request.headers().authorization ?? "",
+        body: request.postDataBuffer()?.toString("utf8") ?? "",
+        contentType: request.headers()["content-type"] ?? "",
+        method: request.method(),
+      });
+    };
+    page.on("request", captureImportRequest);
 
     // Rejected extension: try uploading a .exe file (should not populate targets)
     const fileInput = page.locator('#modal input[type="file"]');
@@ -1094,17 +1113,88 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await page.waitForTimeout(500);
     const targetsAfterExe = await page.locator("#targetsTable tbody tr").count();
     expect(targetsAfterExe).toBe(targetsBeforeExe);
+    expect(importRequests).toHaveLength(0);
+    await expect(page.locator('[id="modal.flashes"]')).toContainText(
+      "Unsupported file extension",
+    );
 
-    // Successful CSV import with valid data
-    const csvContent = "First Name,Last Name,Email,Position\nCSVTest,User,csvtest@localhost.invalid,Tester\nCSVSecond,Person,csvsecond@localhost.invalid,Dev";
-    await fileInput.setInputFiles({
-      name: "targets.csv",
-      mimeType: "text/csv",
-      buffer: Buffer.from(csvContent),
-    });
+    await fileInput.setInputFiles([
+      {
+        name: "mixed-valid.csv",
+        mimeType: "text/csv",
+        buffer: Buffer.from(
+          "First Name,Last Name,Email\nMixed,Valid,mixed-valid@localhost.invalid",
+        ),
+      },
+      {
+        name: "mixed-invalid.exe",
+        mimeType: "application/octet-stream",
+        buffer: Buffer.from("MZ synthetic invalid fixture"),
+      },
+    ]);
+    await expect(page.locator("#targetsTable")).toContainText(
+      "mixed-valid@localhost.invalid",
+    );
+    await expect(page.locator('[id="modal.flashes"]')).toContainText(
+      "Unsupported file extension",
+    );
+    await expect.poll(() => importRequests.length).toBe(1);
+    importRequests.length = 0;
+
+    // Successful multi-file import with the historical one-request-per-file
+    // multipart contract.
+    await fileInput.setInputFiles([
+      {
+        name: "targets.csv",
+        mimeType: "text/csv",
+        buffer: Buffer.from(
+          "First Name,Last Name,Email,Position\nCSVTest,User,csvtest@localhost.invalid,Tester",
+        ),
+      },
+      {
+        name: "targets-extra.txt",
+        mimeType: "text/plain",
+        buffer: Buffer.from(
+          "First Name,Last Name,Email,Position\nCSVSecond,Person,csvsecond@localhost.invalid,Dev",
+        ),
+      },
+    ]);
     await expect(page.locator("#targetsTable")).toContainText("csvtest@localhost.invalid");
     await expect(page.locator("#targetsTable")).toContainText("csvsecond@localhost.invalid");
     await expect(page.locator("#targetsTable")).toContainText("CSVTest");
+    await expect.poll(() => importRequests.length).toBe(2);
+
+    for (const request of importRequests) {
+      expect(request.method).toBe("POST");
+      expect(request.authorization).toMatch(/^Bearer .+$/);
+      expect(request.contentType).toMatch(/^multipart\/form-data;\s*boundary=/);
+      expect(request.body).toContain('name="files[]"');
+    }
+    const multipartBodies = importRequests.map(({ body }) => body).join("\n");
+    expect(multipartBodies).toContain('filename="targets.csv"');
+    expect(multipartBodies).toContain('filename="targets-extra.txt"');
+
+    await page.route(
+      "**/api/import/group",
+      (route) =>
+        route.fulfill({
+          body: JSON.stringify({
+            message: "Synthetic invalid CSV import response",
+          }),
+          contentType: "application/json",
+          status: 200,
+        }),
+      { times: 1 },
+    );
+    await fileInput.setInputFiles({
+      name: "server-error.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from("First Name,Last Name,Email\nError,Fixture,error@localhost.invalid"),
+    });
+    await expect(page.locator('[id="modal.flashes"]')).toContainText(
+      "Invalid CSV import response",
+    );
+    page.off("request", captureImportRequest);
 
     await closeApplicationModal(page);
   });

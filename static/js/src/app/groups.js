@@ -87,34 +87,69 @@ function edit(id) {
                 errorFlash("Error fetching group")
             })
     }
-    // Handle file uploads
-    $("#csvupload").fileupload({
-        url: "/api/import/group",
-        dataType: "json",
-        beforeSend: function (xhr) {
-            xhr.setRequestHeader('Authorization', 'Bearer ' + user.api_key);
+}
+
+function isSupportedCSVFile(file) {
+    return /\.(csv|txt)$/i.test(file.name)
+}
+
+function uploadCSVFile(file) {
+    var formData = new FormData()
+    formData.append("files[]", file, file.name)
+
+    return fetch("/api/import/group", {
+        method: "POST",
+        headers: {
+            "Authorization": "Bearer " + user.api_key
         },
-        add: function (e, data) {
-            $("#modal\\.flashes").empty()
-            var acceptFileTypes = /(csv|txt)$/i;
-            var filename = data.originalFiles[0]['name']
-            if (filename && !acceptFileTypes.test(filename.split(".").pop())) {
-                modalError("Unsupported file extension (use .csv or .txt)")
-                return false;
+        body: formData
+    }).then(function (response) {
+        return response.json().then(function (result) {
+            if (!response.ok) {
+                throw new Error(result.message || "Error importing CSV")
             }
-            data.submit();
-        },
-        done: function (e, data) {
-            $.each(data.result, function (i, record) {
-                addTarget(
-                    record.first_name,
-                    record.last_name,
-                    record.email,
-                    record.position);
-            });
-            targets.DataTable().draw();
-        }
+            if (!Array.isArray(result)) {
+                throw new Error("Invalid CSV import response")
+            }
+            return result
+        }, function () {
+            throw new Error("Invalid CSV import response")
+        })
     })
+}
+
+function addImportedTargets(records) {
+    records.forEach(function (record) {
+        addTarget(
+            record.first_name,
+            record.last_name,
+            record.email,
+            record.position)
+    })
+    targets.DataTable().draw()
+}
+
+function importCSVFiles(input) {
+    var files = Array.prototype.slice.call(input.files)
+    $("#modal\\.flashes").empty()
+
+    if (files.length === 0) {
+        return
+    }
+
+    var supportedFiles = files.filter(isSupportedCSVFile)
+    if (supportedFiles.length !== files.length) {
+        modalError("Unsupported file extension (use .csv or .txt)")
+    }
+
+    supportedFiles.forEach(function (file) {
+        uploadCSVFile(file)
+            .then(addImportedTargets)
+            .catch(function (error) {
+                modalError(error instanceof Error ? error.message : "Error importing CSV")
+            })
+    })
+    input.value = ""
 }
 
 var downloadCSVTemplate = function () {
@@ -292,5 +327,8 @@ $(document).ready(function () {
     document.getElementById('modal').addEventListener('hide.bs.modal', function () {
         dismiss();
     });
+    document.getElementById("csvupload").addEventListener("change", function () {
+        importCSVFiles(this)
+    })
     $("#csv-template").click(downloadCSVTemplate)
 });

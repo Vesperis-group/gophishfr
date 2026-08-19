@@ -58,17 +58,17 @@ The generated stylesheet (`static/css/dist/gophish.css`) is built in this order:
 4. Font Awesome, Bootstrap DateTimePicker CSS, checkbox.css, SweetAlert2, Select2.
 
 The browser vendor bundle (`static/js/dist/vendor.min.js`) includes jQuery
-1.10.2, Bootstrap 5.3.8 bundle (with Popper), and legacy jQuery plugins
+3.7.1, Bootstrap 5.3.8 bundle (with Popper), and legacy jQuery plugins
 (generated in that order by `scripts/build-frontend.js`).
 Bootstrap's optional jQuery bridge is disabled via `data-bs-no-jquery` on
 `<body>`. All Bootstrap lifecycle event listeners use native `addEventListener`.
 No external CDN, fonts, or runtime assets are loaded. Typography uses a
 system-local font stack.
 
-**Remaining jQuery/jQuery UI debt:** jQuery 1.10.2 (vulnerable, unmaintained)
-remains required by DataTables, Select2, DateTimePicker, blueimp File Upload,
-SweetAlert2, and first-party DOM manipulation (`$(...)`). jQuery UI Widget
-Factory 1.11.1 is retained for blueimp File Upload.
+**Remaining jQuery debt:** jQuery 3.7.1 remains required by DataTables, Select2,
+DateTimePicker, and first-party DOM manipulation (`$(...)`). Blueimp File Upload
+and its sole jQuery UI Widget Factory dependency were removed after the
+Bootstrap migration; jQuery UI is no longer distributed.
 
 **Flat UI:** Deleted from the repository. Historical attribution in NOTICE.
 

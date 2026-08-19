@@ -68,9 +68,6 @@ const vendorScriptPaths = [
   managedFile("datatables.net", "js", "jquery.dataTables.min.js"),
   managedFile("datatables.net-bs5", "js", "dataTables.bootstrap5.min.js"),
   vendoredScript("datetime-moment.js"),
-  managedFile("jquery-ui", "ui", "widget.js"),
-  vendoredScript("jquery.fileupload.js"),
-  vendoredScript("jquery.iframe-transport.js"),
   vendoredScript("sweetalert2.min.js"),
   vendoredScript("bootstrap-datetime.js"),
   managedFile("select2", "dist", "js", "select2.min.js"),
@@ -113,10 +110,6 @@ const managedVendorLicenses = [
   {
     component: "jQuery 3.7.1",
     sourcePath: managedFile("jquery", "LICENSE.txt"),
-  },
-  {
-    component: "jQuery UI Widget Factory 1.14.2",
-    sourcePath: managedFile("jquery-ui", "LICENSE.txt"),
   },
   {
     component: "Chart.js 4.5.1",
