@@ -191,7 +191,7 @@ and clean builds produced the same per-file hashes, left `yarn.lock`
 unchanged, and produced this aggregate SHA-256 manifest:
 
 ```text
-781757968ebb37421146e4b6a6f21bd121955498326c35eb2314dae9f5085ff2
+186509d8f87341b50bf7051d8d44f817376bff49b66074883f9b357d92fa4323
 ```
 
 Webpack reports performance-budget warnings for the approximately 532 KiB
