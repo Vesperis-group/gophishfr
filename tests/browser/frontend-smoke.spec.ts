@@ -867,7 +867,8 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     const picker = page.locator(".bootstrap-datetimepicker-widget:visible");
     await expect(async () => {
       if (!(await picker.isVisible())) {
-        await page.locator("#launch_date").click();
+        await page.locator("#name").focus();
+        await page.locator("#launch_date").focus();
       }
       await expect(picker).toBeVisible({ timeout: 1_000 });
     }).toPass({ timeout: 5_000 });
@@ -1231,7 +1232,8 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     const picker = page.locator(".bootstrap-datetimepicker-widget:visible");
     await expect(async () => {
       if (!(await picker.isVisible())) {
-        await page.locator("#launch_date").click();
+        await page.locator("#name").focus();
+        await page.locator("#launch_date").focus();
       }
       await expect(picker).toBeVisible({ timeout: 1_000 });
     }).toPass({ timeout: 5_000 });
