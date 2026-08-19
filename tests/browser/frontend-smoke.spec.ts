@@ -873,8 +873,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   await test.step("nested modal stacking z-index is correct", async () => {
     await page.getByRole("link", { name: "Campaigns", exact: true }).click();
     await expect(page).toHaveURL(/\/campaigns$/);
-    await page.getByRole("button", { name: "New Campaign" }).click();
-    await expect(page.locator("#modal")).toHaveClass(/show/);
+    await openApplicationModal(page, "New Campaign");
 
     const nestedTrigger = page.locator('#modal button', { hasText: "Send Test Email" });
     await nestedTrigger.click();
