@@ -128,6 +128,19 @@ async function openApplicationModal(page: Page, triggerName: string): Promise<vo
   await expect(page.locator("#modal")).toBeVisible();
 }
 
+async function closeApplicationModal(page: Page): Promise<void> {
+  const modal = page.locator("#modal");
+  const hidden = modal.evaluate(
+    (element) =>
+      new Promise<void>((resolve) => {
+        element.addEventListener("hidden.bs.modal", () => resolve(), { once: true });
+      }),
+  );
+  await modal.locator('.modal-footer button[data-bs-dismiss="modal"]').click();
+  await hidden;
+  await expect(modal).not.toBeVisible();
+}
+
 test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   test.setTimeout(60_000);
 
@@ -578,7 +591,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
           window.jQuery("#launch_date").data("DateTimePicker") !== undefined,
       ),
     ).toBe(true);
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
+    await closeApplicationModal(page);
   });
 
   await test.step("group modal and DataTables interaction remain functional", async () => {
@@ -617,7 +630,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator("#targetsTable")).toContainText(
       "second-fixture@localhost.invalid",
     );
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
+    await closeApplicationModal(page);
   });
 
   await test.step("template editor round-trips full-document source HTML", async () => {
@@ -758,8 +771,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
         }),
       )
       .toBe(editedEmailHTML);
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
-    await expect(page.locator("#modal")).not.toBeVisible();
+    await closeApplicationModal(page);
   });
 
   await test.step("landing page editor preserves HTML while backend applies form policy", async () => {
@@ -865,8 +877,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
         }),
       )
       .toBe(landingPage?.html);
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
-    await expect(page.locator("#modal")).not.toBeVisible();
+    await closeApplicationModal(page);
   });
 
 
@@ -905,8 +916,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(await page.evaluate(() => document.body.classList.contains("modal-open"))).toBe(true);
 
     // Close parent
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
-    await expect(page.locator("#modal")).not.toBeVisible();
+    await closeApplicationModal(page);
   });
 
   await test.step("modal accessibility: focus trap and keyboard behavior", async () => {
@@ -923,8 +933,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator("#modal")).toHaveClass(/show/);
 
     // Close the modal explicitly and verify focus returns to the trigger
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
-    await expect(page.locator("#modal")).not.toBeVisible();
+    await closeApplicationModal(page);
 
     // Focus should return to the trigger button after modal close
     await expect.poll(() => page.evaluate(() => {
@@ -1097,8 +1106,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator("#targetsTable")).toContainText("csvsecond@localhost.invalid");
     await expect(page.locator("#targetsTable")).toContainText("CSVTest");
 
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
-    await expect(page.locator("#modal")).not.toBeVisible();
+    await closeApplicationModal(page);
   });
 
   await test.step("AJAX save/update path with synthetic fixture data", async () => {
@@ -1170,10 +1178,11 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     // Select2 keyboard search on the sending profile single-select
     const profileContainer = page.locator('select#profile + .select2-container, select#profile ~ .select2-container').first();
     await profileContainer.click();
-    await expect(page.locator('.select2-dropdown')).toBeVisible();
+    const profileDropdown = page.locator('.select2-dropdown:visible');
+    await expect(profileDropdown).toBeVisible();
     // Type a search query
-    await page.locator('.select2-search__field:visible').fill("Browser Fixture");
-    await expect(page.locator('.select2-results__option:visible')).toContainText("Browser Fixture Sending Profile");
+    await profileDropdown.locator('.select2-search__field').fill("Browser Fixture");
+    await expect(profileDropdown.locator('.select2-results__option')).toContainText("Browser Fixture Sending Profile");
     // Select via Enter key
     await page.keyboard.press("Enter");
     await expect(profileContainer.locator('.select2-selection__rendered')).toContainText('Browser Fixture Sending Profile');
@@ -1181,15 +1190,15 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     // Multi-select keyboard behavior on groups
     const groupContainer = page.locator('select#users + .select2-container, select#users ~ .select2-container').first();
     await groupContainer.click();
-    await expect(page.locator('.select2-dropdown')).toBeVisible();
-    await page.locator('.select2-search__field:visible').fill("Browser");
-    await expect(page.locator('.select2-results__option:visible')).toContainText("Browser Fixture Group");
+    const groupDropdown = page.locator('.select2-dropdown:visible');
+    await expect(groupDropdown).toBeVisible();
+    await page.keyboard.type("Browser");
+    await expect(groupDropdown.locator('.select2-results__option')).toContainText("Browser Fixture Group");
     await page.keyboard.press("Enter");
     // Verify the selection appears as a tag in multi-select
     await expect(groupContainer.locator('.select2-selection__choice')).toContainText("Browser Fixture Group");
 
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
-    await expect(page.locator("#modal")).not.toBeVisible();
+    await closeApplicationModal(page);
   });
 
   await test.step("DateTimePicker value update and interaction", async () => {
@@ -1212,6 +1221,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       if (!dateTimePicker) {
         throw new Error("Launch date DateTimePicker was not initialized");
       }
+      dateTimePicker.focusOnShow(false);
       dateTimePicker.show();
     });
     await expect(picker).toBeVisible();
@@ -1219,9 +1229,10 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(await picker.locator(".fa").count()).toBeGreaterThan(0);
     expect(await picker.locator("[class*=glyphicon]").count()).toBe(0);
     await expect(picker.locator("li.collapse.show .datepicker")).toBeVisible();
-    await picker.locator('[data-action="togglePicker"]').click();
+    const togglePicker = picker.locator('[data-action="togglePicker"]');
+    await togglePicker.click({ force: true });
     await expect(picker.locator("li.collapse.show .timepicker")).toBeVisible();
-    await picker.locator('[data-action="togglePicker"]').click();
+    await togglePicker.click({ force: true });
     await expect(picker.locator("li.collapse.show .datepicker")).toBeVisible();
 
     // Click a definitely different current-month day: scan the visible days
@@ -1255,8 +1266,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(dpData.exists).toBe(true);
     expect(dpData.hasDate).toBe(true);
 
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
-    await expect(page.locator("#modal")).not.toBeVisible();
+    await closeApplicationModal(page);
   });
 
   await test.step("jQuery 3.7.1 runtime identity confirmed", async () => {

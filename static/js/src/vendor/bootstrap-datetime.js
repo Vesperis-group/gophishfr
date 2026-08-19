@@ -1204,6 +1204,7 @@
                 if (component && component.hasClass('btn')) {
                     component.toggleClass('active');
                 }
+                place();
                 widget.show();
                 place();
 

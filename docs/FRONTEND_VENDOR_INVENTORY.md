@@ -18,8 +18,9 @@ scripts under `static/js/src/app` and the project-specific stylesheets
   `jquery-ui@1.14.2`; only `ui/widget.js` is bundled for blueimp File Upload.
   No jQuery UI CSS, theme, or other widget is distributed.
 - First-party jqXHR callbacks use `.done()`/`.fail()`/`.always()`.
-  DateTimePicker uses `.length` instead of removed `.size()`, and blueimp File
-  Upload uses jQuery 3 Deferred `.then()` instead of removed `.pipe()`.
+  DateTimePicker uses `.length` instead of removed `.size()` and inserts its
+  detached widget before showing it under jQuery 3; blueimp File Upload uses
+  jQuery 3 Deferred `.then()` instead of removed `.pipe()`.
 - jQuery Migrate 3.6.0 was evaluated but not added or shipped. Static analysis
   identified the incompatibilities directly, and the production browser suite
   completes with no JavaScript exception or console error.
@@ -96,7 +97,7 @@ exists.
 | jQuery UI Widget Factory | 1.11.1 — **superseded**: vendored copy deleted, replaced by exact Yarn dependency `jquery-ui@1.14.2` (only `ui/widget.js` is bundled) | `static/js/src/vendor/jquery.ui.widget.js` (deleted) | Widget Factory module only; required by blueimp File Upload | [jquery/jquery-ui](https://github.com/jquery/jquery-ui), MIT | Migrated to 1.14.2; Retire.js advisories (Datepicker/Position/Checkboxradio) remain `NOT_APPLICABLE` as those modules are not bundled |
 | blueimp jQuery File Upload | 5.42.3; iframe transport 1.8.3, source banners | `jquery.fileupload.js`, `jquery.iframe-transport.js` | `USED` by group CSV import; readable source retained | [blueimp/jQuery-File-Upload](https://github.com/blueimp/jQuery-File-Upload), MIT | Browser modules have no applicable advisory; CVE-2018-9206 affected upstream server handlers, which are not shipped; migrate with jQuery |
 | SweetAlert2 | 8.17.1, exact npm package hash | `sweetalert2.min.js`, `sweetalert2.min.css` | `USED` for confirmations and status dialogs; minified-only | [sweetalert2/sweetalert2](https://github.com/sweetalert2/sweetalert2), MIT | `CLEAN`, old major; preserve pending UI-stack migration |
-| Bootstrap DateTimePicker | JS 4.17.37; CSS 4.15.35, banners | `bootstrap-datetime.js`, `bootstrap-datetime.css` | `USED` for campaign scheduling; readable JS, CSS source; locally modified: Collapse calls use native Bootstrap 5 API (`bootstrap.Collapse.getOrCreateInstance`), default icons changed from Glyphicon to Font Awesome | [Eonasdan/bootstrap-datetimepicker](https://github.com/Eonasdan/bootstrap-datetimepicker), MIT | `UNMAINTAINED`; mismatched patch versions, no applicable advisory found; migrate with Bootstrap |
+| Bootstrap DateTimePicker | JS 4.17.37; CSS 4.15.35, banners | `bootstrap-datetime.js`, `bootstrap-datetime.css` | `USED` for campaign scheduling; readable JS, CSS source; locally modified: Collapse calls use native Bootstrap 5 API (`bootstrap.Collapse.getOrCreateInstance`), default icons changed from Glyphicon to Font Awesome, and detached widgets are inserted before jQuery 3 shows them | [Eonasdan/bootstrap-datetimepicker](https://github.com/Eonasdan/bootstrap-datetimepicker), MIT | `UNMAINTAINED`; mismatched patch versions, no applicable advisory found; migrate with Bootstrap |
 | Select2 Bootstrap Theme | 0.1.0-beta.9, banner — **superseded**: removed; Select2 now uses its bundled `default` theme, restyled in `static/css/gophishfr-theme.css` | `static/css/select2-bootstrap.min.css` (deleted) | Formerly used for Select2 presentation; minified-only CSS | [select2-bootstrap-theme](https://github.com/select2/select2-bootstrap-theme), MIT | Migrated; see `docs/BOOTSTRAP5_MIGRATION_BASELINE.md` |
 | core-js browser bundle | 2.4.1, source banner | `static/js/src/vendor/core.min.js` | `LEGACY_BUT_REQUIRED` Promise polyfill; minified-only | [zloirock/core-js](https://github.com/zloirock/core-js), MIT | `UNMAINTAINED`; no applicable runtime advisory found; reassess with browser policy |
 | Font Awesome | 4.7.0, CSS banner | `font-awesome.min.css`, `static/font/fontawesome-*` | `USED` across the admin UI; minified CSS and font binaries | [FortAwesome/Font-Awesome](https://github.com/FortAwesome/Font-Awesome), CSS MIT and fonts SIL OFL 1.1 | `CLEAN`, old release line; migrate with UI stack |
@@ -177,8 +178,10 @@ Applicable findings CVE-2015-9251, CVE-2019-11358, CVE-2020-11022, and
 CVE-2020-11023 are all remediated by upgrading to jQuery 3.7.1 (the
 compatibility bridge release). First-party `.success()`/`.error()`/`.complete()`
 calls replaced with `.done()`/`.fail()`/`.always()`. Vendored DateTimePicker
-`.size()` replaced with `.length`. Vendored blueimp File Upload `.pipe()`
-replaced with `.then()`. Select2 4.0.13, DataTables 1.13.11, DateTimePicker
+`.size()` was replaced with `.length`, and its detached widget is inserted
+before `.show()` so jQuery 3 can override Bootstrap's hidden dropdown state.
+Vendored blueimp File Upload `.pipe()` was replaced with `.then()`. Select2
+4.0.13, DataTables 1.13.11, DateTimePicker
 4.17.37, and blueimp File Upload 5.42.3 confirmed compatible under jQuery 3.7.1.
 
 jQuery Migrate 3.6.0 was evaluated as a temporary diagnostic option but was
@@ -222,15 +225,15 @@ CVE-2024-6485. The durable remediation is a supported Bootstrap migration.
 
 ## Reproducibility
 
-The jQuery 3.7.1 frontend build contains 19 generated files and 2,932,107
-bytes, 1,227 bytes smaller than the Bootstrap 5 pre-jQuery baseline of
-2,933,334 bytes. The vendor bundle decreased from 1,115,960 to 1,111,872
+The jQuery 3.7.1 frontend build contains 19 generated files and 2,932,111
+bytes, 1,223 bytes smaller than the Bootstrap 5 pre-jQuery baseline of
+2,933,334 bytes. The vendor bundle decreased from 1,115,960 to 1,111,876
 bytes. Two independent immutable installations and clean builds produced the
 same per-file hashes, left `yarn.lock` unchanged, and produced this aggregate
 SHA-256 manifest:
 
 ```text
-dd6c25dc3755a89f745cb2eede9c15fc5ebc7dd0f5bda60b281abe5d9647029b
+456499aa3ed940bca633ab8ce6853889291d358dcb78277afb128971707a4781
 ```
 
 Webpack reports performance-budget warnings for the approximately 532 KiB
