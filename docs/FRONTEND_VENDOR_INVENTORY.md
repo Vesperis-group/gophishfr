@@ -45,15 +45,12 @@ exists.
 | Select2 Bootstrap Theme | 0.1.0-beta.9, banner | `static/css/select2-bootstrap.min.css` | `USED` for Select2 presentation; minified-only CSS | [select2-bootstrap-theme](https://github.com/select2/select2-bootstrap-theme), MIT | `CLEAN`, archived upstream; migrate with Bootstrap |
 | core-js browser bundle | 2.4.1, source banner | `static/js/src/vendor/core.min.js` | `LEGACY_BUT_REQUIRED` Promise polyfill; minified-only | [zloirock/core-js](https://github.com/zloirock/core-js), MIT | `UNMAINTAINED`; no applicable runtime advisory found; reassess with browser policy |
 | Font Awesome | 4.7.0, CSS banner | `font-awesome.min.css`, `static/font/fontawesome-*` | `USED` across the admin UI; minified CSS and font binaries | [FortAwesome/Font-Awesome](https://github.com/FortAwesome/Font-Awesome), CSS MIT and fonts SIL OFL 1.1 | `CLEAN`, old release line; migrate with UI stack |
-| Flat UI-derived CSS | `UNKNOWN`; imported in 2014 and subsequently modified | `static/css/flat-ui.css` | `USED` for global Bootstrap theme overrides; readable derived source retained | [Designmodo Flat UI Free](https://github.com/designmodo/Flat-UI), CC BY 3.0 and MIT upstream terms; Gophish modifications recorded in history | `UNKNOWN_VERSION`; no known advisory, but provenance prevents byte-for-byte reconstruction |
-| Bootstrap Switch CSS embedded in Flat UI | 1.3, embedded banner | Section in `static/css/flat-ui.css` | `UNUSED`; no matching class or JavaScript reference | Apache-2.0 banner retained | `CLEAN`, old release line; remove only during Flat UI cleanup |
+| Flat UI-derived CSS | 2.1.3 metadata at exact upstream snapshot `097631e`; imported with 14 insertions and 122 deletions, then modified | `static/css/flat-ui.css` | `USED` for global Bootstrap 3 theme overrides; readable derived source retained | [Designmodo Flat UI Free at `097631e`](https://github.com/designmodo/Flat-UI/tree/097631e59b9950312052123a65cbcbaf97dc740a), CC BY 3.0 and MIT upstream terms; Gophish/GophishFR modifications recorded in history | `LOCALLY_MODIFIED`, `HIGH` provenance confidence; no known advisory; replace with explicit design tokens during Bootstrap 5 migration |
 | Awesome Bootstrap Checkbox-derived CSS | 0.3.6-derived; eleven-line diff from the published 0.3.6 CSS | `static/css/checkbox.css` | `USED` for checkbox styling; readable modified source retained | [flatlogic/awesome-bootstrap-checkbox](https://github.com/flatlogic/awesome-bootstrap-checkbox), Copyright 2014 flatlogic.com, MIT | `CLEAN`; retain attribution and migrate with UI stack |
 
 No tracked JavaScript or CSS source maps are present. References to absent maps
 inside minified upstream files are development metadata and are not loaded
-during normal page execution. Flat UI references absent `flat-ui-icons-*`
-fonts, but no application template or script uses the corresponding `fui-*`
-classes.
+during normal page execution.
 
 ## Yarn-managed browser components
 
@@ -92,6 +89,8 @@ Dependabot alerts.
 | DataTables standalone CSS | Unreferenced source files | Removed | `SAFE_REMOVE` | Bootstrap integration CSS is the only stylesheet built |
 | Empty vendor script | Zero-byte `sending_profiles.js` | Removed | `SAFE_REMOVE` | No reference; the first-party application script is separate |
 | CKEditor | Vendored 4.11.1 custom build | Removed and replaced by exact-pinned CodeMirror 6 packages | `SECURITY_REPLACEMENT` | Removes an EOL editor with applicable XSS advisories while preserving the full-document source contract |
+| Flat UI icon definitions | Embedded `@font-face`, `data-icon`, and concrete `fui-*` glyph rules without any distributed font | Removed | `SAFE_REMOVE` | No matching template or script reference; icon assets were absent from the original import and Font Awesome is the active icon system |
+| Bootstrap Switch | Embedded CSS 1.3 without JavaScript, markup, or mask image | Removed | `SAFE_REMOVE` | No matching template or script reference; the absent image was never imported |
 
 Highcharts 5.0.14 was removed and replaced by Chart.js in PR #18 before this
 audit was reconciled. It remains documentation-only: no Highcharts source,
@@ -138,8 +137,9 @@ CVE-2024-6485. The durable remediation is a supported Bootstrap migration.
   Datamaps and retains the upstream MIT obligation, but is not reproducible
   from a known release artifact.
 - The Flat UI stylesheet is a long-lived derivative rather than an unchanged
-  upstream release. Its family provenance and CC BY 3.0/MIT terms are known,
-  but its exact starting release is not.
+  tagged artifact. Its exact source is the post-2.1.3 upstream commit
+  `097631e59b9950312052123a65cbcbaf97dc740a`; the upstream metadata applies
+  CC BY 3.0 and MIT to the distribution without a per-file split.
 - `checkbox.css` is now identified as a modified Awesome Bootstrap Checkbox
   0.3.6 file under MIT; its local changes affect eleven diff lines.
 - Package-managed components' complete notices are generated beside their
@@ -148,15 +148,13 @@ CVE-2024-6485. The durable remediation is a supported Bootstrap migration.
 
 ## Reproducibility
 
-The final frontend build contains 17 generated files and 1,789,478 bytes. The
-migration adds `html_editor.min.js` and its generated license notice, updates
-the email-template and landing-page application bundles, and removes the
-obsolete autocomplete bundle.
-Two independent clean installations and builds produced the same per-file
-hashes and aggregate SHA-256 manifest:
+The current frontend build contains 19 generated files and 2,858,432 bytes.
+Two independent immutable installations and clean builds produced the same
+per-file hashes, left `yarn.lock` unchanged, and produced this aggregate
+SHA-256 manifest:
 
 ```text
-084e0073eb3da1fdfa0f8144caeabe5a240f1fac7e798a43ab67fe06addc0415
+8d79f5299d209269fd63f9e703ad988c70bb8bc1f5fc51818b4874828b716140
 ```
 
 Webpack reports performance-budget warnings for the approximately 532 KiB
