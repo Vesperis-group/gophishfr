@@ -781,6 +781,7 @@ function refresh() {
         return;
     }
     $("#refresh_message").show()
+    bsHideTooltip("#refresh_btn")
     $("#refresh_btn").hide()
     poll()
     clearTimeout(setRefresh)
