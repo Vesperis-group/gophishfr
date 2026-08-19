@@ -19,23 +19,23 @@ function bsInitTooltips(root) {
             return;
         }
         if (!bootstrap.Tooltip.getInstance(el)) {
-            new bootstrap.Tooltip(el);
+            new bootstrap.Tooltip(el, { animation: false });
         }
     });
 }
 window.bsInitTooltips = bsInitTooltips;
 
-function bsDisposeTooltips(root) {
+function bsHideTooltips(root) {
     (root || document).querySelectorAll('[data-bs-toggle="tooltip"]').forEach(function (el) {
         var tooltip = bootstrap.Tooltip.getInstance(el);
         if (tooltip) {
-            tooltip.dispose();
+            tooltip.hide();
         }
     });
 }
 
-// bsHideTooltip hides (and disposes) a visible-element's tooltip before the
-// element is hidden with something like jQuery's .hide(). Bootstrap 5's
+// bsHideTooltip hides a visible-element's tooltip before the element is hidden
+// with something like jQuery's .hide(). Bootstrap 5's
 // Tooltip.show() throws if its trigger has inline style="display: none",
 // which can happen when a pending hover-triggered show fires after the
 // trigger element itself is hidden.
@@ -43,7 +43,7 @@ function bsHideTooltip(selector) {
     var el = typeof selector === "string" ? document.querySelector(selector) : selector;
     if (!el) return;
     var tooltip = bootstrap.Tooltip.getInstance(el);
-    if (tooltip) tooltip.dispose();
+    if (tooltip) tooltip.hide();
 }
 window.bsHideTooltip = bsHideTooltip;
 
@@ -384,7 +384,7 @@ $(document).ready(function () {
     // Handles z-index stacking for multiple simultaneous modals and the scrollbar fix.
     // BS5 base: modal 1055, backdrop 1050; each additional layer adds 10.
     document.addEventListener('hide.bs.modal', function (event) {
-        bsDisposeTooltips(event.target);
+        bsHideTooltips(event.target);
     });
     document.addEventListener('hidden.bs.modal', function (event) {
         var modal = event.target;

@@ -109,7 +109,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       sandboxIsolationErrors.push(error.message);
       return;
     }
-    pageErrors.push(error.message);
+    pageErrors.push(error.stack || error.message);
   });
   page.on("console", (message) => {
     if (message.type() === "error") {
