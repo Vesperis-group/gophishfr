@@ -186,6 +186,28 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
     await expect(page.locator('input[name="username"]')).toBeVisible();
     await expect(page.locator('input[name="password"]')).toBeVisible();
     await expect(page.locator('input[name="csrf_token"]')).toHaveCount(1);
+    const loginPresentation = await page.evaluate(() => {
+      const button = getComputedStyle(
+        document.querySelector<HTMLButtonElement>('button[type="submit"]')!,
+      );
+      const input = getComputedStyle(
+        document.querySelector<HTMLInputElement>('input[name="username"]')!,
+      );
+      return {
+        buttonBackground: button.backgroundColor,
+        buttonColor: button.color,
+        buttonHeight: parseFloat(button.height),
+        inputBorderStyle: input.borderStyle,
+        inputHeight: parseFloat(input.height),
+      };
+    });
+    expect(loginPresentation.buttonBackground).not.toBe("rgba(0, 0, 0, 0)");
+    expect(loginPresentation.buttonColor).not.toBe(
+      loginPresentation.buttonBackground,
+    );
+    expect(loginPresentation.buttonHeight).toBeGreaterThanOrEqual(40);
+    expect(loginPresentation.inputBorderStyle).toBe("solid");
+    expect(loginPresentation.inputHeight).toBeGreaterThanOrEqual(40);
     expect(
       await page.evaluate(
         () =>
@@ -222,6 +244,30 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
       "Browser Fixture Campaign",
     );
     await expect(page.locator("#navbar-dropdown")).toContainText(username);
+
+    const navbarPresentation = await page
+      .locator(".navbar-inverse")
+      .evaluate((navbar) => {
+        const navbarStyle = getComputedStyle(navbar);
+        const brandStyle = getComputedStyle(
+          navbar.querySelector(".navbar-brand")!,
+        );
+        return {
+          background: navbarStyle.backgroundColor,
+          brandColor: brandStyle.color,
+        };
+      });
+    expect(navbarPresentation.background).not.toBe("rgba(0, 0, 0, 0)");
+    expect(navbarPresentation.brandColor).not.toBe(
+      navbarPresentation.background,
+    );
+
+    await page.setViewportSize({ width: 480, height: 800 });
+    await expect(page.locator(".navbar-toggle")).toBeVisible();
+    await page.locator(".navbar-toggle").click();
+    await expect(page.locator(".navbar-collapse")).toHaveClass(/in/);
+    await expect(page.locator("#navbar-dropdown")).toBeVisible();
+    await page.setViewportSize({ width: 1280, height: 720 });
   });
 
   await test.step("dashboard charts preserve values, labels, and navigation", async () => {
@@ -270,7 +316,17 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
   });
 
   await test.step("campaign result charts preserve timeline and status data", async () => {
-    await expect(page.getByRole("heading", { name: "Results for Browser Fixture Campaign" })).toBeVisible();
+    await expect(
+      page.getByRole("heading", {
+        name: "Results for Browser Fixture Campaign",
+      }),
+    ).toBeVisible();
+    await page.locator("#exportButton").click();
+    await expect(page.locator("#exportButton + .dropdown-menu")).toBeVisible();
+    await page.locator("#exportButton").click();
+    await expect(
+      page.locator("#exportButton + .dropdown-menu"),
+    ).not.toBeVisible();
     const chartIDs = [
       "timeline_chart",
       "sent_chart",
@@ -428,7 +484,9 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
     await page.getByRole("link", { name: "Campaigns", exact: true }).click();
     await expect(page).toHaveURL(/\/campaigns$/);
     await expect(page.getByRole("heading", { name: "Campaigns" })).toBeVisible();
-    await expect(page.locator("#campaignTable")).toContainText("Browser Fixture Campaign");
+    await expect(page.locator("#campaignTable")).toContainText(
+      "Browser Fixture Campaign",
+    );
 
     await page.locator('a[href="#archivedCampaigns"]').click();
     await expect(page.locator("#archivedCampaigns")).toHaveClass(/active/);
@@ -437,6 +495,11 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
     await expect(page.locator("#modal")).toHaveClass(/in/);
     await expect(page.locator("#modal")).toBeVisible();
     await expect(page.locator(".select2-container")).toHaveCount(4);
+    const urlHelp = page.locator('label[for="url"] [data-toggle="tooltip"]');
+    await urlHelp.hover();
+    await expect(page.locator(".tooltip.in")).toContainText(
+      "Location of the GophishFR listener",
+    );
     expect(
       await page.evaluate(
         () =>
