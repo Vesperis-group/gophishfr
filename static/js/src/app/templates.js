@@ -1,4 +1,5 @@
 var templates = []
+var htmlEditor
 var icons = {
     "application/vnd.ms-excel": "fa-file-excel-o",
     "text/plain": "fa-file-text-o",
@@ -21,9 +22,7 @@ function save(idx) {
     template.name = $("#name").val()
     template.subject = $("#subject").val()
     template.envelope_sender = $("#envelope-sender").val()
-    template.html = CKEDITOR.instances["html_editor"].getData();
-    // Fix the URL Scheme added by CKEditor (until we can remove it from the plugin)
-    template.html = template.html.replace(/https?:\/\/{{\.URL}}/gi, "{{.URL}}")
+    template.html = htmlEditor.getData()
     // If the "Add Tracker Image" checkbox is checked, add the tracker
     if ($("#use_tracker_checkbox").prop("checked")) {
         if (template.html.indexOf("{{.Tracker}}") == -1 &&
@@ -76,6 +75,10 @@ function dismiss() {
     $("#subject").val("")
     $("#text_editor").val("")
     $("#html_editor").val("")
+    if (htmlEditor) {
+        htmlEditor.setData("")
+        htmlEditor.showSource()
+    }
     $("#modal").modal('hide')
 }
 
@@ -167,8 +170,7 @@ function edit(idx) {
     $("#attachmentUpload").unbind('click').click(function () {
         this.value = null
     })
-    $("#html_editor").ckeditor()
-    setupAutocomplete(CKEDITOR.instances["html_editor"])
+    htmlEditor = GophishHTMLEditor.create("html_editor")
     $("#attachmentsTable").show()
     attachmentsTable = $('#attachmentsTable').DataTable({
         destroy: true,
@@ -192,7 +194,7 @@ function edit(idx) {
         $("#name").val(template.name)
         $("#subject").val(template.subject)
         $("#envelope-sender").val(template.envelope_sender)
-        $("#html_editor").val(template.html)
+        htmlEditor.setData(template.html)
         $("#text_editor").val(template.text)
         attachmentRows = []
         $.each(template.attachments, function (i, file) {
@@ -215,7 +217,9 @@ function edit(idx) {
 
     } else {
         $("#templateModalLabel").text("New Template")
+        htmlEditor.setData("")
     }
+    htmlEditor.showSource()
     // Handle Deletion
     $("#attachmentsTable").unbind('click').on("click", "span>i.fa-trash-o", function () {
         attachmentsTable.row($(this).parents('tr'))
@@ -231,7 +235,7 @@ function copy(idx) {
     $("#attachmentUpload").unbind('click').click(function () {
         this.value = null
     })
-    $("#html_editor").ckeditor()
+    htmlEditor = GophishHTMLEditor.create("html_editor")
     $("#attachmentsTable").show()
     attachmentsTable = $('#attachmentsTable').DataTable({
         destroy: true,
@@ -253,7 +257,8 @@ function copy(idx) {
     $("#name").val("Copy of " + template.name)
     $("#subject").val(template.subject)
     $("#envelope-sender").val(template.envelope_sender)
-    $("#html_editor").val(template.html)
+    htmlEditor.setData(template.html)
+    htmlEditor.showSource()
     $("#text_editor").val(template.text)
     $.each(template.attachments, function (i, file) {
         var icon = icons[file.type] || "fa-file-o"
@@ -291,11 +296,11 @@ function importEmail() {
             })
             .success(function (data) {
                 $("#text_editor").val(data.text)
-                $("#html_editor").val(data.html)
+                htmlEditor.setData(data.html)
                 $("#subject").val(data.subject)
                 // If the HTML is provided, let's open that view in the editor
                 if (data.html) {
-                    CKEDITOR.instances["html_editor"].setMode('wysiwyg')
+                    htmlEditor.showPreview()
                     $('.nav-tabs a[href="#html"]').click()
                 }
                 $("#importEmailModal").modal("hide")
@@ -376,21 +381,6 @@ $(document).ready(function () {
         $('.modal-backdrop').not('.fv-modal-stack').css('z-index', 1039 + (10 * $('body').data('fv_open_modals')));
         $('.modal-backdrop').not('fv-modal-stack').addClass('fv-modal-stack');
     });
-    $.fn.modal.Constructor.prototype.enforceFocus = function () {
-        $(document)
-            .off('focusin.bs.modal') // guard against infinite focus loop
-            .on('focusin.bs.modal', $.proxy(function (e) {
-                if (
-                    this.$element[0] !== e.target && !this.$element.has(e.target).length
-                    // CKEditor compatibility fix start.
-                    &&
-                    !$(e.target).closest('.cke_dialog, .cke').length
-                    // CKEditor compatibility fix end.
-                ) {
-                    this.$element.trigger('focus');
-                }
-            }, this));
-    };
     // Scrollbar fix - https://stackoverflow.com/questions/19305821/multiple-modals-overlay
     $(document).on('hidden.bs.modal', '.modal', function () {
         $('.modal:visible').length && $(document.body).addClass('modal-open');
@@ -401,21 +391,6 @@ $(document).ready(function () {
     $("#importEmailModal").on('hidden.bs.modal', function (event) {
         $("#email_content").val("")
     })
-    CKEDITOR.on('dialogDefinition', function (ev) {
-        // Take the dialog name and its definition from the event data.
-        var dialogName = ev.data.name;
-        var dialogDefinition = ev.data.definition;
-
-        // Check if the definition is from the dialog window you are interested in (the "Link" dialog window).
-        if (dialogName == 'link') {
-            dialogDefinition.minWidth = 500
-            dialogDefinition.minHeight = 100
-
-            // Remove the linkType field
-            var infoTab = dialogDefinition.getContents('info');
-            infoTab.get('linkType').hidden = true;
-        }
-    });
     load()
 
 })

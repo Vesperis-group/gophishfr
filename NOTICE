@@ -40,6 +40,11 @@ chartjs-plugin-zoom, Hammer.JS, DataTables, Moment.js, Papa Parse, Select2, and
 UAParser.js under the MIT License. Their complete copyright and license notices
 are distributed in `static/js/dist/vendor.min.js.LICENSE.txt`.
 
+The HTML source editor bundle includes CodeMirror 6, Lezer, and their small
+support packages under the MIT License. Complete package-specific copyright and
+license notices are distributed in
+`static/js/dist/app/html_editor.min.js.LICENSE.txt`.
+
 The distributed `static/css/flat-ui.css` is a modified derivative of Flat UI
 Free by Designmodo, Sergey Shmidt, and Sergii Iurevych:
 

@@ -133,7 +133,6 @@ jobs:
                     zip -r "releases/$(basename "${RELEASE_DIR}").zip" \
                       "$(basename "${BINARY}")" \
                       static/js/dist \
-                      static/js/src/vendor/ckeditor \
                       static/css/dist \
                       static/images \
                       static/font \

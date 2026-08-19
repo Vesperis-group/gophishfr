@@ -59,7 +59,22 @@
                 <!-- Tab panes -->
                 <div class="tab-content">
                     <div role="tabpanel" class="tab-pane active" id="html">
-                        <textarea id="html_editor"></textarea>
+                        <div class="gophish-html-editor" data-html-editor>
+                            <div class="btn-group gophish-editor-tabs" role="tablist" aria-label="HTML editor view">
+                                <button type="button" class="btn btn-default active" role="tab" aria-selected="true"
+                                    data-editor-view="source">HTML Code</button>
+                                <button type="button" class="btn btn-default" role="tab" aria-selected="false"
+                                    data-editor-view="preview">Preview</button>
+                            </div>
+                            <div data-editor-panel="source">
+                                <textarea id="html_editor" data-editor-label="Landing page HTML source"></textarea>
+                            </div>
+                            <div data-editor-panel="preview" hidden>
+                                <p class="help-block">Scripts, forms, links, and external resources are disabled in this preview.</p>
+                                <iframe data-editor-preview title="Landing page preview" sandbox
+                                    referrerpolicy="no-referrer"></iframe>
+                            </div>
+                        </div>
                     </div>
                 </div>
                 <div class="checkbox checkbox-primary">
@@ -116,8 +131,6 @@
 </div>
 {{end}}
 {{define "scripts"}}
-<script src="/js/src/vendor/ckeditor/ckeditor.js"></script>
-<script src="/js/src/vendor/ckeditor/adapters/jquery.js"></script>
-<script src="/js/dist/app/autocomplete.min.js"></script>
+<script src="/js/dist/app/html_editor.min.js"></script>
 <script src="/js/dist/app/landing_pages.min.js"></script>
 {{end}}

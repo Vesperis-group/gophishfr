@@ -76,6 +76,8 @@ yarn build
 The frontend browser smoke baseline has a separate explicit command because it
 installs and launches Chromium. See
 [`docs/FRONTEND_BROWSER_TESTS.md`](docs/FRONTEND_BROWSER_TESTS.md).
+The HTML source editor and isolated preview security model are documented in
+[`docs/HTML_EDITOR_MIGRATION.md`](docs/HTML_EDITOR_MIGRATION.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements and
 [SECURITY.md](SECURITY.md) for responsible vulnerability reporting.

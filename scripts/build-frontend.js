@@ -1,6 +1,7 @@
 "use strict";
 
 const fs = require("node:fs/promises");
+const fsSync = require("node:fs");
 const path = require("node:path");
 
 const CleanCSS = require("clean-css");
@@ -41,6 +42,21 @@ function managedFile(packageName, ...segments) {
   return path.join(packageDirectory, ...segments);
 }
 
+function packageDirectory(packageName) {
+  let current = path.dirname(require.resolve(packageName));
+  while (current !== path.dirname(current)) {
+    const manifestPath = path.join(current, "package.json");
+    if (fsSync.existsSync(manifestPath)) {
+      const manifest = JSON.parse(fsSync.readFileSync(manifestPath, "utf8"));
+      if (manifest.name === packageName) {
+        return { directory: current, manifest };
+      }
+    }
+    current = path.dirname(current);
+  }
+  throw new Error(`Unable to locate package directory for ${packageName}`);
+}
+
 const vendorScriptPaths = [
   vendoredScript("jquery.js"),
   vendoredScript("bootstrap.min.js"),
@@ -66,7 +82,6 @@ const vendorScriptPaths = [
 ];
 
 const applicationScripts = [
-  "autocomplete.js",
   "charts.js",
   "campaign_results.js",
   "campaigns.js",
@@ -134,6 +149,29 @@ const managedVendorLicenses = [
   },
 ];
 
+const editorPackages = [
+  "@codemirror/autocomplete",
+  "@codemirror/commands",
+  "@codemirror/lang-css",
+  "@codemirror/lang-html",
+  "@codemirror/lang-javascript",
+  "@codemirror/language",
+  "@codemirror/lint",
+  "@codemirror/search",
+  "@codemirror/state",
+  "@codemirror/view",
+  "@lezer/common",
+  "@lezer/css",
+  "@lezer/highlight",
+  "@lezer/html",
+  "@lezer/javascript",
+  "@lezer/lr",
+  "@marijn/find-cluster-break",
+  "crelt",
+  "style-mod",
+  "w3c-keyname",
+];
+
 async function minifyJavaScript(source, sourceName) {
   const result = await minify(source);
   if (typeof result.code !== "string") {
@@ -162,6 +200,28 @@ async function buildManagedVendorLicenses() {
   );
   await fs.writeFile(
     path.join(javascriptOutputDirectory, "vendor.min.js.LICENSE.txt"),
+    `${notices.join("\n\n")}\n`,
+  );
+}
+
+async function buildEditorLicenses() {
+  const notices = await Promise.all(
+    editorPackages.map(async (packageName) => {
+      const { directory, manifest } = packageDirectory(packageName);
+      const license = await fs.readFile(
+        path.join(directory, "LICENSE"),
+        "utf8",
+      );
+      const heading = `${packageName} ${manifest.version}`;
+      return `${heading}\n${"=".repeat(heading.length)}\n\n${license.trim()}`;
+    }),
+  );
+  await fs.writeFile(
+    path.join(
+      javascriptOutputDirectory,
+      "app",
+      "html_editor.min.js.LICENSE.txt",
+    ),
     `${notices.join("\n\n")}\n`,
   );
 }
@@ -203,7 +263,7 @@ async function buildStylesheets() {
   );
 }
 
-async function buildPasswordScript() {
+async function buildWebpackScripts() {
   const compiler = webpack(webpackConfig);
   await new Promise((resolve, reject) => {
     compiler.run((runError, stats) => {
@@ -252,6 +312,7 @@ async function buildPasswordScript() {
       "passwords.min.js.LICENSE.txt",
     ),
   );
+  await buildEditorLicenses();
 }
 
 async function build() {
@@ -268,7 +329,7 @@ async function build() {
     buildManagedVendorLicenses(),
     buildApplicationScripts(),
     buildStylesheets(),
-    buildPasswordScript(),
+    buildWebpackScripts(),
   ]);
 }
 
