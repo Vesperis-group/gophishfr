@@ -262,12 +262,14 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
       navbarPresentation.background,
     );
 
-    await page.setViewportSize({ width: 480, height: 800 });
-    await expect(page.locator(".navbar-toggle")).toBeVisible();
-    await page.locator(".navbar-toggle").click();
-    await expect(page.locator(".navbar-collapse")).toHaveClass(/in/);
-    await expect(page.locator("#navbar-dropdown")).toBeVisible();
-    await page.setViewportSize({ width: 1280, height: 720 });
+    const responsivePage = await context.newPage();
+    await responsivePage.setViewportSize({ width: 480, height: 800 });
+    await responsivePage.goto("/");
+    await expect(responsivePage.locator(".navbar-toggle")).toBeVisible();
+    await responsivePage.locator(".navbar-toggle").click();
+    await expect(responsivePage.locator(".navbar-collapse")).toHaveClass(/in/);
+    await expect(responsivePage.locator("#navbar-dropdown")).toBeVisible();
+    await responsivePage.close();
   });
 
   await test.step("dashboard charts preserve values, labels, and navigation", async () => {
