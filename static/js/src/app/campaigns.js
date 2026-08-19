@@ -1,11 +1,25 @@
 // labels is a map of campaign statuses to
 // CSS classes
 var labels = {
-    "In progress": "label-primary",
-    "Queued": "label-info",
-    "Completed": "label-success",
-    "Emails Sent": "label-success",
-    "Error": "label-danger"
+    "In progress": "text-bg-primary",
+    "Queued": "text-bg-info",
+    "Completed": "text-bg-success",
+    "Emails Sent": "text-bg-success",
+    "Error": "text-bg-danger"
+}
+
+// faIcons overrides Bootstrap DateTimePicker's default Glyphicon set with
+// Font Awesome icons, since Glyphicons are no longer shipped.
+var faIcons = {
+    time: "fa fa-clock-o",
+    date: "fa fa-calendar",
+    up: "fa fa-chevron-up",
+    down: "fa fa-chevron-down",
+    previous: "fa fa-chevron-left",
+    next: "fa fa-chevron-right",
+    today: "fa fa-crosshairs",
+    clear: "fa fa-trash",
+    close: "fa fa-times"
 }
 
 var campaigns = []
@@ -122,7 +136,7 @@ function dismiss() {
     $("#url").val("");
     $("#profile").val("").change();
     $("#users").val("").change();
-    $("#modal").modal('hide');
+    bsModalHide("#modal");
 }
 
 function deleteCampaign(idx) {
@@ -298,7 +312,8 @@ $(document).ready(function () {
         },
         "showTodayButton": true,
         "defaultDate": moment(),
-        "format": "MMMM Do YYYY, h:mm a"
+        "format": "MMMM Do YYYY, h:mm a",
+        "icons": faIcons
     })
     $("#send_by_date").datetimepicker({
         "widgetPositioning": {
@@ -306,36 +321,11 @@ $(document).ready(function () {
         },
         "showTodayButton": true,
         "useCurrent": false,
-        "format": "MMMM Do YYYY, h:mm a"
+        "format": "MMMM Do YYYY, h:mm a",
+        "icons": faIcons
     })
-    // Setup multiple modals
-    // Code based on http://miles-by-motorcycle.com/static/bootstrap-modal/index.html
-    $('.modal').on('hidden.bs.modal', function (event) {
-        $(this).removeClass('fv-modal-stack');
-        $('body').data('fv_open_modals', $('body').data('fv_open_modals') - 1);
-    });
-    $('.modal').on('shown.bs.modal', function (event) {
-        // Keep track of the number of open modals
-        if (typeof ($('body').data('fv_open_modals')) == 'undefined') {
-            $('body').data('fv_open_modals', 0);
-        }
-        // if the z-index of this modal has been set, ignore.
-        if ($(this).hasClass('fv-modal-stack')) {
-            return;
-        }
-        $(this).addClass('fv-modal-stack');
-        // Increment the number of open modals
-        $('body').data('fv_open_modals', $('body').data('fv_open_modals') + 1);
-        // Setup the appropriate z-index
-        $(this).css('z-index', 1040 + (10 * $('body').data('fv_open_modals')));
-        $('.modal-backdrop').not('.fv-modal-stack').css('z-index', 1039 + (10 * $('body').data('fv_open_modals')));
-        $('.modal-backdrop').not('fv-modal-stack').addClass('fv-modal-stack');
-    });
-    // Scrollbar fix - https://stackoverflow.com/questions/19305821/multiple-modals-overlay
-    $(document).on('hidden.bs.modal', '.modal', function () {
-        $('.modal:visible').length && $(document.body).addClass('modal-open');
-    });
-    $('#modal').on('hidden.bs.modal', function (event) {
+    // Modal dismiss handler (native Bootstrap 5 event, no jQuery bridge)
+    document.getElementById('modal').addEventListener('hidden.bs.modal', function (event) {
         dismiss()
     });
     api.campaigns.summary()
@@ -369,7 +359,7 @@ $(document).ready(function () {
                     'archived': []
                 }
                 $.each(campaigns, function (i, campaign) {
-                    label = labels[campaign.status] || "label-default";
+                    label = labels[campaign.status] || "text-bg-secondary";
 
                     //section for tooltips on the status of a campaign to show some quick stats
                     var launchDate;
@@ -384,14 +374,14 @@ $(document).ready(function () {
                     var row = [
                         escapeHtml(campaign.name),
                         moment(campaign.created_date).format('MMMM Do YYYY, h:mm:ss a'),
-                        "<span class=\"label " + label + "\" data-toggle=\"tooltip\" data-placement=\"right\" data-html=\"true\" title=\"" + quickStats + "\">" + campaign.status + "</span>",
-                        "<div class='pull-right'><a class='btn btn-primary' href='/campaigns/" + campaign.id + "' data-toggle='tooltip' data-placement='left' title='View Results'>\
+                        "<span class=\"badge " + label + "\" data-bs-toggle=\"tooltip\" data-bs-placement=\"right\" data-bs-html=\"true\" title=\"" + quickStats + "\">" + campaign.status + "</span>",
+                        "<div class='float-end'><a class='btn btn-primary' href='/campaigns/" + campaign.id + "' data-bs-toggle='tooltip' data-bs-placement='left' title='View Results'>\
                     <i class='fa fa-bar-chart'></i>\
                     </a>\
-            <span data-toggle='modal' data-backdrop='static' data-target='#modal'><button class='btn btn-primary' data-toggle='tooltip' data-placement='left' title='Copy Campaign' onclick='copy(" + i + ")'>\
+            <span data-bs-toggle='modal' data-bs-target='#modal'><button class='btn btn-primary' data-bs-toggle='tooltip' data-bs-placement='left' title='Copy Campaign' onclick='copy(" + i + ")'>\
                     <i class='fa fa-copy'></i>\
                     </button></span>\
-                    <button class='btn btn-danger' onclick='deleteCampaign(" + i + ")' data-toggle='tooltip' data-placement='left' title='Delete Campaign'>\
+                    <button class='btn btn-danger' onclick='deleteCampaign(" + i + ")' data-bs-toggle='tooltip' data-bs-placement='left' title='Delete Campaign'>\
                     <i class='fa fa-trash-o'></i>\
                     </button></div>"
                     ]
@@ -403,7 +393,7 @@ $(document).ready(function () {
                 })
                 activeCampaignsTable.rows.add(rows['active']).draw()
                 archivedCampaignsTable.rows.add(rows['archived']).draw()
-                $('[data-toggle="tooltip"]').tooltip()
+                bsInitTooltips()
             } else {
                 $("#emptyMessage").show()
             }
@@ -415,7 +405,7 @@ $(document).ready(function () {
     // Select2 Defaults
     $.fn.select2.defaults.set("width", "100%");
     $.fn.select2.defaults.set("dropdownParent", $("#modal_body"));
-    $.fn.select2.defaults.set("theme", "bootstrap");
+    $.fn.select2.defaults.set("theme", "default");
     $.fn.select2.defaults.set("sorter", function (data) {
         return data.sort(function (a, b) {
             if (a.text.toLowerCase() > b.text.toLowerCase()) {

@@ -50,7 +50,7 @@ function dismiss() {
     $("#modal").find("input[type='checkbox']").prop("checked", false)
     $("#capture_passwords").hide()
     $("#redirect_url").hide()
-    $("#modal").modal('hide')
+    bsModalHide("#modal")
 }
 
 var deletePage = function (idx) {
@@ -101,7 +101,7 @@ function importSite() {
             .success(function (data) {
                 htmlEditor.setData(data.html)
                 htmlEditor.showPreview()
-                $("#importSiteModal").modal("hide")
+                bsModalHide("#importSiteModal")
             })
             .error(function (data) {
                 modalError(data.responseJSON.message)
@@ -171,19 +171,19 @@ function load() {
                     pageRows.push([
                         escapeHtml(page.name),
                         moment(page.modified_date).format('MMMM Do YYYY, h:mm:ss a'),
-                        "<div class='pull-right'><span data-toggle='modal' data-backdrop='static' data-target='#modal'><button class='btn btn-primary' data-toggle='tooltip' data-placement='left' title='Edit Page' onclick='edit(" + i + ")'>\
+                        "<div class='float-end'><span data-bs-toggle='modal' data-bs-target='#modal'><button class='btn btn-primary' data-bs-toggle='tooltip' data-bs-placement='left' title='Edit Page' onclick='edit(" + i + ")'>\
                     <i class='fa fa-pencil'></i>\
                     </button></span>\
-		    <span data-toggle='modal' data-target='#modal'><button class='btn btn-primary' data-toggle='tooltip' data-placement='left' title='Copy Page' onclick='copy(" + i + ")'>\
+		    <span data-bs-toggle='modal' data-bs-target='#modal'><button class='btn btn-primary' data-bs-toggle='tooltip' data-bs-placement='left' title='Copy Page' onclick='copy(" + i + ")'>\
                     <i class='fa fa-copy'></i>\
                     </button></span>\
-                    <button class='btn btn-danger' data-toggle='tooltip' data-placement='left' title='Delete Page' onclick='deletePage(" + i + ")'>\
+                    <button class='btn btn-danger' data-bs-toggle='tooltip' data-bs-placement='left' title='Delete Page' onclick='deletePage(" + i + ")'>\
                     <i class='fa fa-trash-o'></i>\
                     </button></div>"
                     ])
                 })
                 pagesTable.rows.add(pageRows).draw()
-                $('[data-toggle="tooltip"]').tooltip()
+                bsInitTooltips()
             } else {
                 $("#emptyMessage").show()
             }
@@ -195,34 +195,8 @@ function load() {
 }
 
 $(document).ready(function () {
-    // Setup multiple modals
-    // Code based on http://miles-by-motorcycle.com/static/bootstrap-modal/index.html
-    $('.modal').on('hidden.bs.modal', function (event) {
-        $(this).removeClass('fv-modal-stack');
-        $('body').data('fv_open_modals', $('body').data('fv_open_modals') - 1);
-    });
-    $('.modal').on('shown.bs.modal', function (event) {
-        // Keep track of the number of open modals
-        if (typeof ($('body').data('fv_open_modals')) == 'undefined') {
-            $('body').data('fv_open_modals', 0);
-        }
-        // if the z-index of this modal has been set, ignore.
-        if ($(this).hasClass('fv-modal-stack')) {
-            return;
-        }
-        $(this).addClass('fv-modal-stack');
-        // Increment the number of open modals
-        $('body').data('fv_open_modals', $('body').data('fv_open_modals') + 1);
-        // Setup the appropriate z-index
-        $(this).css('z-index', 1040 + (10 * $('body').data('fv_open_modals')));
-        $('.modal-backdrop').not('.fv-modal-stack').css('z-index', 1039 + (10 * $('body').data('fv_open_modals')));
-        $('.modal-backdrop').not('fv-modal-stack').addClass('fv-modal-stack');
-    });
-    // Scrollbar fix - https://stackoverflow.com/questions/19305821/multiple-modals-overlay
-    $(document).on('hidden.bs.modal', '.modal', function () {
-        $('.modal:visible').length && $(document.body).addClass('modal-open');
-    });
-    $('#modal').on('hidden.bs.modal', function (event) {
+    // Modal dismiss handler (native Bootstrap 5 event, no jQuery bridge)
+    document.getElementById('modal').addEventListener('hidden.bs.modal', function (event) {
         dismiss()
     });
     $("#capture_credentials_checkbox").change(function () {

@@ -80,7 +80,7 @@ var GophishCharts = (function () {
     function addZoomResetButton(chart) {
         var button = document.createElement('button')
         button.type = 'button'
-        button.className = 'btn btn-default btn-xs chart-reset-zoom'
+        button.className = 'btn btn-secondary btn-sm chart-reset-zoom'
         button.textContent = 'Reset zoom'
         button.style.display = 'none'
         button.addEventListener('click', function () {

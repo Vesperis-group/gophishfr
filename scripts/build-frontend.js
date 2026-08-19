@@ -59,14 +59,14 @@ function packageDirectory(packageName) {
 
 const vendorScriptPaths = [
   vendoredScript("jquery.js"),
-  vendoredScript("bootstrap.min.js"),
+  managedFile("bootstrap", "dist", "js", "bootstrap.bundle.min.js"),
   managedFile("moment", "min", "moment.min.js"),
   managedFile("papaparse", "papaparse.min.js"),
   vendoredScript("d3.min.js"),
   vendoredScript("topojson.min.js"),
   vendoredScript("datamaps.min.js"),
   managedFile("datatables.net", "js", "jquery.dataTables.min.js"),
-  managedFile("datatables.net-bs", "js", "dataTables.bootstrap.min.js"),
+  managedFile("datatables.net-bs5", "js", "dataTables.bootstrap5.min.js"),
   vendoredScript("datetime-moment.js"),
   vendoredScript("jquery.ui.widget.js"),
   vendoredScript("jquery.fileupload.js"),
@@ -97,17 +97,16 @@ const applicationScripts = [
 ];
 
 const stylesheetSources = [
-  path.join(stylesheetSourceDirectory, "bootstrap.min.css"),
+  managedFile("bootstrap", "dist", "css", "bootstrap.min.css"),
   path.join(stylesheetSourceDirectory, "main.css"),
   path.join(stylesheetSourceDirectory, "dashboard.css"),
-  path.join(stylesheetSourceDirectory, "flat-ui.css"),
-  managedFile("datatables.net-bs", "css", "dataTables.bootstrap.min.css"),
+  path.join(stylesheetSourceDirectory, "gophishfr-theme.css"),
+  managedFile("datatables.net-bs5", "css", "dataTables.bootstrap5.min.css"),
   path.join(stylesheetSourceDirectory, "font-awesome.min.css"),
   path.join(stylesheetSourceDirectory, "bootstrap-datetime.css"),
   path.join(stylesheetSourceDirectory, "checkbox.css"),
   path.join(stylesheetSourceDirectory, "sweetalert2.min.css"),
   managedFile("select2", "dist", "css", "select2.min.css"),
-  path.join(stylesheetSourceDirectory, "select2-bootstrap.min.css"),
 ];
 
 const managedVendorLicenses = [
@@ -128,7 +127,15 @@ const managedVendorLicenses = [
     sourcePath: path.join(hammerPackageDirectory, "LICENSE.md"),
   },
   {
-    component: "DataTables and DataTables Bootstrap integration 1.13.11",
+    component: "Bootstrap 5.3.8",
+    sourcePath: managedFile("bootstrap", "LICENSE"),
+  },
+  {
+    component: "@popperjs/core 2.11.8",
+    sourcePath: managedFile("@popperjs/core", "LICENSE.md"),
+  },
+  {
+    component: "DataTables and DataTables Bootstrap 5 integration 1.13.11",
     sourcePath: managedFile("datatables.net", "License.txt"),
   },
   {

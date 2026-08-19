@@ -1,5 +1,5 @@
 $(document).ready(function () {
-    $('[data-toggle="tooltip"]').tooltip();
+    bsInitTooltips();
     $("#apiResetForm").submit(function (e) {
         api.reset()
             .success(function (response) {
@@ -38,7 +38,7 @@ $(document).ready(function () {
         imapSettings.restrict_domain = $("#restrictdomain").val()
         imapSettings.ignore_cert_errors = $('#ignorecerterrors').prop('checked')
         imapSettings.delete_reported_campaign_email = $('#deletecampaign').prop('checked')
-        
+
         //To avoid unmarshalling error in controllers/api/imap.go. It would fail gracefully, but with a generic error.
         if (imapSettings.host == ""){
             errorFlash("No IMAP Host specified")
@@ -52,7 +52,7 @@ $(document).ready(function () {
             document.documentElement.scrollTop = 0;
             return false
         }
-        if (isNaN(imapSettings.port) || imapSettings.port <1 || imapSettings.port > 65535  ){ 
+        if (isNaN(imapSettings.port) || imapSettings.port <1 || imapSettings.port > 65535  ){
             errorFlash("Invalid IMAP Port")
             document.body.scrollTop = 0;
             document.documentElement.scrollTop = 0;
@@ -79,7 +79,7 @@ $(document).ready(function () {
                 document.body.scrollTop = 0;
                 document.documentElement.scrollTop = 0;
             })
-        
+
         return false
     })
 
@@ -94,7 +94,7 @@ $(document).ready(function () {
         server.tls = $('#use_tls').prop('checked')
         server.ignore_cert_errors = $('#ignorecerterrors').prop('checked')
 
-        //To avoid unmarshalling error in controllers/api/imap.go. It would fail gracefully, but with a generic error. 
+        //To avoid unmarshalling error in controllers/api/imap.go. It would fail gracefully, but with a generic error.
         if (server.host == ""){
             errorFlash("No IMAP Host specified")
             document.body.scrollTop = 0;
@@ -128,9 +128,9 @@ $(document).ready(function () {
         $('#deletecampaign').attr("disabled", true);
         $('#lastlogin').attr("disabled", true);
         $('#imapfreq').attr("disabled", true);
-        $("#validateimap").attr("disabled", true);  
+        $("#validateimap").attr("disabled", true);
         $("#validateimap").html("<i class='fa fa-circle-o-notch fa-spin'></i> Testing...");
-        
+
         api.IMAP.validate(server).done(function(data) {
             if (data.success == true) {
                 Swal.fire({
@@ -157,7 +157,7 @@ $(document).ready(function () {
                     }
                   })
             }
-            
+
           })
           .fail(function() {
             Swal.fire({
@@ -220,7 +220,7 @@ $(document).ready(function () {
                 $('#lastloginraw').val(imap.last_login)
                 $('#lastlogin').val(moment.utc(imap.last_login).fromNow())
                 $('#imapfreq').val(imap.imap_freq)
-            }  
+            }
 
         })
         .error(function () {

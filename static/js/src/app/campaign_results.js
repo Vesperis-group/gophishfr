@@ -5,81 +5,81 @@ var doPoll = true;
 var statuses = {
     "Email Sent": {
         color: "#1abc9c",
-        label: "label-success",
+        label: "text-bg-success",
         icon: "fa-envelope"
     },
     "Emails Sent": {
         color: "#1abc9c",
-        label: "label-success",
+        label: "text-bg-success",
         icon: "fa-envelope"
     },
     "In progress": {
-        label: "label-primary"
+        label: "text-bg-primary"
     },
     "Queued": {
-        label: "label-info"
+        label: "text-bg-info"
     },
     "Completed": {
-        label: "label-success"
+        label: "text-bg-success"
     },
     "Email Opened": {
         color: "#f9bf3b",
-        label: "label-warning",
+        label: "text-bg-warning",
         icon: "fa-envelope-open"
     },
     "Clicked Link": {
         color: "#F39C12",
-        label: "label-clicked",
+        label: "text-bg-clicked",
         icon: "fa-mouse-pointer"
     },
     "Success": {
         color: "#f05b4f",
-        label: "label-danger",
+        label: "text-bg-danger",
         icon: "fa-exclamation"
     },
     //not a status, but is used for the campaign timeline and user timeline
     "Email Reported": {
         color: "#45d6ef",
-        label: "label-info",
+        label: "text-bg-info",
         icon: "fa-bullhorn"
     },
     "Error": {
         color: "#6c7a89",
-        label: "label-default",
+        label: "text-bg-secondary",
         icon: "fa-times"
     },
     "Error Sending Email": {
         color: "#6c7a89",
-        label: "label-default",
+        label: "text-bg-secondary",
         icon: "fa-times"
     },
     "Submitted Data": {
         color: "#f05b4f",
-        label: "label-danger",
+        label: "text-bg-danger",
         icon: "fa-exclamation"
     },
     "Unknown": {
         color: "#6c7a89",
-        label: "label-default",
+        label: "text-bg-secondary",
         icon: "fa-question"
     },
     "Sending": {
         color: "#428bca",
-        label: "label-primary",
+        label: "text-bg-primary",
         icon: "fa-spinner"
     },
     "Retrying": {
         color: "#6c7a89",
-        label: "label-default",
+        label: "text-bg-secondary",
         icon: "fa-clock-o"
     },
     "Scheduled": {
         color: "#428bca",
-        label: "label-primary",
+        label: "text-bg-primary",
         icon: "fa-clock-o"
     },
     "Campaign Created": {
-        label: "label-success",
+        label: "text-bg-success",
         icon: "fa-rocket"
     }
 }
@@ -106,7 +106,7 @@ var bubbles = []
 
 function dismiss() {
     $("#modal\\.flashes").empty()
-    $("#modal").modal('hide')
+    bsModalHide('#modal')
     $("#resultsTable").dataTable().DataTable().clear().draw()
 }
 
@@ -362,7 +362,7 @@ function renderTimeline(data) {
         "reported": data[7],
         "send_date": data[8]
     }
-    results = '<div class="timeline col-sm-12 well well-lg">' +
+    results = '<div class="timeline col-sm-12 border rounded p-4">' +
         '<h6>Timeline for ' + escapeHtml(record.first_name) + ' ' + escapeHtml(record.last_name) +
         '</h6><span class="subtitle">Email: ' + escapeHtml(record.email) +
         '<br>Result ID: ' + escapeHtml(record.id) + '</span>' +
@@ -392,7 +392,7 @@ function renderTimeline(data) {
                 }
                 if (details.payload) {
                     results += '<div class="timeline-event-results">'
-                    results += '    <table class="table table-condensed table-bordered table-striped">'
+                    results += '    <table class="table table-sm table-bordered table-striped">'
                     results += '        <thead><tr><th>Parameter</th><th>Value(s)</tr></thead><tbody>'
                     $.each(Object.keys(details.payload), function (i, param) {
                         if (param == "rid") {
@@ -409,7 +409,7 @@ function renderTimeline(data) {
                 if (details.error) {
                     results += '<div class="timeline-event-details"><i class="fa fa-caret-right"></i> View Details</div>'
                     results += '<div class="timeline-event-results">'
-                    results += '<span class="label label-default">Error</span> ' + details.error
+                    results += '<span class="badge text-bg-secondary">Error</span> ' + details.error
                     results += '</div>'
                 }
             }
@@ -488,12 +488,12 @@ var updateMap = function (results) {
  * @param {moment(datetime)} send_date 
  */
 function createStatusLabel(status, send_date) {
-    var label = statuses[status].label || "label-default";
-    var statusColumn = "<span class=\"label " + label + "\">" + status + "</span>"
+    var label = statuses[status].label || "text-bg-secondary";
+    var statusColumn = "<span class=\"badge " + label + "\">" + status + "</span>"
     // Add the tooltip if the email is scheduled to be sent
     if (status == "Scheduled" || status == "Retrying") {
         var sendDateMessage = "Scheduled to send at " + send_date
-        statusColumn = "<span class=\"label " + label + "\" data-toggle=\"tooltip\" data-placement=\"top\" data-html=\"true\" title=\"" + sendDateMessage + "\">" + status + "</span>"
+        statusColumn = "<span class=\"badge " + label + "\" data-bs-toggle=\"tooltip\" data-bs-placement=\"top\" data-bs-html=\"true\" title=\"" + sendDateMessage + "\">" + status + "</span>"
     }
     return statusColumn
 }
@@ -584,7 +584,7 @@ function poll() {
             resultsTable.draw(false)
             /* Update the map information */
             updateMap(campaign.results)
-            $('[data-toggle="tooltip"]').tooltip()
+            bsInitTooltips()
             $("#refresh_message").hide()
             $("#refresh_btn").show()
         })
@@ -688,7 +688,7 @@ function load() {
                 })
                 resultsTable.draw();
                 // Setup tooltips
-                $('[data-toggle="tooltip"]').tooltip()
+                bsInitTooltips()
                 // Setup the individual timelines
                 $('#resultsTable tbody').on('click', 'td.details-control', function () {
                     var tr = $(this).closest('tr');

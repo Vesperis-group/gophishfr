@@ -371,7 +371,7 @@
                     content.append(toolbar);
                 }
                 if (hasDate()) {
-                    content.append($('<li>').addClass((options.collapse && hasTime() ? 'collapse in' : '')).append(dateView));
+                    content.append($('<li>').addClass((options.collapse && hasTime() ? 'collapse show' : '')).append(dateView));
                 }
                 if (options.toolbarPlacement === 'default') {
                     content.append(toolbar);
@@ -896,8 +896,8 @@
                 }
                 // Ignore event if in the middle of a picker transition
                 widget.find('.collapse').each(function () {
-                    var collapseData = $(this).data('collapse');
-                    if (collapseData && collapseData.transitioning) {
+                    var instance = bootstrap.Collapse.getInstance(this);
+                    if (instance && instance._element && instance._element.classList.contains('collapsing')) {
                         transitioning = true;
                         return false;
                     }
@@ -1064,32 +1064,22 @@
                 togglePicker: function (e) {
                     var $this = $(e.target),
                         $parent = $this.closest('ul'),
-                        expanded = $parent.find('.in'),
-                        closed = $parent.find('.collapse:not(.in)'),
-                        collapseData;
+                        expanded = $parent.find('.collapse.show'),
+                        closed = $parent.find('.collapse:not(.show)');
 
                     if (expanded && expanded.length) {
-                        collapseData = expanded.data('collapse');
-                        if (collapseData && collapseData.transitioning) {
+                        var expandedInstance = bootstrap.Collapse.getInstance(expanded[0]);
+                        if (expandedInstance && expanded[0] && expanded[0].classList.contains('collapsing')) {
                             return;
                         }
-                        if (expanded.collapse) { // if collapse plugin is available through bootstrap.js then use it
-                            expanded.collapse('hide');
-                            closed.collapse('show');
-                        } else { // otherwise just toggle in class on the two views
-                            expanded.removeClass('in');
-                            closed.addClass('in');
-                        }
+                        bootstrap.Collapse.getOrCreateInstance(expanded[0], {toggle: false}).hide();
+                        bootstrap.Collapse.getOrCreateInstance(closed[0], {toggle: false}).show();
+
                         if ($this.is('span')) {
                             $this.toggleClass(options.icons.time + ' ' + options.icons.date);
                         } else {
                             $this.find('span').toggleClass(options.icons.time + ' ' + options.icons.date);
                         }
-
-                        // NOTE: uncomment if toggled state will be restored in show()
-                        //if (component) {
-                        //    component.find('span').toggleClass(options.icons.time + ' ' + options.icons.date);
-                        //}
                     }
                 },
 
@@ -2381,15 +2371,15 @@
         disabledDates: false,
         enabledDates: false,
         icons: {
-            time: 'glyphicon glyphicon-time',
-            date: 'glyphicon glyphicon-calendar',
-            up: 'glyphicon glyphicon-chevron-up',
-            down: 'glyphicon glyphicon-chevron-down',
-            previous: 'glyphicon glyphicon-chevron-left',
-            next: 'glyphicon glyphicon-chevron-right',
-            today: 'glyphicon glyphicon-screenshot',
-            clear: 'glyphicon glyphicon-trash',
-            close: 'glyphicon glyphicon-remove'
+            time: 'fa fa-clock-o',
+            date: 'fa fa-calendar',
+            up: 'fa fa-chevron-up',
+            down: 'fa fa-chevron-down',
+            previous: 'fa fa-chevron-left',
+            next: 'fa fa-chevron-right',
+            today: 'fa fa-crosshairs',
+            clear: 'fa fa-trash',
+            close: 'fa fa-times'
         },
         tooltips: {
             today: 'Go to today',

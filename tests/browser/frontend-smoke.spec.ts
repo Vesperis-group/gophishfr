@@ -91,7 +91,7 @@ function requiredEnvironmentVariable(name: string): string {
   return value;
 }
 
-test("legacy frontend browser smoke baseline", async ({ context, page }) => {
+test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   test.setTimeout(60_000);
 
   const sandboxServiceWorkerError =
@@ -144,18 +144,6 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
       await route.continue();
       return;
     }
-    if (
-      url.protocol === "https:" &&
-      url.hostname === "fonts.googleapis.com" &&
-      request.resourceType() === "stylesheet"
-    ) {
-      await route.fulfill({
-        status: 200,
-        contentType: "text/css",
-        body: "",
-      });
-      return;
-    }
     unexpectedExternalRequests.push(request.url());
     await route.abort("blockedbyclient");
   });
@@ -177,7 +165,7 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
     });
   });
 
-  await test.step("login loads legacy CSS and JavaScript", async () => {
+  await test.step("login loads Bootstrap 5 CSS and JavaScript", async () => {
     const response = await page.goto("/login");
     expect(response?.status()).toBe(200);
     await expect(page).toHaveTitle("GophishFR - Login");
@@ -185,6 +173,10 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
     await expect(page.locator("form.form-signin")).toHaveCSS("max-width", "400px");
     await expect(page.locator('input[name="username"]')).toBeVisible();
     await expect(page.locator('input[name="password"]')).toBeVisible();
+    // Login form accessibility: inputs have associated labels
+    await expect(page.locator('label[for="username"]')).toHaveCount(1);
+    await expect(page.locator('label[for="password"]')).toHaveCount(1);
+    await expect(page.locator('#logo')).toHaveAttribute('alt', 'GophishFR logo');
     await expect(page.locator('input[name="csrf_token"]')).toHaveCount(1);
     const loginPresentation = await page.evaluate(() => {
       const button = getComputedStyle(
@@ -212,8 +204,25 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
       await page.evaluate(
         () =>
           typeof window.jQuery === "function" &&
-          typeof window.jQuery.fn.modal === "function" &&
           typeof window.jQuery.fn.DataTable === "function",
+      ),
+    ).toBe(true);
+    // Bootstrap jQuery bridge must be absent (data-bs-no-jquery disables it)
+    expect(
+      await page.evaluate(
+        () =>
+          typeof window.jQuery.fn.modal !== "function" &&
+          typeof window.jQuery.fn.tooltip !== "function" &&
+          typeof window.jQuery.fn.collapse !== "function",
+      ),
+    ).toBe(true);
+    // Native Bootstrap 5 API must be available
+    expect(
+      await page.evaluate(
+        () =>
+          typeof window.bootstrap === "object" &&
+          typeof window.bootstrap.Modal === "function" &&
+          typeof window.bootstrap.Tooltip === "function",
       ),
     ).toBe(true);
     expect(
@@ -246,7 +255,7 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
     await expect(page.locator("#navbar-dropdown")).toContainText(username);
 
     const navbarPresentation = await page
-      .locator(".navbar-inverse")
+      .locator(".navbar-gophishfr")
       .evaluate((navbar) => {
         const navbarStyle = getComputedStyle(navbar);
         const brandStyle = getComputedStyle(
@@ -265,9 +274,9 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
     const responsivePage = await context.newPage();
     await responsivePage.setViewportSize({ width: 480, height: 800 });
     await responsivePage.goto("/");
-    await expect(responsivePage.locator(".navbar-toggle")).toBeVisible();
-    await responsivePage.locator(".navbar-toggle").click();
-    await expect(responsivePage.locator(".navbar-collapse")).toHaveClass(/in/);
+    await expect(responsivePage.locator(".navbar-toggler")).toBeVisible();
+    await responsivePage.locator(".navbar-toggler").click();
+    await expect(responsivePage.locator(".navbar-collapse")).toHaveClass(/show/);
     await expect(responsivePage.locator("#navbar-dropdown")).toBeVisible();
     await responsivePage.close();
   });
@@ -494,12 +503,34 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
     await expect(page.locator("#archivedCampaigns")).toHaveClass(/active/);
 
     await page.getByRole("button", { name: "New Campaign" }).click();
-    await expect(page.locator("#modal")).toHaveClass(/in/);
+    await expect(page.locator("#modal")).toHaveClass(/show/);
     await expect(page.locator("#modal")).toBeVisible();
     await expect(page.locator(".select2-container")).toHaveCount(4);
-    const urlHelp = page.locator('label[for="url"] [data-toggle="tooltip"]');
+    // Select2: open and select a known fixture for a single-select (sending profile)
+    const profileContainer = page.locator('select#profile + .select2-container, select#profile ~ .select2-container').first();
+    await profileContainer.click();
+    await expect(page.locator('.select2-dropdown')).toBeVisible();
+    await page.locator('.select2-results__option').filter({ hasText: 'Browser Fixture Sending Profile' }).click();
+    await expect(profileContainer.locator('.select2-selection__rendered')).toContainText('Browser Fixture Sending Profile');
+
+    // Select2: open and select for a multi-select (groups)
+    const groupContainer = page.locator('select#users + .select2-container, select#users ~ .select2-container').first();
+    await groupContainer.click();
+    await expect(page.locator('.select2-dropdown')).toBeVisible();
+    await page.locator('.select2-results__option').filter({ hasText: 'Browser Fixture Group' }).click();
+
+    // Verify dropdown renders inside/above modal without overflow
+    const modalRect = await page.locator('#modal .modal-content').boundingBox();
+    const dropdownVisible = await page.locator('.select2-dropdown').isVisible().catch(() => false);
+    if (dropdownVisible) {
+      const dropdownRect = await page.locator('.select2-dropdown').boundingBox();
+      if (modalRect && dropdownRect) {
+        expect(dropdownRect.x).toBeGreaterThanOrEqual(modalRect.x - 5);
+      }
+    }
+    const urlHelp = page.locator('label[for="url"] [data-bs-toggle="tooltip"]');
     await urlHelp.hover();
-    await expect(page.locator(".tooltip.in")).toContainText(
+    await expect(page.locator(".tooltip.show")).toContainText(
       "Location of the GophishFR listener",
     );
     expect(
@@ -510,7 +541,7 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
           window.jQuery("#launch_date").data("DateTimePicker") !== undefined,
       ),
     ).toBe(true);
-    await page.locator('#modal .modal-footer button[data-dismiss="modal"]').click();
+    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
   });
 
   await test.step("group modal and DataTables interaction remain functional", async () => {
@@ -519,6 +550,26 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
     await expect(page.getByRole("heading", { name: "Users & Groups" })).toBeVisible();
     await expect(page.locator("#groupTable")).toBeVisible();
     await expect(page.locator("#groupTable")).toContainText("Browser Fixture Group");
+    // DataTables BS5 wrapper classes
+    await expect(page.locator("#groupTable_wrapper")).toBeVisible();
+    await expect(page.locator("#groupTable_filter input")).toHaveClass(/form-control/);
+    const paginationClasses = await page.locator("#groupTable_wrapper .pagination").getAttribute("class");
+    expect(paginationClasses).toContain("pagination");
+
+    // Exercise search filtering
+    await page.locator("#groupTable_filter input").fill("Browser Fixture");
+    await expect(page.locator("#groupTable")).toContainText("Browser Fixture Group");
+    await page.locator("#groupTable_filter input").fill("XYZNONEXISTENT999");
+    await expect(page.locator("#groupTable")).not.toContainText("Browser Fixture Group");
+    await page.locator("#groupTable_filter input").fill("");
+    await expect(page.locator("#groupTable")).toContainText("Browser Fixture Group");
+
+    // Exercise sortable header
+    const nameHeader = page.locator("#groupTable thead th").first();
+    const initialClass = await nameHeader.getAttribute("class");
+    await nameHeader.click();
+    const afterClass = await nameHeader.getAttribute("class");
+    expect(afterClass).not.toBe(initialClass);
 
     await page.getByRole("button", { name: "New Group" }).click();
     await expect(page.locator("#modal")).toBeVisible();
@@ -530,7 +581,7 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
     await expect(page.locator("#targetsTable")).toContainText(
       "second-fixture@localhost.invalid",
     );
-    await page.locator('#modal .modal-footer button[data-dismiss="modal"]').click();
+    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
   });
 
   await test.step("template editor round-trips full-document source HTML", async () => {
@@ -671,7 +722,7 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
         }),
       )
       .toBe(editedEmailHTML);
-    await page.locator('#modal .modal-footer button[data-dismiss="modal"]').click();
+    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
     await expect(page.locator("#modal")).not.toBeVisible();
   });
 
@@ -778,8 +829,207 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
         }),
       )
       .toBe(landingPage?.html);
-    await page.locator('#modal .modal-footer button[data-dismiss="modal"]').click();
+    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
     await expect(page.locator("#modal")).not.toBeVisible();
+  });
+
+
+  await test.step("datetimepicker opens with Font Awesome icons and toggles panes", async () => {
+    await page.getByRole("link", { name: "Campaigns", exact: true }).click();
+    await expect(page).toHaveURL(/\/campaigns$/);
+    await page.waitForFunction(() => typeof window.bootstrap !== "undefined");
+    await page.getByRole("button", { name: "New Campaign" }).click();
+    await expect(page.locator("#modal")).toHaveClass(/show/);
+
+    // Click on launch date input to open datetimepicker
+    await page.locator("#launch_date").click();
+    const picker = page.locator(".bootstrap-datetimepicker-widget");
+    await expect(picker).toBeVisible();
+
+    // Verify Font Awesome icons (no glyphicon)
+    expect(await picker.locator(".fa").count()).toBeGreaterThan(0);
+    expect(await picker.locator("[class*=glyphicon]").count()).toBe(0);
+
+    // Verify date pane is initially visible (collapse show)
+    const datePaneVisible = await picker.locator("li.collapse.show .datepicker").count();
+    expect(datePaneVisible).toBe(1);
+
+    // Click the toggle action to switch to time pane
+    await picker.locator('[data-action="togglePicker"]').click();
+    await expect(picker.locator("li.collapse.show .timepicker")).toBeVisible();
+    await expect(picker.locator("li.collapse:not(.show) .datepicker")).toHaveCount(1);
+
+    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+  });
+
+  await test.step("nested modal stacking z-index is correct", async () => {
+    await page.getByRole("button", { name: "New Campaign" }).click();
+    await expect(page.locator("#modal")).toHaveClass(/show/);
+
+    const nestedTrigger = page.locator('#modal button', { hasText: "Send Test Email" });
+    await nestedTrigger.click();
+    await expect(page.locator("#sendTestEmailModal")).toHaveClass(/show/);
+    await expect(page.locator("#modal")).toHaveClass(/show/);
+
+    // Verify nested modal z-index is above parent while the parent remains visible.
+    const zIndexes = await page.evaluate(() => {
+      const parent = document.querySelector("#modal") as HTMLElement;
+      const child = document.querySelector("#sendTestEmailModal") as HTMLElement;
+      const backdrops = document.querySelectorAll(".modal-backdrop");
+      const lastBackdrop = backdrops[backdrops.length - 1] as HTMLElement;
+      return {
+        parentZ: parseInt(parent.style.zIndex || "0", 10),
+        childZ: parseInt(child.style.zIndex || "0", 10),
+        lastBackdropZ: parseInt(lastBackdrop?.style.zIndex || "0", 10),
+      };
+    });
+    expect(zIndexes.childZ).toBeGreaterThan(zIndexes.parentZ);
+    expect(zIndexes.lastBackdropZ).toBeGreaterThan(zIndexes.parentZ);
+
+    // Close nested modal and restore focus to the trigger.
+    await page.locator('#sendTestEmailModal .btn-close, #sendTestEmailModal [data-bs-dismiss="modal"]').first().click();
+    await expect(page.locator("#sendTestEmailModal")).not.toHaveClass(/show/);
+    await expect.poll(() => nestedTrigger.evaluate((el) => document.activeElement === el)).toBe(true);
+
+    // Parent stays open and usable.
+    await expect(page.locator("#modal")).toHaveClass(/show/);
+    expect(await page.evaluate(() => document.body.classList.contains("modal-open"))).toBe(true);
+
+    // Close parent
+    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+  });
+
+  await test.step("modal accessibility: focus trap and keyboard behavior", async () => {
+    await page.getByRole("button", { name: "New Campaign" }).click();
+    await expect(page.locator("#modal")).toHaveClass(/show/);
+
+    // Focus should be inside the modal after opening (BS5 moves focus async)
+    await expect.poll(() => page.evaluate(() => {
+      const modal = document.querySelector("#modal");
+      return modal?.contains(document.activeElement) ?? false;
+    })).toBe(true);
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator("#modal")).toHaveClass(/show/);
+
+    // Close the modal explicitly and verify focus returns to the trigger
+    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+
+    // Focus should return to the trigger button after modal close
+    await expect.poll(() => page.evaluate(() => {
+      return document.activeElement?.textContent?.trim() ?? "";
+    })).toContain("New Campaign");
+  });
+
+  await test.step("layout: no critical overflow and content below navbar", async () => {
+    // Desktop check
+    const layoutDesktop = await page.evaluate(() => {
+      const navbar = document.querySelector(".navbar") as HTMLElement;
+      const navbarRect = navbar.getBoundingClientRect();
+      const content = document.querySelector(".main") as HTMLElement;
+      const contentRect = content?.getBoundingClientRect();
+      return {
+        navbarBottom: navbarRect.bottom,
+        contentTop: contentRect?.top ?? 0,
+        bodyScrollWidth: document.body.scrollWidth,
+        viewportWidth: window.innerWidth,
+      };
+    });
+    expect(layoutDesktop.contentTop).toBeGreaterThanOrEqual(layoutDesktop.navbarBottom - 2);
+    expect(layoutDesktop.bodyScrollWidth).toBeLessThanOrEqual(layoutDesktop.viewportWidth + 5);
+
+    // Sidebar top should be >= navbar bottom on desktop
+    const sidebarTop = await page.evaluate(() => {
+      const sidebar = document.querySelector('.sidebar') as HTMLElement;
+      const navbar = document.querySelector('.navbar') as HTMLElement;
+      return {
+        sidebarTop: sidebar ? sidebar.getBoundingClientRect().top : null,
+        navbarBottom: navbar.getBoundingClientRect().bottom,
+      };
+    });
+    if (sidebarTop.sidebarTop !== null) {
+      expect(sidebarTop.sidebarTop).toBeGreaterThanOrEqual(sidebarTop.navbarBottom - 2);
+    }
+
+    // Mobile check (use /settings which has no wide DataTable)
+    const mobilePage = await context.newPage();
+    await mobilePage.setViewportSize({ width: 375, height: 667 });
+    await mobilePage.goto("/settings");
+    const layoutMobile = await mobilePage.evaluate(() => {
+      const navbar = document.querySelector(".navbar") as HTMLElement;
+      const navbarRect = navbar.getBoundingClientRect();
+      const content = document.querySelector(".main") as HTMLElement;
+      const contentRect = content?.getBoundingClientRect();
+      return {
+        navbarBottom: navbarRect.bottom,
+        contentTop: contentRect?.top ?? 0,
+        bodyScrollWidth: document.body.scrollWidth,
+        viewportWidth: window.innerWidth,
+      };
+    });
+    expect(layoutMobile.contentTop).toBeGreaterThanOrEqual(layoutMobile.navbarBottom - 2);
+    expect(layoutMobile.bodyScrollWidth).toBeLessThanOrEqual(layoutMobile.viewportWidth + 5);
+
+    // Modal fits viewport
+    await mobilePage.goto("/campaigns");
+    await mobilePage.getByRole("button", { name: "New Campaign" }).click();
+    await expect(mobilePage.locator("#modal")).toHaveClass(/show/);
+    const modalWidth = await mobilePage.evaluate(() => {
+      const dialog = document.querySelector(".modal-dialog") as HTMLElement;
+      return dialog.getBoundingClientRect().width;
+    });
+    expect(modalWidth).toBeLessThanOrEqual(375);
+    await mobilePage.close();
+  });
+
+  await test.step("mobile: routes have visible content without overflow", async () => {
+    const mobilePage2 = await context.newPage();
+    await mobilePage2.setViewportSize({ width: 375, height: 667 });
+
+    const routes = ["/", "/campaigns", "/templates", "/settings", "/groups"];
+    for (const route of routes) {
+      await mobilePage2.goto(route);
+      const layout = await mobilePage2.evaluate(() => {
+        const dataTablesWrapper = document.querySelector(".dataTables_wrapper") as HTMLElement | null;
+        return {
+          bodyScrollWidth: document.body.scrollWidth,
+          viewportWidth: window.innerWidth,
+          hasHeading: !!document.querySelector("h1, h2, h3, .page-header, [role='heading']"),
+          navbarVisible: document.querySelector(".navbar")?.getBoundingClientRect().height! > 0,
+          hasDataTablesWrapper: !!dataTablesWrapper,
+          dataTablesWrapperOverflowX: dataTablesWrapper ? window.getComputedStyle(dataTablesWrapper).overflowX : null,
+        };
+      });
+      expect(layout.bodyScrollWidth, `overflow on ${route}`).toBeLessThanOrEqual(layout.viewportWidth + 5);
+      if (layout.hasDataTablesWrapper) {
+        expect(layout.dataTablesWrapperOverflowX, `DataTables wrapper overflow on ${route}`).toBe("auto");
+      }
+      expect(layout.hasHeading, `no heading on ${route}`).toBe(true);
+      expect(layout.navbarVisible, `navbar hidden on ${route}`).toBe(true);
+    }
+
+    // Editor/modal on mobile: modal content reachable and scrollable
+    await mobilePage2.goto("/campaigns");
+    await mobilePage2.getByRole("button", { name: "New Campaign" }).click();
+    await expect(mobilePage2.locator("#modal")).toHaveClass(/show/);
+    const modalScroll = await mobilePage2.evaluate(() => {
+      const dialog = document.querySelector(".modal-dialog") as HTMLElement;
+      const content = document.querySelector(".modal-content") as HTMLElement;
+      return {
+        dialogWidth: dialog.getBoundingClientRect().width,
+        viewportWidth: window.innerWidth,
+        contentReachable: content !== null && content.getBoundingClientRect().height > 0,
+        dialogScrollable: dialog.classList.contains("modal-dialog-scrollable"),
+      };
+    });
+    expect(modalScroll.dialogWidth).toBeLessThanOrEqual(modalScroll.viewportWidth);
+    expect(modalScroll.contentReachable).toBe(true);
+    expect(modalScroll.dialogScrollable).toBe(true);
+
+    await mobilePage2.close();
   });
 
   await test.step("password strength bundle resolves zxcvbn", async () => {
@@ -795,10 +1045,16 @@ test("legacy frontend browser smoke baseline", async ({ context, page }) => {
       pageErrors: [],
     });
     await expect(page.locator("#modal")).toBeVisible();
+    await expect(page.locator("#password-strength-container")).toHaveClass(/d-none/);
     await page.locator("#password").fill("browser fixture password 2026");
     await expect(page.locator("#password-strength-container")).not.toHaveClass(
-      /hidden/,
+      /d-none/,
     );
+    // Password strength bar should have a bg-* class and numeric aria-valuenow > 0
+    const strengthBar = page.locator("#password-strength-bar");
+    await expect(strengthBar).toHaveAttribute("aria-valuenow", /^[1-9]\d*$/);
+    const barClasses = await strengthBar.getAttribute("class");
+    expect(barClasses).toMatch(/bg-(success|warning|danger)/);
     await expect(page.locator("#password-strength-description")).not.toBeEmpty();
   });
 

@@ -24,7 +24,7 @@ const save = (id) => {
                 successFlash("User " + escapeHtml(user.username) + " updated successfully!")
                 load()
                 dismiss()
-                $("#modal").modal('hide')
+                bsModalHide("#modal")
             })
             .error((data) => {
                 modalError(data.responseJSON.message)
@@ -37,7 +37,7 @@ const save = (id) => {
                 successFlash("User " + escapeHtml(user.username) + " registered successfully!")
                 load()
                 dismiss()
-                $("#modal").modal('hide')
+                bsModalHide("#modal")
             })
             .error((data) => {
                 modalError(data.responseJSON.message)
@@ -211,11 +211,11 @@ const load = () => {
                     escapeHtml(user.username),
                     escapeHtml(user.role.name),
                     lastlogin,
-                    "<div class='pull-right'>\
+                    "<div class='float-end'>\
                     <button class='btn btn-warning impersonate_button' data-user-id='" + user.id + "'>\
                     <i class='fa fa-retweet'></i>\
                     </button>\
-                    <button class='btn btn-primary edit_button' data-toggle='modal' data-backdrop='static' data-target='#modal' data-user-id='" + user.id + "'>\
+                    <button class='btn btn-primary edit_button' data-bs-toggle='modal' data-bs-target='#modal' data-user-id='" + user.id + "'>\
                     <i class='fa fa-pencil'></i>\
                     </button>\
                     <button class='btn btn-danger delete_button' data-user-id='" + user.id + "'>\
@@ -233,13 +233,13 @@ const load = () => {
 $(document).ready(function () {
     load()
     // Setup the event listeners
-    $("#modal").on("hide.bs.modal", function () {
+    document.getElementById('modal').addEventListener('hide.bs.modal', function () {
         dismiss();
     });
     // Select2 Defaults
     $.fn.select2.defaults.set("width", "100%");
     $.fn.select2.defaults.set("dropdownParent", $("#role-select"));
-    $.fn.select2.defaults.set("theme", "bootstrap");
+    $.fn.select2.defaults.set("theme", "default");
     $.fn.select2.defaults.set("sorter", function (data) {
         return data.sort(function (a, b) {
             if (a.text.toLowerCase() > b.text.toLowerCase()) {

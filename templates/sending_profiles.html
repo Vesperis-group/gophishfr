@@ -1,12 +1,12 @@
 {{define "body"}}
-<div class="col-sm-9 col-sm-offset-3 col-md-10 col-md-offset-2 main">
+<div class="col-sm-9 offset-sm-3 col-md-10 offset-md-2 main">
     <h1 class="page-header">
         Sending Profiles
     </h1>
     <div id="flashes" class="row"></div>
     <div class="row">
-        <button type="button" class="btn btn-primary" onclick="edit(-1)" data-toggle="modal" data-backdrop="static"
-            data-target="#modal"><i class="fa fa-plus"></i> New Profile</button>
+        <button type="button" class="btn btn-primary" onclick="edit(-1)" data-bs-toggle="modal"
+            data-bs-target="#modal"><i class="fa fa-plus"></i> New Profile</button>
     </div>
     &nbsp;
     <div id="loading">
@@ -33,41 +33,41 @@
     </div>
 </div>
 <!-- Modal -->
-<div class="modal fade" id="modal" tabindex="-1" role="dialog" aria-labelledby="modalLabel">
-    <div class="modal-dialog" role="document">
+<div class="modal fade" id="modal" tabindex="-1" role="dialog" aria-labelledby="profileModalLabel"
+    aria-modal="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-scrollable" role="document">
         <div class="modal-content">
             <!-- New Template Modal -->
             <div class="modal-header">
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close" onclick="dismiss()"><span
-                        aria-hidden="true">&times;</span></button>
                 <h4 class="modal-title" id="profileModalLabel">New Sending Profile</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" onclick="dismiss()"></button>
             </div>
             <div class="modal-body">
                 <div class="row" id="modal.flashes"></div>
                 <form>
-                    <div class="form-group">
-                        <label class="control-label" for="name">Name:</label>
+                    <div class="mb-3">
+                        <label class="form-label" for="name">Name:</label>
                         <input type="text" class="form-control" placeholder="Profile name" id="name" autofocus />
-                        <label class="control-label" for="interface_type">Interface Type:</label>
+                        <label class="form-label" for="interface_type">Interface Type:</label>
                         <input type="text" class="form-control" value="SMTP" id="interface_type" disabled />
-                        <label class="control-label" for="from">SMTP From: <i class="fa fa-question-circle"
-                                data-toggle="tooltip" data-placement="right" title="Set this to an email address from your sending domain to bypass SPF-checks. You can set the Envelope Sender in Email Templates. The Envelope Sender is shown to the user."></i></label>
+                        <label class="form-label" for="from">SMTP From: <i class="fa fa-question-circle"
+                                data-bs-toggle="tooltip" data-bs-placement="right" title="Set this to an email address from your sending domain to bypass SPF-checks. You can set the Envelope Sender in Email Templates. The Envelope Sender is shown to the user."></i></label>
                         <input type="text" class="form-control" placeholder="test@example.com" id="from"
                             required />
-                        <label class="control-label" for="host">Host:</label>
+                        <label class="form-label" for="host">Host:</label>
                         <input type="text" class="form-control" placeholder="smtp.example.com:25" id="host" required />
-                        <label class="control-label" for="username">Username:</label>
+                        <label class="form-label" for="username">Username:</label>
                         <input type="text" class="form-control" placeholder="Username" id="username" />
-                        <label class="control-label" for="password">Password:</label>
+                        <label class="form-label" for="password">Password:</label>
                         <input type="password" class="form-control" placeholder="Password" id="password" />
                         <div class="checkbox checkbox-primary">
                             <input id="ignore_cert_errors" type="checkbox" checked>
                             <label for="ignore_cert_errors">Ignore Certificate Errors <i class="fa fa-question-circle"
-                                    data-toggle="tooltip" data-placement="right" title="Ignore common certificate errors such as self-signed certs (exposes you to MiTM attacks - use carefully!)"></i></label>
+                                    data-bs-toggle="tooltip" data-bs-placement="right" title="Ignore common certificate errors such as self-signed certs (exposes you to MiTM attacks - use carefully!)"></i></label>
                         </div>
                     </div>
-                    <fieldset class="form-group">
-                        <label class="control-label input-group">Email Headers:</label>
+                    <fieldset class="mb-3">
+                        <label class="form-label input-group">Email Headers:</label>
                         <div class="col-md-4">
                             <input type="text" class="form-control" name="headerKey" id="headerKey" placeholder="X-Custom-Header">
                         </div>
@@ -79,7 +79,7 @@
                                 Custom Header</button>
                         </div>
                     </fieldset>
-                    <table id="headersTable" class="table table-hover table-striped table-condensed">
+                    <table id="headersTable" class="table table-hover table-striped table-sm">
                         <thead>
                             <tr>
                                 <th>Header</th>
@@ -90,31 +90,31 @@
                         <tbody>
                         </tbody>
                     </table>
-                    <button type="button" data-toggle="modal" data-backdrop="static" data-target="#sendTestEmailModal"
+                    <button type="button" onclick="bsModalShow('#sendTestEmailModal', this)"
                         class="btn btn-primary"><i class="fa fa-envelope"></i> Send Test Email</button>
                 </form>
             </div>
             <div class="modal-footer">
-                <button type="button" data-dismiss="modal" class="btn btn-default" onclick="dismiss()">Cancel</button>
+                <button type="button" data-bs-dismiss="modal" class="btn btn-secondary" onclick="dismiss()">Cancel</button>
                 <button type="button" class="btn btn-primary" id="modalSubmit">Save Profile</button>
             </div>
         </div>
     </div>
 </div>
 <!-- Send Test Email Modal -->
-<div class="modal" id="sendTestEmailModal" tabindex="-1" role="dialog" aria-labelledby="modalLabel">
-    <div class="modal-dialog" role="document">
+<div class="modal" id="sendTestEmailModal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="sendTestEmailModalTitle">
+    <div class="modal-dialog modal-dialog-scrollable" role="document">
         <div class="modal-content">
             <!-- New Email Modal -->
             <div class="modal-header">
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
                 <h4 class="modal-title" id="sendTestEmailModalTitle">Send Test Email</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="row" id="sendTestEmailModal.flashes"></div>
                 <div class="row">
                     <div class="col-sm-12">
-                        <label class="control-label" for="to">Send Test Email to:</label>
+                        <label class="form-label" for="to">Send Test Email to:</label>
                     </div>
                     <br>
                     <div class="col-sm-2">
@@ -132,7 +132,7 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" data-dismiss="modal" class="btn btn-default">Cancel</button>
+                <button type="button" data-bs-dismiss="modal" class="btn btn-secondary">Cancel</button>
                 <button type="button" class="btn btn-primary" id="sendTestModalSubmit" onclick="sendTestEmail()"><i
                         class="fa fa-envelope"></i> Send</button>
             </div>

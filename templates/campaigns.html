@@ -1,5 +1,5 @@
 {{define "body"}}
-<div class="col-sm-9 col-sm-offset-3 col-md-10 col-md-offset-2 main">
+<div class="col-sm-9 offset-sm-3 col-md-10 offset-md-2 main">
     <div class="row">
         <h1 class="page-header">
             Campaigns
@@ -7,19 +7,19 @@
     </div>
     <div id="flashes" class="row"></div>
     <div class="row">
-        <button type="button" class="btn btn-primary" data-toggle="modal" data-backdrop="static" data-target="#modal"
+        <button type="button" class="btn btn-primary" data-bs-toggle="modal" data-bs-target="#modal"
             onclick="edit('new')">
             <i class="fa fa-plus"></i> New Campaign</button>
     </div>
     &nbsp;
 
     <ul class="nav nav-tabs" role="tablist">
-        <li class="active" role="activeCampaigns"><a href="#activeCampaigns" aria-controls="activeCampaigns" role="tab"
-                data-toggle="tab">Active Campaigns</a></li>
-        <li role="archivedCampaigns"><a href="#archivedCampaigns" aria-controls="archivedCampaigns" role="tab"
-                data-toggle="tab">Archived Campaigns</a></li>
+        <li class="nav-item" role="presentation"><a class="nav-link active" href="#activeCampaigns" aria-controls="activeCampaigns" role="tab"
+                data-bs-toggle="tab">Active Campaigns</a></li>
+        <li class="nav-item" role="presentation"><a class="nav-link" href="#archivedCampaigns" aria-controls="archivedCampaigns" role="tab"
+                data-bs-toggle="tab">Archived Campaigns</a></li>
     </ul>
-    </br>
+    <br>
     <div class="tab-content">
         <div role="tabpanel" class="tab-pane active" id="activeCampaigns">
             <div id="flashes" class="row"></div>
@@ -48,9 +48,9 @@
             </div>
         </div>
         <div role="tabpanel" class="tab-pane" id="archivedCampaigns">
-            </br>
+            <br>
             <div id="emptyMessage" class="row" style="display:none;">
-                </br>
+                <br>
                 <div class="alert alert-info">
                     No archived campaigns.
                 </div>
@@ -73,61 +73,58 @@
     </div>
 </div>
 <!-- Modal -->
-<div class="modal fade" id="modal" tabindex="-1" role="dialog" aria-labelledby="myModalLabel">
-    <div class="modal-dialog" role="document">
+<div class="modal fade" id="modal" tabindex="-1" role="dialog" aria-labelledby="campaignModalLabel"
+    aria-modal="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog modal-dialog-scrollable" role="document">
         <div class="modal-content">
             <div class="modal-header">
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close" onclick="dismiss()">
-                    <span aria-hidden="true">&times;</span>
-                </button>
                 <h4 class="modal-title" id="campaignModalLabel">New Campaign</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close" onclick="dismiss()"></button>
             </div>
             <div class="modal-body" id="modal_body">
                 <div class="row" id="modal.flashes"></div>
-                <div class="form-group">
+                <div class="mb-3">
                     <label for="name">Name:</label>
                     <input type="text" class="form-control" id="name" placeholder="Campaign name" autofocus>
-                    <label class="control-label" for="template">Email Template:</label>
-                    <select class="form-control" placeholder="Template Name" id="template" />
+                    <label class="form-label" for="template">Email Template:</label>
+                    <select class="form-control" placeholder="Template Name" id="template">
                     <option></option>
                     </select>
-                    <label class="control-label" for="page">Landing Page:</label>
-                    <select class="form-control" placeholder="Landing Page" id="page" />
+                    <label class="form-label" for="page">Landing Page:</label>
+                    <select class="form-control" placeholder="Landing Page" id="page">
                     <option></option>
                     </select>
-                    <label class="control-label" for="url">URL:
-                        <i class="fa fa-question-circle" data-toggle="tooltip" data-placement="right" title="Location of the GophishFR listener (must be reachable by targets!)"></i>
+                    <label class="form-label" for="url">URL:
+                        <i class="fa fa-question-circle" data-bs-toggle="tooltip" data-bs-placement="right" title="Location of the GophishFR listener (must be reachable by targets!)"></i>
                     </label>
                     <input type="text" class="form-control" placeholder="http://192.168.1.1" id="url" />
                     <div class="row">
                         <div class="col-md-6">
-                            <label class="control-label" for="url">Launch Date </label>
+                            <label class="form-label" for="url">Launch Date </label>
                             <input type="text" class="form-control" id="launch_date" />
                         </div>
                         <div class="col-md-6">
-                            <label class="control-label" for="delay">Send Emails By (Optional)
-                                <i class="fa fa-question-circle" data-toggle="tooltip" data-placement="right" title="If specified, GophishFR will send emails evenly between the campaign launch and this date."></i>
+                            <label class="form-label" for="delay">Send Emails By (Optional)
+                                <i class="fa fa-question-circle" data-bs-toggle="tooltip" data-bs-placement="right" title="If specified, GophishFR will send emails evenly between the campaign launch and this date."></i>
                             </label>
                             <input type="text" class="form-control" id="send_by_date" autocomplete="random-data"/> <!--Chrome ignores autocomplete="off".-->
                         </div>
                     </div>
-                    <label class="control-label" for="profile">Sending Profile:</label>
+                    <label class="form-label" for="profile">Sending Profile:</label>
                     <div class="input-group">
-                        <select class="form-control" placeholder="Sending Profile" id="profile" />
+                        <select class="form-control" placeholder="Sending Profile" id="profile">
                         <option></option>
                         </select>
-                        <span class="input-group-btn">
-                            <button type="button" data-toggle="modal" data-backdrop="static" data-target="#sendTestEmailModal"
-                                class="btn btn-primary button">
-                                <i class="fa fa-envelope"></i> Send Test Email</button>
-                        </span>
+                        <button type="button" onclick="bsModalShow('#sendTestEmailModal', this)"
+                            class="btn btn-primary button">
+                            <i class="fa fa-envelope"></i> Send Test Email</button>
                     </div>
-                    <label class="control-label" for="users">Groups:</label>
+                    <label class="form-label" for="users">Groups:</label>
                     <select class="form-control" id="users" multiple="multiple"></select>
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" class="btn btn-default" data-dismiss="modal" onclick="dismiss()">Close</button>
+                <button type="button" class="btn btn-secondary" data-bs-dismiss="modal" onclick="dismiss()">Close</button>
                 <button type="button" id="launchButton" class="btn btn-primary" onclick="launch()">
                     <i class="fa fa-rocket"></i> Launch Campaign</button>
             </div>
@@ -135,21 +132,19 @@
     </div>
 </div>
 <!-- Send Test Email Modal -->
-<div class="modal" id="sendTestEmailModal" tabindex="-1" role="dialog" aria-labelledby="modalLabel">
-    <div class="modal-dialog" role="document">
+<div class="modal" id="sendTestEmailModal" tabindex="-1" role="dialog" aria-modal="true" aria-labelledby="sendTestEmailModalTitle">
+    <div class="modal-dialog modal-dialog-scrollable" role="document">
         <div class="modal-content">
             <!-- New Email Modal -->
             <div class="modal-header">
-                <button type="button" class="close" data-dismiss="modal" aria-label="Close">
-                    <span aria-hidden="true">&times;</span>
-                </button>
                 <h4 class="modal-title" id="sendTestEmailModalTitle">Send Test Email</h4>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Close"></button>
             </div>
             <div class="modal-body">
                 <div class="row" id="sendTestEmailModal.flashes"></div>
                 <div class="row">
                     <div class="col-sm-12">
-                        <label class="control-label" for="to">Send Test Email to:</label>
+                        <label class="form-label" for="to">Send Test Email to:</label>
                     </div>
                     <br>
                     <div class="col-sm-2">
@@ -167,7 +162,7 @@
                 </div>
             </div>
             <div class="modal-footer">
-                <button type="button" data-dismiss="modal" class="btn btn-default">Cancel</button>
+                <button type="button" data-bs-dismiss="modal" class="btn btn-secondary">Cancel</button>
                 <button type="button" class="btn btn-primary" id="sendTestModalSubmit" onclick="sendTestEmail()">
                     <i class="fa fa-envelope"></i> Send</button>
             </div>

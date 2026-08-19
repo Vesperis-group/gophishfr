@@ -25,7 +25,7 @@ function save(id) {
                 successFlash("Group updated successfully!")
                 load()
                 dismiss()
-                $("#modal").modal('hide')
+                bsModalHide("#modal")
             })
             .error(function (data) {
                 modalError(data.responseJSON.message)
@@ -38,7 +38,7 @@ function save(id) {
                 successFlash("Group added successfully!")
                 load()
                 dismiss()
-                $("#modal").modal('hide')
+                bsModalHide("#modal")
             })
             .error(function (data) {
                 modalError(data.responseJSON.message)
@@ -241,7 +241,7 @@ function load() {
                         escapeHtml(group.name),
                         escapeHtml(group.num_targets),
                         moment(group.modified_date).format('MMMM Do YYYY, h:mm:ss a'),
-                        "<div class='pull-right'><button class='btn btn-primary' data-toggle='modal' data-backdrop='static' data-target='#modal' onclick='edit(" + group.id + ")'>\
+                        "<div class='float-end'><button class='btn btn-primary' data-bs-toggle='modal' data-bs-target='#modal' onclick='edit(" + group.id + ")'>\
                     <i class='fa fa-pencil'></i>\
                     </button>\
                     <button class='btn btn-danger' onclick='deleteGroup(" + group.id + ")'>\
@@ -289,7 +289,7 @@ $(document).ready(function () {
             .remove()
             .draw();
     });
-    $("#modal").on("hide.bs.modal", function () {
+    document.getElementById('modal').addEventListener('hide.bs.modal', function () {
         dismiss();
     });
     $("#csv-template").click(downloadCSVTemplate)

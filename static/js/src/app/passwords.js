@@ -37,18 +37,20 @@ const updatePasswordStrength = (e) => {
     // If there is no password, clear out the progress bar
     if (!candidate) {
         ProgressBar.style.width = 0
+        ProgressBar.setAttribute('aria-valuenow', '0')
         StrengthDescription.textContent = ""
-        Progress.classList.add("hidden")
+        Progress.classList.add("d-none")
         return
     }
     const score = zxcvbn(candidate).score
     const evaluation = StrengthMapping[score]
     // Update the progress bar
-    ProgressBar.classList = `progress-bar progress-bar-${evaluation.class}`
+    ProgressBar.classList = `progress-bar bg-${evaluation.class}`
     ProgressBar.style.width = evaluation.width
+    ProgressBar.setAttribute('aria-valuenow', String(parseInt(evaluation.width, 10)))
     StrengthDescription.textContent = evaluation.status
     StrengthDescription.classList = `text-${evaluation.class}`
-    Progress.classList.remove("hidden")
+    Progress.classList.remove("d-none")
 }
 
 document.getElementById("password").addEventListener("input", updatePasswordStrength)

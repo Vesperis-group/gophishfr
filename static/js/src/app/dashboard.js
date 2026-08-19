@@ -3,70 +3,70 @@ var campaigns = []
 var statuses = {
     "Email Sent": {
         color: "#1abc9c",
-        label: "label-success",
+        label: "text-bg-success",
         icon: "fa-envelope"
     },
     "Emails Sent": {
         color: "#1abc9c",
-        label: "label-success",
+        label: "text-bg-success",
         icon: "fa-envelope"
     },
     "In progress": {
-        label: "label-primary"
+        label: "text-bg-primary"
     },
     "Queued": {
-        label: "label-info"
+        label: "text-bg-info"
     },
     "Completed": {
-        label: "label-success"
+        label: "text-bg-success"
     },
     "Email Opened": {
         color: "#f9bf3b",
-        label: "label-warning",
+        label: "text-bg-warning",
         icon: "fa-envelope"
     },
     "Email Reported": {
         color: "#45d6ef",
-        label: "label-warning",
-        icon: "fa-bullhorne"
+        label: "text-bg-info",
+        icon: "fa-bullhorn"
     },
     "Clicked Link": {
         color: "#F39C12",
-        label: "label-clicked",
+        label: "text-bg-clicked",
         icon: "fa-mouse-pointer"
     },
     "Success": {
         color: "#f05b4f",
-        label: "label-danger",
+        label: "text-bg-danger",
         icon: "fa-exclamation"
     },
     "Error": {
         color: "#6c7a89",
-        label: "label-default",
+        label: "text-bg-secondary",
         icon: "fa-times"
     },
     "Error Sending Email": {
         color: "#6c7a89",
-        label: "label-default",
+        label: "text-bg-secondary",
         icon: "fa-times"
     },
     "Submitted Data": {
         color: "#f05b4f",
-        label: "label-danger",
+        label: "text-bg-danger",
         icon: "fa-exclamation"
     },
     "Unknown": {
         color: "#6c7a89",
-        label: "label-default",
+        label: "text-bg-secondary",
         icon: "fa-question"
     },
     "Sending": {
         color: "#428bca",
-        label: "label-primary",
+        label: "text-bg-primary",
         icon: "fa-spinner"
     },
     "Campaign Created": {
-        label: "label-success",
+        label: "text-bg-success",
         icon: "fa-rocket"
     }
 }
@@ -210,7 +210,7 @@ $(document).ready(function () {
                 campaignRows = []
                 $.each(campaigns, function (i, campaign) {
                     var campaign_date = moment(campaign.created_date).format('MMMM Do YYYY, h:mm:ss a')
-                    var label = statuses[campaign.status].label || "label-default";
+                    var label = statuses[campaign.status].label || "text-bg-secondary";
                     //section for tooltips on the status of a campaign to show some quick stats
                     var launchDate;
                     if (moment(campaign.launch_date).isAfter(moment())) {
@@ -229,15 +229,15 @@ $(document).ready(function () {
                         campaign.stats.clicked,
                         campaign.stats.submitted_data,
                         campaign.stats.email_reported,
-                        "<span class=\"label " + label + "\" data-toggle=\"tooltip\" data-placement=\"right\" data-html=\"true\" title=\"" + quickStats + "\">" + campaign.status + "</span>",
-                        "<div class='pull-right'><a class='btn btn-primary' href='/campaigns/" + campaign.id + "' data-toggle='tooltip' data-placement='left' title='View Results'>\
+                        "<span class=\"badge " + label + "\" data-bs-toggle=\"tooltip\" data-bs-placement=\"right\" data-bs-html=\"true\" title=\"" + quickStats + "\">" + campaign.status + "</span>",
+                        "<div class='float-end'><a class='btn btn-primary' href='/campaigns/" + campaign.id + "' data-bs-toggle='tooltip' data-bs-placement='left' title='View Results'>\
                     <i class='fa fa-bar-chart'></i>\
                     </a>\
-                    <button class='btn btn-danger' onclick='deleteCampaign(" + i + ")' data-toggle='tooltip' data-placement='left' title='Delete Campaign'>\
+                    <button class='btn btn-danger' onclick='deleteCampaign(" + i + ")' data-bs-toggle='tooltip' data-bs-placement='left' title='Delete Campaign'>\
                     <i class='fa fa-trash-o'></i>\
                     </button></div>"
                     ])
-                    $('[data-toggle="tooltip"]').tooltip()
+                    bsInitTooltips()
                 })
                 campaignTable.rows.add(campaignRows).draw()
                 // Build the charts

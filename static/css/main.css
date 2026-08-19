@@ -1,3 +1,7 @@
+:root {
+  --gophishfr-navbar-height: 76px;
+}
+
 .swal2-popup {
     font-size: 1.6rem !important;
   }
@@ -26,11 +30,7 @@
 }
 
 .sans {
-    font-family: 'Open Sans', sans-serif !important;
-}
-
-.label {
-    font-family: 'Roboto', sans-serif !important;
+    font-family: inherit !important;
 }
 
 .form-signin {
@@ -63,7 +63,7 @@ ul .dropdown-menu .ng-isolate-scope {
 }
 
 .form-signin .form-control {
-    font-family: 'Open Sans', sans-serif;
+    font-family: inherit;
     position: relative;
     font-size: 16px;
     height: auto;
@@ -105,7 +105,7 @@ ul .dropdown-menu .ng-isolate-scope {
 
 footer>p {
     color: #444444;
-    font-family: 'Open Sans', sans-serif;
+    font-family: inherit;
 }
 
 .header {
@@ -125,7 +125,7 @@ footer>p {
 }
 
 .api_heading {
-    font-family: 'Open Sans', sans-serif;
+    font-family: inherit;
     background-color: #201e1c;
     border-radius: 5px;
     padding: 10px;
@@ -242,9 +242,6 @@ p {
     line-height: 1.39 !important;
 }
 
-.label-clicked {
-    background-color: #F39C12 !important;
-}
 
 .gophish-editor {
     font-family: 'Courier New', Monospace !important;
@@ -258,21 +255,16 @@ p {
 /* Handle the navbar collapse at < 1300px */
 
 @media (min-width: 768px) and (max-width: 1300px) {
-    .navbar-collapse.collapse {
+    .navbar-collapse.collapse:not(.show) {
         display: none !important;
     }
 
-    .navbar-collapse.collapse.in {
+    .navbar-collapse.collapse.show {
         display: block !important;
     }
 
-    .navbar-header .collapse,
-    .navbar-toggle {
+    .navbar-toggler {
         display: block !important;
-    }
-
-    .navbar-header {
-        float: none !important;
     }
 }
 
@@ -471,7 +463,7 @@ i.fa-laptop+i.fa-vendor-icon {
 }
 
 @media (max-width: 767px) {
-    .navbar-header {
+    .navbar-brand {
         margin-left: 10px !important;
     }
 }
@@ -490,18 +482,15 @@ table.dataTable {
     background-color: #64a1d6;
 }
 
-.select2-container--bootstrap .select2-selection--single .select2-selection__rendered {
+.select2-container--default .select2-selection--single .select2-selection__rendered {
     font-size: 15px !important;
 }
 
-.select2-container--bootstrap .select2-selection--single {
+.select2-container--default .select2-selection--single {
     height: 42px !important;
     padding: 8px 12px !important;
 }
 
-.input-group-btn .btn {
-    line-height: 20px !important;
-}
 
 .chart-wrapper {
     position: relative;
@@ -598,4 +587,16 @@ table.dataTable {
 }
 #password-strength-container {
     height: 40px;
+}
+
+
+/* Mobile table overflow containment */
+.main {
+    min-width: 0;
+    overflow-x: hidden;
+}
+
+.dataTables_wrapper {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
 }

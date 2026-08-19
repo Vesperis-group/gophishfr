@@ -8,6 +8,43 @@ the normal Yarn dependency graph. Generated files under `static/js/dist` and
 scripts under `static/js/src/app` and the project-specific stylesheets
 `main.css`, `dashboard.css`, and `docs.css` are first-party sources.
 
+## Update (Bootstrap 5 migration, 2026-08-19)
+
+Bootstrap and the DataTables Bootstrap integration moved from manually
+vendored/inventoried components to exact Yarn dependencies as part of
+`refactor/migrate-bootstrap5`:
+
+- Bootstrap 3.0.2 JS (`static/js/src/vendor/bootstrap.min.js`) and Bootstrap
+  3.3.7 CSS (`static/css/bootstrap.min.css`) were deleted, along with the
+  Glyphicon font files under `static/font/`. Bootstrap 5.3.8 is now an exact
+  Yarn dependency; `bootstrap.bundle.min.js` (which includes Popper) and
+  `bootstrap.min.css` are built from `node_modules/bootstrap`, and its full
+  license text is emitted in `static/js/dist/vendor.min.js.LICENSE.txt`.
+  Bootstrap's exact `@popperjs/core@2.11.8` peer dependency is also managed by
+  Yarn and included in the generated notices.
+- `datatables.net-bs` 1.13.11 was replaced by `datatables.net-bs5` 1.13.11 in
+  `package.json`.
+- `static/css/select2-bootstrap.min.css` (Select2 Bootstrap Theme, a Bootstrap
+  3 theme) was deleted; Select2 now uses its bundled `default` theme.
+- `static/css/flat-ui.css` was deleted from the repository. Its historical
+  attribution is preserved in NOTICE. `static/css/gophishfr-theme.css` is the
+  new first-party Bootstrap 5 theme (system font stack, no external CDN).
+- Bootstrap does NOT use its optional jQuery bridge (`data-bs-no-jquery` is set
+  on `<body>`). All Bootstrap lifecycle events are handled via native
+  `addEventListener`. jQuery remains for legacy plugins (DataTables, Select2,
+  DateTimePicker, blueimp File Upload, SweetAlert2) only.
+- Bootstrap DateTimePicker's vendored source (`bootstrap-datetime.js`) was
+  locally modified to: (1) replace Collapse jQuery calls with native
+  `bootstrap.Collapse.getOrCreateInstance()` API, and (2) change default icon
+  classes from Glyphicon to Font Awesome. The plugin remains jQuery-based.
+- Google Fonts external stylesheet links were removed. Typography uses a
+  system-local font stack defined in `gophishfr-theme.css` — no CDN or
+  external runtime asset is loaded.
+
+The rest of this document, written before the migration, describes the
+Bootstrap 3/Flat UI-era inventory for historical reference; entries below are
+annotated where the migration superseded them.
+
 ## Method and status definitions
 
 The audit combined file banners and embedded constants, exact hashes against
@@ -32,7 +69,7 @@ exists.
 | Component | Version and evidence | Distribution | Usage and retained form | Provenance and license | Security and action |
 | --- | --- | --- | --- | --- | --- |
 | jQuery | 1.10.2, source banner | `static/js/src/vendor/jquery.js` | `USED` globally; minified-only historical copy | [jquery/jquery](https://github.com/jquery/jquery), MIT banner retained | `VULNERABLE`, `UNMAINTAINED`; migrate the legacy plug-in stack to jQuery 3.5+ |
-| Bootstrap | JS 3.0.2; CSS and Glyphicons 3.3.7, file banners | `bootstrap.min.js`, `bootstrap.min.css`, `static/font/glyphicons-*` | `USED` for layout, modal, tabs, tooltip; minified-only | [twbs/bootstrap](https://github.com/twbs/bootstrap); JS Apache-2.0, CSS MIT, Glyphicons' Bootstrap-specific grant | `VULNERABLE`, `UNMAINTAINED`; migrate the UI stack |
+| Bootstrap | JS 3.0.2; CSS and Glyphicons 3.3.7, file banners — **superseded**: removed, replaced by the exact Yarn dependency `bootstrap@5.3.8` (see update note above) | `bootstrap.min.js`, `bootstrap.min.css`, `static/font/glyphicons-*` (all deleted) | Formerly used for layout, modal, tabs, tooltip; minified-only | [twbs/bootstrap](https://github.com/twbs/bootstrap); JS Apache-2.0, CSS MIT, Glyphicons' Bootstrap-specific grant | Migrated; see `docs/BOOTSTRAP5_MIGRATION_BASELINE.md` |
 | normalize.css | 3.0.3, embedded banner | Embedded in `bootstrap.min.css` | `USED` as Bootstrap reset; minified-only | [necolas/normalize.css](https://github.com/necolas/normalize.css), MIT | `CLEAN`; keep with Bootstrap CSS |
 | D3 | 3.5.3, embedded `version` and exact npm package hash | `static/js/src/vendor/d3.min.js` | `LEGACY_BUT_REQUIRED` by Datamaps; minified-only | [d3/d3](https://github.com/d3/d3), BSD-3-Clause | `CLEAN`, old release line; migrate with Datamaps |
 | TopoJSON | 1.6.9, embedded `version` | `static/js/src/vendor/topojson.min.js` | `LEGACY_BUT_REQUIRED` by Datamaps; minified-only | [topojson/topojson](https://github.com/topojson/topojson), BSD-3-Clause | `CLEAN`, old release line; migrate with Datamaps |
@@ -41,11 +78,11 @@ exists.
 | jQuery UI Widget Factory | 1.11.1, source banner | `static/js/src/vendor/jquery.ui.widget.js` | `LEGACY_BUT_REQUIRED` by blueimp File Upload; readable source retained | [jquery/jquery-ui](https://github.com/jquery/jquery-ui), MIT | Retire.js matches four advisories for absent Datepicker, Position, and Checkboxradio modules: `NOT_APPLICABLE`; migrate with file upload |
 | blueimp jQuery File Upload | 5.42.3; iframe transport 1.8.3, source banners | `jquery.fileupload.js`, `jquery.iframe-transport.js` | `USED` by group CSV import; readable source retained | [blueimp/jQuery-File-Upload](https://github.com/blueimp/jQuery-File-Upload), MIT | Browser modules have no applicable advisory; CVE-2018-9206 affected upstream server handlers, which are not shipped; migrate with jQuery |
 | SweetAlert2 | 8.17.1, exact npm package hash | `sweetalert2.min.js`, `sweetalert2.min.css` | `USED` for confirmations and status dialogs; minified-only | [sweetalert2/sweetalert2](https://github.com/sweetalert2/sweetalert2), MIT | `CLEAN`, old major; preserve pending UI-stack migration |
-| Bootstrap DateTimePicker | JS 4.17.37; CSS 4.15.35, banners | `bootstrap-datetime.js`, `bootstrap-datetime.css` | `USED` for campaign scheduling; readable JS, CSS source | [Eonasdan/bootstrap-datetimepicker](https://github.com/Eonasdan/bootstrap-datetimepicker), MIT | `UNMAINTAINED`; mismatched patch versions, no applicable advisory found; migrate with Bootstrap |
-| Select2 Bootstrap Theme | 0.1.0-beta.9, banner | `static/css/select2-bootstrap.min.css` | `USED` for Select2 presentation; minified-only CSS | [select2-bootstrap-theme](https://github.com/select2/select2-bootstrap-theme), MIT | `CLEAN`, archived upstream; migrate with Bootstrap |
+| Bootstrap DateTimePicker | JS 4.17.37; CSS 4.15.35, banners | `bootstrap-datetime.js`, `bootstrap-datetime.css` | `USED` for campaign scheduling; readable JS, CSS source; locally modified: Collapse calls use native Bootstrap 5 API (`bootstrap.Collapse.getOrCreateInstance`), default icons changed from Glyphicon to Font Awesome | [Eonasdan/bootstrap-datetimepicker](https://github.com/Eonasdan/bootstrap-datetimepicker), MIT | `UNMAINTAINED`; mismatched patch versions, no applicable advisory found; migrate with Bootstrap |
+| Select2 Bootstrap Theme | 0.1.0-beta.9, banner — **superseded**: removed; Select2 now uses its bundled `default` theme, restyled in `static/css/gophishfr-theme.css` | `static/css/select2-bootstrap.min.css` (deleted) | Formerly used for Select2 presentation; minified-only CSS | [select2-bootstrap-theme](https://github.com/select2/select2-bootstrap-theme), MIT | Migrated; see `docs/BOOTSTRAP5_MIGRATION_BASELINE.md` |
 | core-js browser bundle | 2.4.1, source banner | `static/js/src/vendor/core.min.js` | `LEGACY_BUT_REQUIRED` Promise polyfill; minified-only | [zloirock/core-js](https://github.com/zloirock/core-js), MIT | `UNMAINTAINED`; no applicable runtime advisory found; reassess with browser policy |
 | Font Awesome | 4.7.0, CSS banner | `font-awesome.min.css`, `static/font/fontawesome-*` | `USED` across the admin UI; minified CSS and font binaries | [FortAwesome/Font-Awesome](https://github.com/FortAwesome/Font-Awesome), CSS MIT and fonts SIL OFL 1.1 | `CLEAN`, old release line; migrate with UI stack |
-| Flat UI-derived CSS | 2.1.3 metadata at exact upstream snapshot `097631e`; imported with 14 insertions and 122 deletions, then modified | `static/css/flat-ui.css` | `USED` for global Bootstrap 3 theme overrides; readable derived source retained | [Designmodo Flat UI Free at `097631e`](https://github.com/designmodo/Flat-UI/tree/097631e59b9950312052123a65cbcbaf97dc740a), CC BY 3.0 and MIT upstream terms; Gophish/GophishFR modifications recorded in history | `LOCALLY_MODIFIED`, `HIGH` provenance confidence; no known advisory; replace with explicit design tokens during Bootstrap 5 migration |
+| Flat UI-derived CSS | 2.1.3 metadata at exact upstream snapshot `097631e`; imported with 14 insertions and 122 deletions, then modified — **removed** from repository during Bootstrap 5 migration | `static/css/flat-ui.css` (deleted) | No longer distributed; historical attribution in NOTICE | [Designmodo Flat UI Free at `097631e`](https://github.com/designmodo/Flat-UI/tree/097631e59b9950312052123a65cbcbaf97dc740a), CC BY 3.0 and MIT upstream terms | Removed |
 | Awesome Bootstrap Checkbox-derived CSS | 0.3.6-derived; eleven-line diff from the published 0.3.6 CSS | `static/css/checkbox.css` | `USED` for checkbox styling; readable modified source retained | [flatlogic/awesome-bootstrap-checkbox](https://github.com/flatlogic/awesome-bootstrap-checkbox), Copyright 2014 flatlogic.com, MIT | `CLEAN`; retain attribution and migrate with UI stack |
 
 No tracked JavaScript or CSS source maps are present. References to absent maps
@@ -63,7 +100,8 @@ them in a fixed order, and emits their complete license texts in
 | --- | --- | --- | --- | --- |
 | Chart.js / `@kurkle/color` | 4.5.1 / 0.3.4 | Dashboard and campaign charts | MIT | `CLEAN` |
 | chartjs-plugin-zoom / Hammer.JS | 2.2.0 / 2.0.8 | Timeline pan and zoom | MIT | `CLEAN` |
-| DataTables / Bootstrap integration | 1.13.11 | Admin tables | MIT | `CLEAN`; `jquery@4.0.0` is a lockfile-only transitive dependency and is not bundled because browser mode uses the existing global jQuery |
+| Bootstrap / Popper | 5.3.8 / 2.11.8 | Global layout, navbar, modal, tabs, dropdown, tooltip | MIT | `CLEAN`; exact Yarn dependencies replacing the manually vendored Bootstrap 3 JS/CSS above |
+| DataTables / Bootstrap 5 integration (`datatables.net-bs5`) | 1.13.11 | Admin tables | MIT | `CLEAN`; `jquery@4.0.0` is a lockfile-only transitive dependency and is not bundled because browser mode uses the existing global jQuery |
 | Moment.js | 2.30.1 | Date parsing and formatting | MIT | `CLEAN`, maintenance mode |
 | Papa Parse | 5.6.0 | CSV import and export | MIT | `CLEAN` |
 | Select2 | 4.0.13 | Campaign and role selectors | MIT | `CLEAN` |
@@ -71,10 +109,10 @@ them in a fixed order, and emits their complete license texts in
 | zxcvbn | 4.4.2 | Password-strength feedback | MIT | `CLEAN`, old release |
 | CodeMirror / Lezer | CodeMirror packages 6.x; Lezer packages 1.x, exact versions in `yarn.lock` | Canonical full-document HTML source editing, syntax highlighting, search, keyboard commands, and GophishFR placeholder completion | MIT | `CLEAN`; self-hosted Webpack bundle, no remote service or license key |
 
-Yarn audit reports zero advisories across 110 resolved dependencies. A temporary
-npm resolution, created outside the worktree without retaining a
-`package-lock.json`, also reports zero advisories. GitHub reports zero open
-Dependabot alerts.
+Yarn audit reports zero advisories across 112 resolved dependencies. A
+temporary npm resolution, created outside the worktree without retaining a
+`package-lock.json`, reports zero advisories across 108 dependencies. GitHub
+reports zero open Dependabot alerts.
 
 ## Changes made by this audit
 
@@ -98,14 +136,12 @@ bundle, or runtime reference is distributed.
 
 ## Known findings and deferred migrations
 
-After the CKEditor removal, Retire.js 5.4.3 reports 16 source signatures: 14
-medium and 2 low. They occur in Bootstrap, jQuery, and jQuery UI Widget Factory.
-The four jQuery UI findings are false component matches because the affected
-widgets are absent. Retire.js reports no critical or high-severity finding, but
-the remaining legacy UI stack still makes the following migrations security
-priorities. Scanning source and generated JavaScript reports 32 signatures;
-the 16 additional matches are duplicates for the same Bootstrap, jQuery, and
-jQuery UI code inside `vendor.min.js`, not new components or advisories.
+Before this migration, Retire.js 5.4.3 reported 16 source signatures: 14
+medium and 2 low across Bootstrap, jQuery, and jQuery UI Widget Factory. After
+removing Bootstrap 3, it reports 9 source signatures: 8 medium and 1 low, all
+limited to jQuery and jQuery UI. No Bootstrap finding remains. The four jQuery
+UI findings are false component matches because the affected widgets are
+absent. Retire.js reports no critical or high-severity finding.
 
 ### CKEditor 4.11.1
 
@@ -148,13 +184,14 @@ CVE-2024-6485. The durable remediation is a supported Bootstrap migration.
 
 ## Reproducibility
 
-The current frontend build contains 19 generated files and 2,858,432 bytes.
-Two independent immutable installations and clean builds produced the same
-per-file hashes, left `yarn.lock` unchanged, and produced this aggregate
-SHA-256 manifest:
+The Bootstrap 5 frontend build contains 19 generated files and 2,933,334
+bytes. The pre-migration build contained the same 19 files and 2,858,432
+bytes, for a 74,902-byte increase. Two independent immutable installations
+and clean builds produced the same per-file hashes, left `yarn.lock`
+unchanged, and produced this aggregate SHA-256 manifest:
 
 ```text
-8d79f5299d209269fd63f9e703ad988c70bb8bc1f5fc51818b4874828b716140
+781757968ebb37421146e4b6a6f21bd121955498326c35eb2314dae9f5085ff2
 ```
 
 Webpack reports performance-budget warnings for the approximately 532 KiB
