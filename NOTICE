@@ -36,12 +36,12 @@ available license banners, and complete notices for package-managed frontend
 libraries are emitted beside the generated JavaScript bundles.
 
 The package-managed components in the generated frontend vendor bundle include
-Bootstrap, Popper, Chart.js, @kurkle/color, chartjs-plugin-zoom, Hammer.JS,
-DataTables, Moment.js, Papa Parse, Select2, and UAParser.js under the MIT
-License. Their complete copyright and license notices are distributed in
-`static/js/dist/vendor.min.js.LICENSE.txt`. Manually retained browser libraries
-in that bundle preserve their available source license banners and are
-inventoried in `docs/FRONTEND_VENDOR_INVENTORY.md`.
+jQuery, jQuery UI Widget Factory, Bootstrap, Popper, Chart.js, @kurkle/color,
+chartjs-plugin-zoom, Hammer.JS, DataTables, Moment.js, Papa Parse, Select2,
+and UAParser.js under the MIT License. Their complete copyright and license
+notices are distributed in `static/js/dist/vendor.min.js.LICENSE.txt`. Manually
+retained browser libraries in that bundle preserve their available source
+license banners and are inventoried in `docs/FRONTEND_VENDOR_INVENTORY.md`.
 
 The HTML source editor bundle includes CodeMirror 6, Lezer, and their small
 support packages under the MIT License. Complete package-specific copyright and

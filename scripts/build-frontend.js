@@ -58,7 +58,7 @@ function packageDirectory(packageName) {
 }
 
 const vendorScriptPaths = [
-  vendoredScript("jquery.js"),
+  managedFile("jquery", "dist", "jquery.js"),
   managedFile("bootstrap", "dist", "js", "bootstrap.bundle.min.js"),
   managedFile("moment", "min", "moment.min.js"),
   managedFile("papaparse", "papaparse.min.js"),
@@ -68,7 +68,7 @@ const vendorScriptPaths = [
   managedFile("datatables.net", "js", "jquery.dataTables.min.js"),
   managedFile("datatables.net-bs5", "js", "dataTables.bootstrap5.min.js"),
   vendoredScript("datetime-moment.js"),
-  vendoredScript("jquery.ui.widget.js"),
+  managedFile("jquery-ui", "ui", "widget.js"),
   vendoredScript("jquery.fileupload.js"),
   vendoredScript("jquery.iframe-transport.js"),
   vendoredScript("sweetalert2.min.js"),
@@ -110,6 +110,14 @@ const stylesheetSources = [
 ];
 
 const managedVendorLicenses = [
+  {
+    component: "jQuery 3.7.1",
+    sourcePath: managedFile("jquery", "LICENSE.txt"),
+  },
+  {
+    component: "jQuery UI Widget Factory 1.14.2",
+    sourcePath: managedFile("jquery-ui", "LICENSE.txt"),
+  },
   {
     component: "Chart.js 4.5.1",
     sourcePath: path.join(chartPackageDirectory, "LICENSE.md"),

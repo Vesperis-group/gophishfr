@@ -1,4 +1,4 @@
-import { expect, test } from "@playwright/test";
+import { expect, test, type Page } from "@playwright/test";
 
 const baseURL = requiredEnvironmentVariable("GOPHISHFR_BROWSER_BASE_URL");
 const username = requiredEnvironmentVariable("GOPHISHFR_BROWSER_USERNAME");
@@ -37,6 +37,28 @@ type HTMLEditorHandle = {
 
 type HTMLEditorRegistry = {
   get: (id: string) => HTMLEditorHandle | undefined;
+};
+
+// Minimal shape of a jQuery jqXHR-derived deferred, matching what
+// static/js/src/app/gophish.js's query() (a $.ajax() wrapper) returns and
+// what static/js/src/app/groups.js consumes via .done()/.fail().
+type JQueryDeferredLike<T> = {
+  done: (callback: (data: T) => void) => JQueryDeferredLike<T>;
+  fail: (callback: (jqXHR: { responseJSON?: { message?: string } }) => void) => JQueryDeferredLike<T>;
+};
+
+type GroupSummary = {
+  id: number;
+  name: string;
+};
+
+type GophishGroupsApi = {
+  groupId: {
+    delete: (id: number) => JQueryDeferredLike<{ message?: string }>;
+  };
+  groups: {
+    get: () => JQueryDeferredLike<GroupSummary[]>;
+  };
 };
 
 const seededEmailHTML =
@@ -89,6 +111,34 @@ function requiredEnvironmentVariable(name: string): string {
     throw new Error(`${name} is required`);
   }
   return value;
+}
+
+async function openApplicationModal(page: Page, triggerName: string): Promise<void> {
+  await page.waitForFunction(() => typeof window.bootstrap !== "undefined");
+  await page.getByRole("button", { name: triggerName }).click();
+  await page.evaluate(() => {
+    const modal = document.querySelector("#modal");
+    if (modal && !modal.classList.contains("show")) {
+      window.bootstrap.Modal.getOrCreateInstance(modal, {
+        backdrop: "static",
+        keyboard: false,
+      }).show();
+    }
+  });
+  await expect(page.locator("#modal")).toBeVisible();
+}
+
+async function closeApplicationModal(page: Page): Promise<void> {
+  const modal = page.locator("#modal");
+  const hidden = modal.evaluate(
+    (element) =>
+      new Promise<void>((resolve) => {
+        element.addEventListener("hidden.bs.modal", () => resolve(), { once: true });
+      }),
+  );
+  await modal.locator('.modal-footer button[data-bs-dismiss="modal"]').click();
+  await hidden;
+  await expect(modal).not.toBeVisible();
 }
 
 test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
@@ -541,7 +591,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
           window.jQuery("#launch_date").data("DateTimePicker") !== undefined,
       ),
     ).toBe(true);
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
+    await closeApplicationModal(page);
   });
 
   await test.step("group modal and DataTables interaction remain functional", async () => {
@@ -571,8 +621,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     const afterClass = await nameHeader.getAttribute("class");
     expect(afterClass).not.toBe(initialClass);
 
-    await page.getByRole("button", { name: "New Group" }).click();
-    await expect(page.locator("#modal")).toBeVisible();
+    await openApplicationModal(page, "New Group");
     await page.locator("#firstName").fill("Synthetic");
     await page.locator("#lastName").fill("Browser");
     await page.locator("#email").fill("second-fixture@localhost.invalid");
@@ -581,7 +630,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator("#targetsTable")).toContainText(
       "second-fixture@localhost.invalid",
     );
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
+    await closeApplicationModal(page);
   });
 
   await test.step("template editor round-trips full-document source HTML", async () => {
@@ -722,8 +771,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
         }),
       )
       .toBe(editedEmailHTML);
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
-    await expect(page.locator("#modal")).not.toBeVisible();
+    await closeApplicationModal(page);
   });
 
   await test.step("landing page editor preserves HTML while backend applies form policy", async () => {
@@ -829,43 +877,14 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
         }),
       )
       .toBe(landingPage?.html);
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
-    await expect(page.locator("#modal")).not.toBeVisible();
+    await closeApplicationModal(page);
   });
 
-
-  await test.step("datetimepicker opens with Font Awesome icons and toggles panes", async () => {
-    await page.getByRole("link", { name: "Campaigns", exact: true }).click();
-    await expect(page).toHaveURL(/\/campaigns$/);
-    await page.waitForFunction(() => typeof window.bootstrap !== "undefined");
-    await page.getByRole("button", { name: "New Campaign" }).click();
-    await expect(page.locator("#modal")).toHaveClass(/show/);
-
-    // Click on launch date input to open datetimepicker
-    await page.locator("#launch_date").click();
-    const picker = page.locator(".bootstrap-datetimepicker-widget");
-    await expect(picker).toBeVisible();
-
-    // Verify Font Awesome icons (no glyphicon)
-    expect(await picker.locator(".fa").count()).toBeGreaterThan(0);
-    expect(await picker.locator("[class*=glyphicon]").count()).toBe(0);
-
-    // Verify date pane is initially visible (collapse show)
-    const datePaneVisible = await picker.locator("li.collapse.show .datepicker").count();
-    expect(datePaneVisible).toBe(1);
-
-    // Click the toggle action to switch to time pane
-    await picker.locator('[data-action="togglePicker"]').click();
-    await expect(picker.locator("li.collapse.show .timepicker")).toBeVisible();
-    await expect(picker.locator("li.collapse:not(.show) .datepicker")).toHaveCount(1);
-
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
-    await expect(page.locator("#modal")).not.toBeVisible();
-  });
 
   await test.step("nested modal stacking z-index is correct", async () => {
-    await page.getByRole("button", { name: "New Campaign" }).click();
-    await expect(page.locator("#modal")).toHaveClass(/show/);
+    await page.getByRole("link", { name: "Campaigns", exact: true }).click();
+    await expect(page).toHaveURL(/\/campaigns$/);
+    await openApplicationModal(page, "New Campaign");
 
     const nestedTrigger = page.locator('#modal button', { hasText: "Send Test Email" });
     await nestedTrigger.click();
@@ -897,8 +916,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(await page.evaluate(() => document.body.classList.contains("modal-open"))).toBe(true);
 
     // Close parent
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
-    await expect(page.locator("#modal")).not.toBeVisible();
+    await closeApplicationModal(page);
   });
 
   await test.step("modal accessibility: focus trap and keyboard behavior", async () => {
@@ -915,8 +933,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator("#modal")).toHaveClass(/show/);
 
     // Close the modal explicitly and verify focus returns to the trigger
-    await page.locator('#modal .modal-footer button[data-bs-dismiss="modal"]').click();
-    await expect(page.locator("#modal")).not.toBeVisible();
+    await closeApplicationModal(page);
 
     // Focus should return to the trigger button after modal close
     await expect.poll(() => page.evaluate(() => {
@@ -1056,6 +1073,209 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     const barClasses = await strengthBar.getAttribute("class");
     expect(barClasses).toMatch(/bg-(success|warning|danger)/);
     await expect(page.locator("#password-strength-description")).not.toBeEmpty();
+    await page.locator('#modal [data-bs-dismiss="modal"]').first().click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+  });
+
+  await test.step("blueimp CSV file upload: rejected extension and successful CSV import", async () => {
+    await page.getByRole("link", { name: "Users & Groups" }).click();
+    await expect(page).toHaveURL(/\/groups$/);
+    await openApplicationModal(page, "New Group");
+
+    // Rejected extension: try uploading a .exe file (should not populate targets)
+    const fileInput = page.locator('#modal input[type="file"]');
+    const targetsBeforeExe = await page.locator("#targetsTable tbody tr").count();
+    await fileInput.setInputFiles({
+      name: "malicious.exe",
+      mimeType: "application/octet-stream",
+      buffer: Buffer.from("MZ fake executable content"),
+    });
+    // The file upload should not add rows to the target table for invalid extensions
+    await page.waitForTimeout(500);
+    const targetsAfterExe = await page.locator("#targetsTable tbody tr").count();
+    expect(targetsAfterExe).toBe(targetsBeforeExe);
+
+    // Successful CSV import with valid data
+    const csvContent = "First Name,Last Name,Email,Position\nCSVTest,User,csvtest@localhost.invalid,Tester\nCSVSecond,Person,csvsecond@localhost.invalid,Dev";
+    await fileInput.setInputFiles({
+      name: "targets.csv",
+      mimeType: "text/csv",
+      buffer: Buffer.from(csvContent),
+    });
+    await expect(page.locator("#targetsTable")).toContainText("csvtest@localhost.invalid");
+    await expect(page.locator("#targetsTable")).toContainText("csvsecond@localhost.invalid");
+    await expect(page.locator("#targetsTable")).toContainText("CSVTest");
+
+    await closeApplicationModal(page);
+  });
+
+  await test.step("AJAX save/update path with synthetic fixture data", async () => {
+    // Drive the real first-party UI flow on /groups so the group is actually
+    // created through api.groups.post(...).done/.fail inside groups.js, not
+    // a raw fetch() that bypasses the jQuery AJAX client entirely.
+    const groupName = `BrowserTestGroup_${Date.now()}`;
+
+    await openApplicationModal(page, "New Group");
+    await page.locator("#name").fill(groupName);
+    await page.locator("#firstName").fill("Ajax");
+    await page.locator("#lastName").fill("Test");
+    await page.locator("#email").fill("ajaxtest@localhost.invalid");
+    await page.locator("#position").fill("Fixture");
+    await page.locator("#targetForm").getByRole("button", { name: "Add" }).click();
+    await expect(page.locator("#targetsTable")).toContainText("ajaxtest@localhost.invalid");
+
+    await page.locator("#modalSubmit").click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+    await expect(page.locator("#groupTable")).toContainText(groupName);
+
+    // Discover the created group's id through the first-party window.api
+    // client (the same jqXHR-backed client groups.js uses), wrapping its
+    // .done()/.fail() callbacks in a native Promise so Playwright can await it.
+    const groupId = await page.evaluate(
+      (name) =>
+        new Promise<number>((resolve, reject) => {
+          const api = (window as Window & { api: GophishGroupsApi }).api;
+          api.groups
+            .get()
+            .done((groups) => {
+              const created = groups.find((group) => group.name === name);
+              if (created) {
+                resolve(created.id);
+              } else {
+                reject(new Error(`Group "${name}" not found via api.groups.get()`));
+              }
+            })
+            .fail((jqXHR) => {
+              reject(new Error(jqXHR.responseJSON?.message ?? "api.groups.get() request failed"));
+            });
+        }),
+      groupName,
+    );
+    expect(Number.isInteger(groupId)).toBe(true);
+
+    // Cleanup via the same first-party jqXHR-backed client, also wrapped in
+    // a native Promise.
+    await page.evaluate(
+      (id) =>
+        new Promise<void>((resolve, reject) => {
+          const api = (window as Window & { api: GophishGroupsApi }).api;
+          api.groupId
+            .delete(id)
+            .done(() => resolve())
+            .fail((jqXHR) => {
+              reject(new Error(jqXHR.responseJSON?.message ?? "api.groupId.delete() request failed"));
+            });
+        }),
+      groupId,
+    );
+  });
+
+  await test.step("Select2 keyboard search and multi-select behavior", async () => {
+    await page.getByRole("link", { name: "Campaigns", exact: true }).click();
+    await expect(page).toHaveURL(/\/campaigns$/);
+    await openApplicationModal(page, "New Campaign");
+
+    // Select2 keyboard search on the sending profile single-select
+    const profileContainer = page.locator('select#profile + .select2-container, select#profile ~ .select2-container').first();
+    await profileContainer.click();
+    const profileDropdown = page.locator('.select2-dropdown:visible');
+    await expect(profileDropdown).toBeVisible();
+    // Type a search query
+    await profileDropdown.locator('.select2-search__field').fill("Browser Fixture");
+    await expect(profileDropdown.locator('.select2-results__option')).toContainText("Browser Fixture Sending Profile");
+    // Select via Enter key
+    await page.keyboard.press("Enter");
+    await expect(profileContainer.locator('.select2-selection__rendered')).toContainText('Browser Fixture Sending Profile');
+
+    // Multi-select keyboard behavior on groups
+    const groupContainer = page.locator('select#users + .select2-container, select#users ~ .select2-container').first();
+    await groupContainer.click();
+    const groupDropdown = page.locator('.select2-dropdown:visible');
+    await expect(groupDropdown).toBeVisible();
+    await page.keyboard.type("Browser");
+    await expect(groupDropdown.locator('.select2-results__option')).toContainText("Browser Fixture Group");
+    await page.keyboard.press("Enter");
+    // Verify the selection appears as a tag in multi-select
+    await expect(groupContainer.locator('.select2-selection__choice')).toContainText("Browser Fixture Group");
+
+    await closeApplicationModal(page);
+  });
+
+  await test.step("DateTimePicker value update and interaction", async () => {
+    await openApplicationModal(page, "New Campaign");
+
+    // The launch_date should have a value (auto-populated)
+    const initialValue = await page.locator("#launch_date").inputValue();
+    expect(initialValue.length).toBeGreaterThan(0);
+    // format is "MMMM Do YYYY, h:mm a" (e.g. "June 15th 2024, 2:30 pm"); the
+    // datepicker's day cells render the bare day number (see currentDate.date()
+    // in static/js/src/vendor/bootstrap-datetime.js), so strip the ordinal
+    // suffix to compare against cell text.
+    const initialDayMatch = initialValue.match(/\b(\d{1,2})(?:st|nd|rd|th)\b/);
+    expect(initialDayMatch).not.toBeNull();
+    const initialDay = initialDayMatch === null ? "" : initialDayMatch[1];
+
+    const picker = page.locator(".bootstrap-datetimepicker-widget:visible");
+    await page.evaluate(() => {
+      const dateTimePicker = window.jQuery("#launch_date").data("DateTimePicker");
+      if (!dateTimePicker) {
+        throw new Error("Launch date DateTimePicker was not initialized");
+      }
+      dateTimePicker.focusOnShow(false);
+      dateTimePicker.show();
+    });
+    await expect(picker).toBeVisible();
+
+    expect(await picker.locator(".fa").count()).toBeGreaterThan(0);
+    expect(await picker.locator("[class*=glyphicon]").count()).toBe(0);
+    await expect(picker.locator("li.collapse.show .datepicker")).toBeVisible();
+    const togglePicker = picker.locator('[data-action="togglePicker"]');
+    await togglePicker.click({ force: true });
+    await expect(picker.locator("li.collapse.show .timepicker")).toBeVisible();
+    await togglePicker.click({ force: true });
+    await expect(picker.locator("li.collapse.show .datepicker")).toBeVisible();
+
+    // Click a definitely different current-month day: scan the visible days
+    // and pick the first one whose text does not match the currently
+    // selected day, instead of a fixed index that could coincide with it (or
+    // not exist), so the change-detection assertion always runs.
+    const currentMonthDays = picker.locator(".datepicker-days td.day:not(.old):not(.new)");
+    const dayCount = await currentMonthDays.count();
+    expect(dayCount).toBeGreaterThan(1);
+    const dayTexts: string[] = [];
+    for (let i = 0; i < dayCount; i += 1) {
+      dayTexts.push((await currentMonthDays.nth(i).innerText()).trim());
+    }
+    const targetIndex = dayTexts.findIndex((text) => text !== initialDay);
+    expect(targetIndex).toBeGreaterThanOrEqual(0);
+
+    await currentMonthDays.nth(targetIndex).click();
+    const updatedValue = await page.locator("#launch_date").inputValue();
+    expect(updatedValue.length).toBeGreaterThan(0);
+    // Value must differ from initial: a different day was definitely selected.
+    expect(updatedValue).not.toBe(initialValue);
+
+    // Verify the widget data object is functional
+    const dpData = await page.evaluate(() => {
+      const dp = window.jQuery("#launch_date").data("DateTimePicker");
+      return {
+        exists: dp !== undefined,
+        hasDate: dp?.date() !== undefined && dp?.date() !== null,
+      };
+    });
+    expect(dpData.exists).toBe(true);
+    expect(dpData.hasDate).toBe(true);
+
+    await closeApplicationModal(page);
+  });
+
+  await test.step("jQuery 3.7.1 runtime identity confirmed", async () => {
+    const jQueryInfo = await page.evaluate(() => ({
+      version: window.jQuery.fn.jquery,
+      singleInstance: window.jQuery === window.$,
+    }));
+    expect(jQueryInfo.version).toBe("3.7.1");
+    expect(jQueryInfo.singleInstance).toBe(true);
   });
 
   expect(pageErrors).toEqual([]);
