@@ -141,6 +141,28 @@ async function closeApplicationModal(page: Page): Promise<void> {
   await expect(modal).not.toBeVisible();
 }
 
+async function waitForSelectOption(
+  page: Page,
+  selectId: string,
+  optionText: string,
+): Promise<void> {
+  // The campaign modal fills its selects from the API after it opens, so wait
+  // for the option to exist before driving the Select2 widget built on top.
+  await expect
+    .poll(
+      () =>
+        page.evaluate(
+          ({ id, text }) =>
+            Array.from(document.querySelectorAll(`select#${id} option`)).some(
+              (option) => (option.textContent ?? "").trim() === text,
+            ),
+          { id: selectId, text: optionText },
+        ),
+      { message: `option "${optionText}" never appeared in #${selectId}` },
+    )
+    .toBe(true);
+}
+
 test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   test.setTimeout(60_000);
 
@@ -587,8 +609,8 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       await page.evaluate(
         () =>
           typeof window.jQuery.fn.select2 === "function" &&
-          typeof window.jQuery.fn.datetimepicker === "function" &&
-          window.jQuery("#launch_date").data("DateTimePicker") !== undefined,
+          typeof window.jQuery.fn.datetimepicker === "undefined" &&
+          document.querySelector("#launch_date")?.getAttribute("type") === "datetime-local",
       ),
     ).toBe(true);
     await closeApplicationModal(page);
@@ -1046,6 +1068,24 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(modalScroll.contentReachable).toBe(true);
     expect(modalScroll.dialogScrollable).toBe(true);
 
+    // The launch date controls keep their DOM and form contract on a small
+    // viewport. The native picker surface itself belongs to the operating
+    // system, so only the contract is asserted here, not its rendering.
+    const mobileLaunchDate = mobilePage2.locator("#launch_date");
+    await expect(mobileLaunchDate).toHaveAttribute("type", "datetime-local");
+    await expect(mobileLaunchDate).toBeVisible();
+    await mobileLaunchDate.fill("2031-06-15T14:30");
+    expect(await mobileLaunchDate.inputValue()).toBe("2031-06-15T14:30");
+    const mobileLaunchLayout = await mobilePage2.evaluate(() => {
+      const input = document.querySelector("#launch_date") as HTMLElement;
+      return {
+        insideViewport: input.getBoundingClientRect().right <= window.innerWidth + 5,
+        width: input.getBoundingClientRect().width,
+      };
+    });
+    expect(mobileLaunchLayout.insideViewport).toBe(true);
+    expect(mobileLaunchLayout.width).toBeGreaterThan(0);
+
     await mobilePage2.close();
   });
 
@@ -1291,72 +1331,181 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await closeApplicationModal(page);
   });
 
-  await test.step("DateTimePicker value update and interaction", async () => {
+  await test.step("native datetime controls preserve the campaign launch contract", async () => {
     await openApplicationModal(page, "New Campaign");
 
-    // The launch_date should have a value (auto-populated)
-    const initialValue = await page.locator("#launch_date").inputValue();
-    expect(initialValue.length).toBeGreaterThan(0);
-    // format is "MMMM Do YYYY, h:mm a" (e.g. "June 15th 2024, 2:30 pm"); the
-    // datepicker's day cells render the bare day number (see currentDate.date()
-    // in static/js/src/vendor/bootstrap-datetime.js), so strip the ordinal
-    // suffix to compare against cell text.
-    const initialDayMatch = initialValue.match(/\b(\d{1,2})(?:st|nd|rd|th)\b/);
-    expect(initialDayMatch).not.toBeNull();
-    const initialDay = initialDayMatch === null ? "" : initialDayMatch[1];
+    const launchDate = page.locator("#launch_date");
+    const sendByDate = page.locator("#send_by_date");
 
-    const picker = page.locator(".bootstrap-datetimepicker-widget:visible");
-    await page.evaluate(() => {
-      const dateTimePicker = window.jQuery("#launch_date").data("DateTimePicker");
-      if (!dateTimePicker) {
-        throw new Error("Launch date DateTimePicker was not initialized");
-      }
-      dateTimePicker.focusOnShow(false);
-      dateTimePicker.show();
-    });
-    await expect(picker).toBeVisible();
+    // The legacy jQuery widget is gone: these are plain native controls, each
+    // announced by its own label and reachable without a mouse.
+    await expect(launchDate).toHaveAttribute("type", "datetime-local");
+    await expect(sendByDate).toHaveAttribute("type", "datetime-local");
+    await expect(page.locator('label[for="launch_date"]')).toContainText("Launch Date");
+    await expect(page.locator('label[for="send_by_date"]')).toContainText("Send Emails By");
+    expect(await page.locator(".bootstrap-datetimepicker-widget").count()).toBe(0);
 
-    expect(await picker.locator(".fa").count()).toBeGreaterThan(0);
-    expect(await picker.locator("[class*=glyphicon]").count()).toBe(0);
-    await expect(picker.locator("li.collapse.show .datepicker")).toBeVisible();
-    const togglePicker = picker.locator('[data-action="togglePicker"]');
-    await togglePicker.click({ force: true });
-    await expect(picker.locator("li.collapse.show .timepicker")).toBeVisible();
-    await togglePicker.click({ force: true });
-    await expect(picker.locator("li.collapse.show .datepicker")).toBeVisible();
+    // The launch date is prefilled with the current local time and the optional
+    // field stays empty, matching the picker this replaced.
+    const prefilled = await launchDate.inputValue();
+    expect(prefilled).toMatch(/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}$/);
+    expect(await sendByDate.inputValue()).toBe("");
 
-    // Click a definitely different current-month day: scan the visible days
-    // and pick the first one whose text does not match the currently
-    // selected day, instead of a fixed index that could coincide with it (or
-    // not exist), so the change-detection assertion always runs.
-    const currentMonthDays = picker.locator(".datepicker-days td.day:not(.old):not(.new)");
-    const dayCount = await currentMonthDays.count();
-    expect(dayCount).toBeGreaterThan(1);
-    const dayTexts: string[] = [];
-    for (let i = 0; i < dayCount; i += 1) {
-      dayTexts.push((await currentMonthDays.nth(i).innerText()).trim());
-    }
-    const targetIndex = dayTexts.findIndex((text) => text !== initialDay);
-    expect(targetIndex).toBeGreaterThanOrEqual(0);
+    // Manual entry and clearing behave like any other form control.
+    await launchDate.fill("2031-06-15T14:30");
+    expect(await launchDate.inputValue()).toBe("2031-06-15T14:30");
+    await launchDate.fill("");
+    expect(await launchDate.inputValue()).toBe("");
+    await launchDate.focus();
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe("launch_date");
 
-    await currentMonthDays.nth(targetIndex).click();
-    const updatedValue = await page.locator("#launch_date").inputValue();
-    expect(updatedValue.length).toBeGreaterThan(0);
-    // Value must differ from initial: a different day was definitely selected.
-    expect(updatedValue).not.toBe(initialValue);
-
-    // Verify the widget data object is functional
-    const dpData = await page.evaluate(() => {
-      const dp = window.jQuery("#launch_date").data("DateTimePicker");
+    // The local value is converted to the UTC instant the API has always
+    // received. Round-tripping real instants keeps the check independent of the
+    // time zone the browser happens to run in, while still covering the
+    // daylight saving transitions, midnight, and period boundaries.
+    const conversions = await page.evaluate(() => {
+      const scope = window as unknown as {
+        localDateTimeInputValue: (date: Date) => string;
+        utcFromLocalDateTimeInput: (value: string) => string;
+      };
+      const instants = [
+        "2031-03-30T00:59:00Z", // just before the European spring transition
+        "2031-03-30T01:00:00Z", // the transition itself
+        "2031-10-26T00:59:00Z", // the autumn transition
+        "2031-06-15T12:30:00Z", // an ordinary summer instant
+        "2031-01-01T00:00:00Z", // midnight on a year boundary
+        "2031-02-28T23:59:00Z", // an end-of-month boundary
+        "2031-12-31T23:00:00Z", // an end-of-year boundary
+      ];
       return {
-        exists: dp !== undefined,
-        hasDate: dp?.date() !== undefined && dp?.date() !== null,
+        empty: scope.utcFromLocalDateTimeInput(""),
+        invalid: scope.utcFromLocalDateTimeInput("not-a-date"),
+        roundTrips: instants.map((instant) => {
+          const expected = new Date(instant);
+          const local = scope.localDateTimeInputValue(expected);
+          const converted = scope.utcFromLocalDateTimeInput(local);
+          return {
+            converted,
+            instant,
+            matches: new Date(converted).getTime() === expected.getTime(),
+          };
+        }),
       };
     });
-    expect(dpData.exists).toBe(true);
-    expect(dpData.hasDate).toBe(true);
+
+    // An empty or unusable control never yields a value to submit.
+    expect(conversions.empty).toBe("");
+    expect(conversions.invalid).toBe("");
+    for (const roundTrip of conversions.roundTrips) {
+      expect(roundTrip.converted, `local time drifted for ${roundTrip.instant}`).toBe(
+        roundTrip.instant,
+      );
+      expect(roundTrip.matches).toBe(true);
+    }
 
     await closeApplicationModal(page);
+  });
+
+  await test.step("campaign launch submits and stores the selected instant", async () => {
+    const campaignPayloads: string[] = [];
+    const captureCampaign = (request: Request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/campaigns/"
+      ) {
+        campaignPayloads.push(request.postData() ?? "");
+      }
+    };
+    page.on("request", captureCampaign);
+
+    await openApplicationModal(page, "New Campaign");
+    const campaignName = `BrowserDateCampaign_${Date.now()}`;
+    await page.locator("#name").fill(campaignName);
+    await page.locator("#url").fill("http://127.0.0.1:1");
+
+    // A launch date far in the future keeps the campaign queued, so no message
+    // is ever attempted while the contract is verified.
+    const localLaunch = "2031-06-15T14:30";
+    const localSendBy = "2031-06-15T15:30";
+    await page.locator("#launch_date").fill(localLaunch);
+    await page.locator("#send_by_date").fill(localSendBy);
+
+    // setupOptions() re-creates each Select2 widget as its own API response
+    // arrives. Selecting through the underlying controls, exactly as copy()
+    // does in campaigns.js, keeps this step focused on the date contract; the
+    // Select2 interaction itself is covered by the dedicated step above.
+    await waitForSelectOption(page, "template", "Browser Fixture Template");
+    await waitForSelectOption(page, "page", "Browser Fixture Landing Page");
+    await waitForSelectOption(page, "profile", "Browser Fixture Sending Profile");
+    await waitForSelectOption(page, "users", "Browser Fixture Group");
+
+    await page.evaluate(
+      (selections) => {
+        for (const [id, text] of Object.entries(selections)) {
+          const select = document.querySelector(`#${id}`) as HTMLSelectElement;
+          const option = Array.from(select.options).find(
+            (candidate) => (candidate.textContent ?? "").trim() === text,
+          );
+          if (!option) {
+            throw new Error(`option "${text}" missing from #${id}`);
+          }
+          option.selected = true;
+          if (!select.multiple) {
+            select.value = option.value;
+          }
+          window.jQuery(select).trigger("change.select2");
+        }
+      },
+      {
+        page: "Browser Fixture Landing Page",
+        profile: "Browser Fixture Sending Profile",
+        template: "Browser Fixture Template",
+        users: "Browser Fixture Group",
+      },
+    );
+
+    await page.locator("#launchButton").click();
+    await page.locator(".swal2-confirm").click();
+    await expect(page.locator(".swal2-popup")).toContainText("Campaign Scheduled!");
+
+    // picker -> submit: the payload carries the UTC instant matching the local
+    // value, computed independently of the page.
+    await expect.poll(() => campaignPayloads.length).toBe(1);
+    const payload = JSON.parse(campaignPayloads[0]) as {
+      launch_date: string;
+      send_by_date: string | null;
+    };
+    const expectedLaunch = new Date(localLaunch).toISOString().replace(".000", "");
+    const expectedSendBy = new Date(localSendBy).toISOString().replace(".000", "");
+    expect(payload.launch_date).toBe(expectedLaunch);
+    expect(payload.send_by_date).toBe(expectedSendBy);
+    page.off("request", captureCampaign);
+
+    // submit -> store -> reload: the API returns the same instant it was given.
+    const stored = await page.evaluate(
+      (name) =>
+        new Promise<{ launch_date: string; send_by_date: string }>((resolve, reject) => {
+          window
+            .fetch("/api/campaigns/", {
+              headers: {
+                Authorization: `Bearer ${(window as unknown as { user: { api_key: string } }).user.api_key}`,
+              },
+            })
+            .then((response) => response.json())
+            .then((campaigns: Array<{ name: string; launch_date: string; send_by_date: string }>) => {
+              const created = campaigns.find((campaign) => campaign.name === name);
+              if (!created) {
+                reject(new Error(`Campaign "${name}" was not stored`));
+                return;
+              }
+              resolve(created);
+            })
+            .catch(reject);
+        }),
+      campaignName,
+    );
+    expect(new Date(stored.launch_date).getTime()).toBe(new Date(expectedLaunch).getTime());
+    expect(new Date(stored.send_by_date).getTime()).toBe(new Date(expectedSendBy).getTime());
   });
 
   await test.step("jQuery 3.7.1 runtime identity confirmed", async () => {

@@ -100,14 +100,14 @@
                     <input type="text" class="form-control" placeholder="http://192.168.1.1" id="url" />
                     <div class="row">
                         <div class="col-md-6">
-                            <label class="form-label" for="url">Launch Date </label>
-                            <input type="text" class="form-control" id="launch_date" />
+                            <label class="form-label" for="launch_date">Launch Date </label>
+                            <input type="datetime-local" class="form-control" id="launch_date" />
                         </div>
                         <div class="col-md-6">
-                            <label class="form-label" for="delay">Send Emails By (Optional)
+                            <label class="form-label" for="send_by_date">Send Emails By (Optional)
                                 <i class="fa fa-question-circle" data-bs-toggle="tooltip" data-bs-placement="right" title="If specified, GophishFR will send emails evenly between the campaign launch and this date."></i>
                             </label>
-                            <input type="text" class="form-control" id="send_by_date" autocomplete="random-data"/> <!--Chrome ignores autocomplete="off".-->
+                            <input type="datetime-local" class="form-control" id="send_by_date" />
                         </div>
                     </div>
                     <label class="form-label" for="profile">Sending Profile:</label>

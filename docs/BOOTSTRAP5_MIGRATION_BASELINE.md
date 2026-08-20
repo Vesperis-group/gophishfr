@@ -24,9 +24,10 @@ The Bootstrap 5 migration described as future work below is complete:
   `gophishfr-theme.css`.
 - DataTables' Bootstrap integration moved from `datatables.net-bs` 1.13.11 to
   `datatables.net-bs5` 1.13.11.
-- Glyphicon font files were removed. Bootstrap DateTimePicker (kept, still
-  jQuery-based) has its vendored default icons changed from Glyphicon to Font
-  Awesome, and every initialization supplies explicit `icons: faIcons`.
+- Glyphicon font files were removed. Bootstrap DateTimePicker had its vendored
+  default icons changed from Glyphicon to Font Awesome, and every
+  initialization supplied explicit `icons: faIcons`. The picker was later
+  replaced by native `datetime-local` controls and is no longer distributed.
 - Bootstrap DateTimePicker's Collapse calls were replaced with native
   `bootstrap.Collapse.getOrCreateInstance()` API (no jQuery bridge dependency).
 - All templates were migrated to Bootstrap 5 markup: `data-bs-*` attributes,
@@ -55,7 +56,7 @@ The generated stylesheet (`static/css/dist/gophish.css`) is built in this order:
 1. Bootstrap 5.3.8 CSS (from `node_modules/bootstrap`);
 2. first-party GophishFR styles (`main.css`, `dashboard.css`, `gophishfr-theme.css`);
 3. DataTables Bootstrap 5 integration CSS;
-4. Font Awesome, Bootstrap DateTimePicker CSS, checkbox.css, SweetAlert2, Select2.
+4. Font Awesome, checkbox.css, SweetAlert2, Select2.
 
 The browser vendor bundle (`static/js/dist/vendor.min.js`) includes jQuery
 3.7.1, Bootstrap 5.3.8 bundle (with Popper), and legacy jQuery plugins
@@ -66,9 +67,10 @@ No external CDN, fonts, or runtime assets are loaded. Typography uses a
 system-local font stack.
 
 **Remaining jQuery debt:** jQuery 3.7.1 remains required by DataTables, Select2,
-DateTimePicker, and first-party DOM manipulation (`$(...)`). Blueimp File Upload
-and its sole jQuery UI Widget Factory dependency were removed after the
-Bootstrap migration; jQuery UI is no longer distributed.
+and first-party DOM manipulation (`$(...)`). Blueimp File Upload and its sole
+jQuery UI Widget Factory dependency were removed after the Bootstrap migration,
+and the jQuery DateTimePicker was replaced by native `datetime-local` controls;
+jQuery UI is no longer distributed.
 
 **Flat UI:** Deleted from the repository. Historical attribution in NOTICE.
 
