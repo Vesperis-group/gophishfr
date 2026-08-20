@@ -8,7 +8,72 @@ the normal Yarn dependency graph. Generated files under `static/js/dist` and
 scripts under `static/js/src/app` and the project-specific stylesheets
 `main.css`, `dashboard.css`, and `docs.css` are first-party sources.
 
-## Update (blueimp File Upload removal, 2026-08-19)
+## Update (DateTimePicker removal, 2026-08-20)
+
+The manually vendored Bootstrap DateTimePicker (JS 4.17.37, CSS 4.15.35) was
+removed. Campaign scheduling now uses the browser's native
+`<input type="datetime-local">` controls, so no replacement dependency, CDN,
+theme, or runtime download was added and 112,485 bytes of unmaintained vendored
+source left the repository.
+
+The picker was only used on `/campaigns`, for the `launch_date` and
+`send_by_date` fields of the campaign modal. Its remaining behaviour was date
+and time selection, a "today" shortcut, a prefilled current time on the launch
+date, and an empty optional "send emails by" field. No minimum or maximum date,
+disabled date, locale, time zone, clear button, or programmatic change was
+configured, and no campaign value was ever loaded back into the picker: the
+control is only used while creating a campaign.
+
+| Capability | Legacy picker | Used by GophishFR | Required after migration |
+| --- | --- | --- | --- |
+| Date selection | Yes | Yes | Yes, native |
+| Time selection to the minute | Yes | Yes | Yes, native |
+| Seconds | Optional | No | No |
+| Prefilled current time | Yes, on the launch date | Yes | Yes, first-party |
+| Empty optional field | Yes | Yes | Yes |
+| Manual keyboard entry | Yes | Yes | Yes, native |
+| Minimum or maximum date | Yes | No | No |
+| Disabled dates | Yes | No | No |
+| Locale | Yes | Default only | Browser locale |
+| Explicit time zone | Yes, with `moment-timezone` | No | No |
+| Clear and today buttons | Yes | Today only | Browser affordances |
+| Programmatic change and callbacks | Yes | No | No |
+
+Candidates were compared before choosing the native controls. Tempus Dominus 6,
+the successor written by the same author, is jQuery-free and Bootstrap 5 ready
+but its repository states the project is no longer active or supported, so it
+was rejected as abandoned. Flatpickr has had no core release since 4.6.13 in
+April 2022 and was rejected for the same reason. Air Datepicker 3.6.0 is MIT,
+dependency-free and actively maintained, and remains the fallback if a custom
+picker is ever required. The native controls were preferred because they cover
+the whole capability set actually used, add no dependency, are maintained by the
+platform, and provide keyboard and mobile behaviour for free. They are supported
+by every browser targeted by Bootstrap 5: Chrome, Edge, Firefox 93 and later,
+and Safari 14.1 and later.
+
+The date and time semantics are unchanged end to end. The control holds a local
+wall-clock value, `campaigns.js` converts it to the same UTC instant the API has
+always received, and the stored and reloaded values are untouched:
+
+```text
+user picks local time
+  → datetime-local value YYYY-MM-DDTHH:mm, local
+  → utcFromLocalDateTimeInput() → UTC RFC 3339, e.g. 2031-06-15T12:30:00Z
+  → Go time.Time, stored in UTC
+  → campaign lists format it back to local with Moment
+```
+
+The one deliberate user-visible change is presentation: the field shows the
+browser's locale format instead of the previous `MMMM Do YYYY, h:mm a` string.
+Submitting an empty launch date now reports "Please specify a launch date"
+instead of posting a value the API rejects; no campaign is created either way.
+
+Moment.js is retained. It is still used by eleven application scripts and the
+DataTables sorting plug-in for displaying dates, so the picker was not its only
+consumer. jQuery is unchanged at 3.7.1 and still has eleven first-party
+consumers.
+
+
 
 The manually vendored blueimp jQuery File Upload 5.42.3 and iframe transport
 1.8.3 were removed. Group CSV import now uses the browser-native file input,
@@ -54,8 +119,8 @@ replacement.
 Removing blueimp eliminated the only Widget Factory consumer. The exact
 `jquery-ui@1.14.2` dependency, its lockfile entry, bundled `ui/widget.js`, and
 generated license notice were therefore removed. jQuery UI is no longer
-distributed. jQuery 3.7.1 remains unchanged for DataTables, Select2,
-DateTimePicker, and first-party code; 11 first-party application scripts still
+distributed. jQuery 3.7.1 remains unchanged for DataTables, Select2 and
+first-party code; 11 first-party application scripts still
 contain jQuery usage.
 
 ## Update (jQuery modernization, 2026-08-19)
@@ -68,8 +133,9 @@ contain jQuery usage.
   `jquery-ui@1.14.2` for blueimp File Upload. That intermediate dependency was
   removed with blueimp; no jQuery UI code is now distributed.
 - First-party jqXHR callbacks use `.done()`/`.fail()`/`.always()`.
-  DateTimePicker uses `.length` instead of removed `.size()` and inserts its
-  detached widget before showing it under jQuery 3. The former blueimp
+  DateTimePicker used `.length` instead of removed `.size()` and inserted its
+  detached widget before showing it under jQuery 3, until the picker was
+  replaced by native controls. The former blueimp
   `.pipe()` compatibility patch disappeared with the plugin.
 - jQuery Migrate 3.6.0 was evaluated but not added or shipped. Static analysis
   identified the incompatibilities directly, and the production browser suite
@@ -100,12 +166,12 @@ vendored/inventoried components to exact Yarn dependencies as part of
   new first-party Bootstrap 5 theme (system font stack, no external CDN).
 - Bootstrap does NOT use its optional jQuery bridge (`data-bs-no-jquery` is set
   on `<body>`). All Bootstrap lifecycle events are handled via native
-  `addEventListener`. jQuery remains for DataTables, Select2, DateTimePicker,
+  `addEventListener`. jQuery remains for DataTables, Select2,
   and first-party application code.
 - Bootstrap DateTimePicker's vendored source (`bootstrap-datetime.js`) was
   locally modified to: (1) replace Collapse jQuery calls with native
   `bootstrap.Collapse.getOrCreateInstance()` API, and (2) change default icon
-  classes from Glyphicon to Font Awesome. The plugin remains jQuery-based.
+  classes from Glyphicon to Font Awesome. That plugin was later removed.
 - Google Fonts external stylesheet links were removed. Typography uses a
   system-local font stack defined in `gophishfr-theme.css` — no CDN or
   external runtime asset is loaded.
@@ -147,7 +213,7 @@ exists.
 | jQuery UI Widget Factory | 1.11.1, later Yarn-managed 1.14.2 — **removed** | Former vendored file and package-managed `ui/widget.js` are deleted | Its only consumer was blueimp File Upload | [jquery/jquery-ui](https://github.com/jquery/jquery-ui), MIT | `REMOVED`; jQuery UI is no longer distributed |
 | blueimp jQuery File Upload | 5.42.3; iframe transport 1.8.3 — **removed** | `jquery.fileupload.js`, `jquery.iframe-transport.js` (deleted) | Formerly used only by group CSV import; replaced with first-party native browser APIs | [blueimp/jQuery-File-Upload](https://github.com/blueimp/jQuery-File-Upload), MIT | `REMOVED`; CVE-2018-9206 concerned upstream server handlers, which were never shipped |
 | SweetAlert2 | 8.17.1, exact npm package hash | `sweetalert2.min.js`, `sweetalert2.min.css` | `USED` for confirmations and status dialogs; minified-only | [sweetalert2/sweetalert2](https://github.com/sweetalert2/sweetalert2), MIT | `CLEAN`, old major; preserve pending UI-stack migration |
-| Bootstrap DateTimePicker | JS 4.17.37; CSS 4.15.35, banners | `bootstrap-datetime.js`, `bootstrap-datetime.css` | `USED` for campaign scheduling; readable JS, CSS source; locally modified: Collapse calls use native Bootstrap 5 API (`bootstrap.Collapse.getOrCreateInstance`), default icons changed from Glyphicon to Font Awesome, and detached widgets are inserted before jQuery 3 shows them | [Eonasdan/bootstrap-datetimepicker](https://github.com/Eonasdan/bootstrap-datetimepicker), MIT | `UNMAINTAINED`; mismatched patch versions, no applicable advisory found; migrate with Bootstrap |
+| Bootstrap DateTimePicker | JS 4.17.37; CSS 4.15.35 — **removed** | `bootstrap-datetime.js`, `bootstrap-datetime.css` (deleted) | Formerly used for campaign scheduling; replaced by native `<input type="datetime-local">` controls | [Eonasdan/bootstrap-datetimepicker](https://github.com/Eonasdan/bootstrap-datetimepicker), MIT | `REMOVED`; it was `UNMAINTAINED` and its successor is discontinued, so no third-party picker is distributed |
 | Select2 Bootstrap Theme | 0.1.0-beta.9, banner — **superseded**: removed; Select2 now uses its bundled `default` theme, restyled in `static/css/gophishfr-theme.css` | `static/css/select2-bootstrap.min.css` (deleted) | Formerly used for Select2 presentation; minified-only CSS | [select2-bootstrap-theme](https://github.com/select2/select2-bootstrap-theme), MIT | Migrated; see `docs/BOOTSTRAP5_MIGRATION_BASELINE.md` |
 | core-js browser bundle | 2.4.1, source banner | `static/js/src/vendor/core.min.js` | `LEGACY_BUT_REQUIRED` Promise polyfill; minified-only | [zloirock/core-js](https://github.com/zloirock/core-js), MIT | `UNMAINTAINED`; no applicable runtime advisory found; reassess with browser policy |
 | Font Awesome | 4.7.0, CSS banner | `font-awesome.min.css`, `static/font/fontawesome-*` | `USED` across the admin UI; minified CSS and font binaries | [FortAwesome/Font-Awesome](https://github.com/FortAwesome/Font-Awesome), CSS MIT and fonts SIL OFL 1.1 | `CLEAN`, old release line; migrate with UI stack |
@@ -167,7 +233,7 @@ them in a fixed order, and emits their complete license texts in
 
 | Component | Version | Usage | License | Audit status |
 | --- | --- | --- | --- | --- |
-| jQuery | 3.7.1 | Single global runtime instance for DataTables, Select2, DateTimePicker, and first-party code; the exact direct dependency naturally satisfies all transitive ranges | MIT | `CLEAN`; remediates CVE-2015-9251, CVE-2019-11358, CVE-2020-11022, CVE-2020-11023 from 1.10.2 |
+| jQuery | 3.7.1 | Single global runtime instance for DataTables, Select2, and first-party code; the exact direct dependency naturally satisfies all transitive ranges | MIT | `CLEAN`; remediates CVE-2015-9251, CVE-2019-11358, CVE-2020-11022, CVE-2020-11023 from 1.10.2 |
 | Chart.js / `@kurkle/color` | 4.5.1 / 0.3.4 | Dashboard and campaign charts | MIT | `CLEAN` |
 | chartjs-plugin-zoom / Hammer.JS | 2.2.0 / 2.0.8 | Timeline pan and zoom | MIT | `CLEAN` |
 | Bootstrap / Popper | 5.3.8 / 2.11.8 | Global layout, navbar, modal, tabs, dropdown, tooltip | MIT | `CLEAN`; exact Yarn dependencies replacing the manually vendored Bootstrap 3 JS/CSS above |
@@ -227,11 +293,13 @@ Applicable findings CVE-2015-9251, CVE-2019-11358, CVE-2020-11022, and
 CVE-2020-11023 are all remediated by upgrading to jQuery 3.7.1 (the
 compatibility bridge release). First-party `.success()`/`.error()`/`.complete()`
 calls replaced with `.done()`/`.fail()`/`.always()`. Vendored DateTimePicker
-`.size()` was replaced with `.length`, and its detached widget is inserted
-before `.show()` so jQuery 3 can override Bootstrap's hidden dropdown state.
+`.size()` was replaced with `.length`, and its detached widget was inserted
+before `.show()` so jQuery 3 could override Bootstrap's hidden dropdown state,
+until that picker was replaced by native controls.
 Vendored blueimp File Upload `.pipe()` was temporarily replaced with `.then()`
-before the plugin was removed. Select2 4.0.13, DataTables 1.13.11, and
-DateTimePicker 4.17.37 remain confirmed compatible under jQuery 3.7.1.
+before the plugin was removed. Select2 4.0.13 and DataTables 1.13.11 remain
+confirmed compatible under jQuery 3.7.1, as did DateTimePicker 4.17.37 until it
+was replaced by native controls.
 
 jQuery Migrate 3.6.0 was evaluated as a temporary diagnostic option but was
 not added or loaded: the static audit identified the removed APIs directly,
@@ -241,10 +309,12 @@ manifest, lockfile, or test dependencies.
 
 **JQUERY4_BLOCKED reasons** (preliminary):
 - Select2 4.0.13: uses internal jQuery APIs removed in 4.x (`$.expr[':']`)
-- DateTimePicker: unmaintained, uses deprecated `$.isFunction` removed in 4.x
 - DataTables 1.x: uses `$.camelCase` and other internals removed in 4.x
 - first-party application scripts still use jQuery for Ajax, DOM, and events
 - Resolution: remain on 3.7.1 until plugin majors are upgraded or replaced
+
+The DateTimePicker blocker was removed with the picker itself: campaign
+scheduling no longer runs any jQuery plugin.
 
 ### Bootstrap JS 3.0.2
 
@@ -272,15 +342,16 @@ CVE-2024-6485. The durable remediation is a supported Bootstrap migration.
 
 ## Reproducibility
 
-The post-blueimp frontend build contains 19 generated files and 2,902,066
-bytes, 30,045 bytes smaller than the pre-removal jQuery 3 build. The vendor
-bundle decreased from 1,111,876 to 1,083,088 bytes. Two independent immutable
+The post-DateTimePicker frontend build contains 19 generated files and
+2,856,640 bytes, 45,426 bytes smaller than the previous build of 2,902,066
+bytes. The vendor bundle decreased from 1,083,088 to 1,045,486 bytes and the
+stylesheet from 338,328 to 330,625 bytes. Two independent immutable
 installations and clean builds produced the
 same per-file hashes, left `yarn.lock` unchanged, and produced this aggregate
 SHA-256 manifest:
 
 ```text
-d30bb094b005dd8112f7fc85c9c4001a435a55bcdb6bf439db01598b20975e46
+f2ae0043d798fb5b1e027ccbbe8548cbb2a0ad2deed5e6caf673c9ce5873e622
 ```
 
 Webpack reports performance-budget warnings for the approximately 532 KiB

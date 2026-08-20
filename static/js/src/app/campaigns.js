@@ -8,22 +8,33 @@ var labels = {
     "Error": "text-bg-danger"
 }
 
-// faIcons overrides Bootstrap DateTimePicker's default Glyphicon set with
-// Font Awesome icons, since Glyphicons are no longer shipped.
-var faIcons = {
-    time: "fa fa-clock-o",
-    date: "fa fa-calendar",
-    up: "fa fa-chevron-up",
-    down: "fa fa-chevron-down",
-    previous: "fa fa-chevron-left",
-    next: "fa fa-chevron-right",
-    today: "fa fa-crosshairs",
-    clear: "fa fa-trash",
-    close: "fa fa-times"
-}
-
 var campaigns = []
 var campaign = {}
+
+// The launch date fields are native datetime-local controls. The browser holds
+// a local wall-clock value formatted as YYYY-MM-DDTHH:mm while the API has
+// always received an instant in UTC, so both directions are converted here.
+function localDateTimeInputValue(date) {
+    var pad = function (value) {
+        return (value < 10 ? "0" : "") + value
+    }
+    return date.getFullYear() + "-" + pad(date.getMonth() + 1) + "-" + pad(date.getDate()) +
+        "T" + pad(date.getHours()) + ":" + pad(date.getMinutes())
+}
+
+// utcFromLocalDateTimeInput turns a datetime-local value, which the browser
+// expresses in the visitor's own time zone, into the UTC timestamp the API
+// expects. An empty or unusable control yields an empty string.
+function utcFromLocalDateTimeInput(value) {
+    if (!value) {
+        return ""
+    }
+    var parsed = new Date(value)
+    if (isNaN(parsed.getTime())) {
+        return ""
+    }
+    return parsed.toISOString().replace(/\.\d{3}Z$/, "Z")
+}
 
 // Launch attempts to POST to /campaigns/
 function launch() {
@@ -47,10 +58,15 @@ function launch() {
                     });
                 })
                 // Validate our fields
-                var send_by_date = $("#send_by_date").val()
-                if (send_by_date != "") {
-                    send_by_date = moment(send_by_date, "MMMM Do YYYY, h:mm a").utc().format()
+                var launch_date = utcFromLocalDateTimeInput($("#launch_date").val())
+                if (!launch_date) {
+                    // Refuse to schedule rather than post a launch date the API
+                    // cannot parse, which is what an empty control used to do.
+                    modalError("Please specify a launch date")
+                    Swal.close()
+                    return
                 }
+                var send_by_date = utcFromLocalDateTimeInput($("#send_by_date").val())
                 campaign = {
                     name: $("#name").val(),
                     template: {
@@ -63,7 +79,7 @@ function launch() {
                     smtp: {
                         name: $("#profile").select2("data")[0].text
                     },
-                    launch_date: moment($("#launch_date").val(), "MMMM Do YYYY, h:mm a").utc().format(),
+                    launch_date: launch_date,
                     send_by_date: send_by_date || null,
                     groups: groups,
                 }
@@ -305,24 +321,9 @@ function copy(idx) {
 }
 
 $(document).ready(function () {
-    $("#launch_date").datetimepicker({
-        "widgetPositioning": {
-            "vertical": "bottom"
-        },
-        "showTodayButton": true,
-        "defaultDate": moment(),
-        "format": "MMMM Do YYYY, h:mm a",
-        "icons": faIcons
-    })
-    $("#send_by_date").datetimepicker({
-        "widgetPositioning": {
-            "vertical": "bottom"
-        },
-        "showTodayButton": true,
-        "useCurrent": false,
-        "format": "MMMM Do YYYY, h:mm a",
-        "icons": faIcons
-    })
+    // Prefill the launch date with the current local time, as the previous
+    // picker did; the optional "send emails by" field stays empty.
+    $("#launch_date").val(localDateTimeInputValue(new Date()))
     // Modal dismiss handler (native Bootstrap 5 event, no jQuery bridge)
     document.getElementById('modal').addEventListener('hidden.bs.modal', function (event) {
         dismiss()
