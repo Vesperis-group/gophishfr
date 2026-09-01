@@ -1,43 +1,77 @@
-$(document).ready(function () {
+// imapControls lists the controls that are locked while a connection test runs.
+const imapControls = [
+    "imaphost",
+    "imapport",
+    "imapusername",
+    "imappassword",
+    "use_imap",
+    "use_tls",
+    "ignorecerterrors",
+    "folder",
+    "restrictdomain",
+    "deletecampaign",
+    "lastlogin",
+    "imapfreq",
+    "validateimap",
+]
+
+function setIMAPControlsDisabled(disabled) {
+    imapControls.forEach(function (id) {
+        document.getElementById(id).disabled = disabled
+    })
+}
+
+// The application scripts are plain classic scripts at the end of <body>, so
+// the document is still parsing when they run and DOMContentLoaded has not
+// fired yet.
+document.addEventListener('DOMContentLoaded', function () {
     bsInitTooltips();
-    $("#apiResetForm").submit(function (e) {
+    document.getElementById("apiResetForm").addEventListener("submit", function (e) {
+        // The previous handler returned false, which cancelled the browser's
+        // own submission as well as further propagation.
+        e.preventDefault()
+        e.stopPropagation()
         api.reset()
             .done(function (response) {
                 user.api_key = response.data
                 successFlash(response.message)
-                $("#api_key").val(user.api_key)
+                document.getElementById("api_key").value = user.api_key
             })
             .fail(function (data) {
                 errorFlash(data.message)
             })
-        return false
     })
-    $("#settingsForm").submit(function (e) {
-        $.post("/settings", $(this).serialize())
+    document.getElementById("settingsForm").addEventListener("submit", function (e) {
+        e.preventDefault()
+        e.stopPropagation()
+        // Deliberately still jQuery: this is a direct form-urlencoded POST whose
+        // body comes from jQuery's own serializer, not from the query() helper.
+        // Reproducing that payload exactly belongs with the AJAX and form
+        // migration, not here.
+        $.post("/settings", $("#settingsForm").serialize())
             .done(function (data) {
                 successFlash(data.message)
             })
             .fail(function (data) {
                 errorFlash(data.responseJSON.message)
             })
-        return false
     })
     //$("#imapForm").submit(function (e) {
-    $("#savesettings").click(function() {
+    document.getElementById("savesettings").addEventListener("click", function() {
         var imapSettings = {}
-        imapSettings.host = $("#imaphost").val()
-        imapSettings.port = $("#imapport").val()
-        imapSettings.username = $("#imapusername").val()
-        imapSettings.password = $("#imappassword").val()
-        imapSettings.enabled = $('#use_imap').prop('checked')
-        imapSettings.tls = $('#use_tls').prop('checked')
+        imapSettings.host = document.getElementById("imaphost").value
+        imapSettings.port = document.getElementById("imapport").value
+        imapSettings.username = document.getElementById("imapusername").value
+        imapSettings.password = document.getElementById("imappassword").value
+        imapSettings.enabled = document.getElementById("use_imap").checked
+        imapSettings.tls = document.getElementById("use_tls").checked
 
         //Advanced settings
-        imapSettings.folder = $("#folder").val()
-        imapSettings.imap_freq = $("#imapfreq").val()
-        imapSettings.restrict_domain = $("#restrictdomain").val()
-        imapSettings.ignore_cert_errors = $('#ignorecerterrors').prop('checked')
-        imapSettings.delete_reported_campaign_email = $('#deletecampaign').prop('checked')
+        imapSettings.folder = document.getElementById("folder").value
+        imapSettings.imap_freq = document.getElementById("imapfreq").value
+        imapSettings.restrict_domain = document.getElementById("restrictdomain").value
+        imapSettings.ignore_cert_errors = document.getElementById("ignorecerterrors").checked
+        imapSettings.delete_reported_campaign_email = document.getElementById("deletecampaign").checked
 
         //To avoid unmarshalling error in controllers/api/imap.go. It would fail gracefully, but with a generic error.
         if (imapSettings.host == ""){
@@ -83,16 +117,16 @@ $(document).ready(function () {
         return false
     })
 
-    $("#validateimap").click(function() {
+    document.getElementById("validateimap").addEventListener("click", function() {
 
         // Query validate imap server endpoint
         var server = {}
-        server.host = $("#imaphost").val()
-        server.port = $("#imapport").val()
-        server.username = $("#imapusername").val()
-        server.password = $("#imappassword").val()
-        server.tls = $('#use_tls').prop('checked')
-        server.ignore_cert_errors = $('#ignorecerterrors').prop('checked')
+        server.host = document.getElementById("imaphost").value
+        server.port = document.getElementById("imapport").value
+        server.username = document.getElementById("imapusername").value
+        server.password = document.getElementById("imappassword").value
+        server.tls = document.getElementById("use_tls").checked
+        server.ignore_cert_errors = document.getElementById("ignorecerterrors").checked
 
         //To avoid unmarshalling error in controllers/api/imap.go. It would fail gracefully, but with a generic error.
         if (server.host == ""){
@@ -114,34 +148,22 @@ $(document).ready(function () {
             return false
         }
 
-        var oldHTML = $("#validateimap").html();
+        var oldHTML = document.getElementById("validateimap").innerHTML;
         // Disable inputs and change button text
-        $("#imaphost").attr("disabled", true);
-        $("#imapport").attr("disabled", true);
-        $("#imapusername").attr("disabled", true);
-        $("#imappassword").attr("disabled", true);
-        $("#use_imap").attr("disabled", true);
-        $("#use_tls").attr("disabled", true);
-        $('#ignorecerterrors').attr("disabled", true);
-        $("#folder").attr("disabled", true);
-        $("#restrictdomain").attr("disabled", true);
-        $('#deletecampaign').attr("disabled", true);
-        $('#lastlogin').attr("disabled", true);
-        $('#imapfreq').attr("disabled", true);
-        $("#validateimap").attr("disabled", true);
-        $("#validateimap").html("<i class='fa fa-circle-o-notch fa-spin'></i> Testing...");
+        setIMAPControlsDisabled(true);
+        document.getElementById("validateimap").innerHTML = "<i class='fa fa-circle-o-notch fa-spin'></i> Testing...";
 
         api.IMAP.validate(server).done(function(data) {
             if (data.success == true) {
                 Swal.fire({
                     title: "Success",
-                    html: "Logged into <b>" + escapeHtml($("#imaphost").val()) + "</b>",
+                    html: "Logged into <b>" + escapeHtml(document.getElementById("imaphost").value) + "</b>",
                     type: "success",
                 })
             } else {
                 Swal.fire({
                     title: "Failed!",
-                    html: "Unable to login to <b>" + escapeHtml($("#imaphost").val()) + "</b>.",
+                    html: "Unable to login to <b>" + escapeHtml(document.getElementById("imaphost").value) + "</b>.",
                     type: "error",
                     showCancelButton: true,
                     cancelButtonText: "Close",
@@ -168,58 +190,51 @@ $(document).ready(function () {
           })
           .always(function() {
             //Re-enable inputs and change button text
-            $("#imaphost").attr("disabled", false);
-            $("#imapport").attr("disabled", false);
-            $("#imapusername").attr("disabled", false);
-            $("#imappassword").attr("disabled", false);
-            $("#use_imap").attr("disabled", false);
-            $("#use_tls").attr("disabled", false);
-            $('#ignorecerterrors').attr("disabled", false);
-            $("#folder").attr("disabled", false);
-            $("#restrictdomain").attr("disabled", false);
-            $('#deletecampaign').attr("disabled", false);
-            $('#lastlogin').attr("disabled", false);
-            $('#imapfreq').attr("disabled", false);
-            $("#validateimap").attr("disabled", false);
-            $("#validateimap").html(oldHTML);
+            setIMAPControlsDisabled(false);
+            document.getElementById("validateimap").innerHTML = oldHTML;
 
           });
 
       }); //end testclick
 
-    $("#reporttab").click(function() {
+    document.getElementById("reporttab").addEventListener("click", function() {
         loadIMAPSettings()
     })
 
-    $("#advanced").click(function() {
-        $("#advancedarea").toggle();
+    document.getElementById("advanced").addEventListener("click", function() {
+        // The markup hides this with an inline style, so the toggle flips
+        // between that and letting the stylesheet decide.
+        var area = document.getElementById("advancedarea")
+        var hidden = window.getComputedStyle(area).display === "none"
+        area.style.display = hidden ? "" : "none"
     })
 
     function loadIMAPSettings(){
         api.IMAP.get()
         .done(function (imap) {
+            var lastLoginRow = document.getElementById("lastlogindiv")
             if (imap.length == 0){
-                $('#lastlogindiv').hide()
+                lastLoginRow.style.display = "none"
             } else {
                 imap = imap[0]
                 if (imap.enabled == false){
-                    $('#lastlogindiv').hide()
+                    lastLoginRow.style.display = "none"
                 } else {
-                    $('#lastlogindiv').show()
+                    lastLoginRow.style.display = ""
                 }
-                $("#imapusername").val(imap.username)
-                $("#imaphost").val(imap.host)
-                $("#imapport").val(imap.port)
-                $("#imappassword").val(imap.password)
-                $('#use_tls').prop('checked', imap.tls)
-                $('#ignorecerterrors').prop('checked', imap.ignore_cert_errors)
-                $('#use_imap').prop('checked', imap.enabled)
-                $("#folder").val(imap.folder)
-                $("#restrictdomain").val(imap.restrict_domain)
-                $('#deletecampaign').prop('checked', imap.delete_reported_campaign_email)
-                $('#lastloginraw').val(imap.last_login)
-                $('#lastlogin').val(moment.utc(imap.last_login).fromNow())
-                $('#imapfreq').val(imap.imap_freq)
+                document.getElementById("imapusername").value = imap.username
+                document.getElementById("imaphost").value = imap.host
+                document.getElementById("imapport").value = imap.port
+                document.getElementById("imappassword").value = imap.password
+                document.getElementById("use_tls").checked = imap.tls
+                document.getElementById("ignorecerterrors").checked = imap.ignore_cert_errors
+                document.getElementById("use_imap").checked = imap.enabled
+                document.getElementById("folder").value = imap.folder
+                document.getElementById("restrictdomain").value = imap.restrict_domain
+                document.getElementById("deletecampaign").checked = imap.delete_reported_campaign_email
+                document.getElementById("lastloginraw").value = imap.last_login
+                document.getElementById("lastlogin").value = moment.utc(imap.last_login).fromNow()
+                document.getElementById("imapfreq").value = imap.imap_freq
             }
 
         })
@@ -229,8 +244,9 @@ $(document).ready(function () {
     }
 
     var use_map = localStorage.getItem('gophish.use_map')
-    $("#use_map").prop('checked', JSON.parse(use_map))
-    $("#use_map").on('change', function () {
+    var mapToggle = document.getElementById("use_map")
+    mapToggle.checked = JSON.parse(use_map)
+    mapToggle.addEventListener('change', function () {
         localStorage.setItem('gophish.use_map', JSON.stringify(this.checked))
     })
 
