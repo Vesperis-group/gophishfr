@@ -2095,7 +2095,11 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await page.unroute("**/api/users/*");
     await page.getByRole("button", { name: "Delete" }).click();
     await expect(page.locator(".swal2-popup")).toContainText("User Deleted!");
-    await page.getByRole("button", { name: "OK" }).click();
+    await Promise.all([
+      page.waitForNavigation({ waitUntil: "load" }),
+      page.getByRole("button", { name: "OK" }).click(),
+    ]);
+    await expect(page.getByRole("heading", { name: "User Management" })).toBeVisible();
 
     expect(
       consoleErrors
