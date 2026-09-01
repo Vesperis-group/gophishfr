@@ -243,20 +243,19 @@ function sendTestEmail() {
     submit.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Sending'
     // Send the test email
     api.send_test_email(test_email_request)
-        .done(function (data) {
+        .then(function () {
             showCampaignFlash(
                 "sendTestEmailModal.flashes",
                 "alert-success",
                 "fa-check-circle",
                 "Email Sent!")
             submit.innerHTML = btnHtml
-        })
-        .fail(function (data) {
+        }, function (error) {
             showCampaignFlash(
                 "sendTestEmailModal.flashes",
                 "alert-danger",
                 "fa-exclamation-circle",
-                data.responseJSON.message)
+                requestErrorMessage(error))
             submit.innerHTML = btnHtml
         })
 }

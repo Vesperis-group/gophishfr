@@ -88,7 +88,7 @@ const edit = (id) => {
     } else {
         document.getElementById("userModalLabel").textContent = "Edit User"
         api.userId.get(id)
-            .done((user) => {
+            .then((user) => {
                 document.getElementById("username").value = user.username
                 setRole(user.role.slug)
                 document.getElementById("force_password_change_checkbox").checked = user.password_change_required
@@ -96,8 +96,7 @@ const edit = (id) => {
                 if (user.username == "admin") {
                     document.getElementById("username").disabled = true
                 }
-            })
-            .fail(function () {
+            }, function () {
                 errorFlash("Error fetching user")
             })
     }
@@ -214,7 +213,7 @@ const load = () => {
     document.getElementById("userTable").style.display = "none"
     document.getElementById("loading").style.display = ""
     api.users.get()
-        .done((us) => {
+        .then((us) => {
             users = us
             document.getElementById("loading").style.display = "none"
             document.getElementById("userTable").style.display = ""
@@ -249,8 +248,7 @@ const load = () => {
                 ])
             })
             userTable.rows.add(userRows).draw();
-        })
-        .fail(() => {
+        }, () => {
             errorFlash("Error fetching users")
         })
 }

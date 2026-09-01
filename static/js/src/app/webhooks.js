@@ -167,17 +167,16 @@ const pingUrl = (btn, whId) => {
     dismiss();
     btn.disabled = true;
     api.webhookId.ping(whId)
-        .done(function(wh) {
+        .then(function(wh) {
             btn.disabled = false;
             successFlash(`Ping of "${escapeHtml(wh.name)}" webhook succeeded.`);
-        })
-        .fail(function(data) {
+        }, function(error) {
             btn.disabled = false;
             var wh = webhooks.find(x => x.id == whId);
             if (!wh) {
                 return
             }
-            errorFlash(`Ping of "${escapeHtml(wh.name)}" webhook failed: "${escapeHtml(data.responseJSON.message)}"`)
+            errorFlash(`Ping of "${escapeHtml(wh.name)}" webhook failed: "${escapeHtml(requestErrorMessage(error))}"`)
         });
 };
 
