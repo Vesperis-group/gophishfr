@@ -623,6 +623,147 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(
       page.locator("#exportButton + .dropdown-menu"),
     ).not.toBeVisible();
+
+    const exportState = await page.evaluate(() => {
+      type ExportGlobals = Window & {
+        Papa: {
+          unparse: (
+            input: unknown,
+            options: { escapeFormulae: boolean },
+          ) => string;
+        };
+        campaign: { results: unknown[] };
+        exportAsCSV: (scope: string) => void;
+      };
+      const globals = window as unknown as ExportGlobals;
+      const button = document.getElementById("exportButton") as HTMLButtonElement;
+      const originalHTML = button.innerHTML;
+      const originalUnparse = globals.Papa.unparse;
+      const originalCreateObjectURL = URL.createObjectURL;
+      const originalClick = HTMLAnchorElement.prototype.click;
+      let download = { filename: "", href: "" };
+      let unparse = {
+        escapeFormulae: false,
+        rows: 0,
+        spinnerHTML: "",
+      };
+
+      try {
+        globals.Papa.unparse = (input, options) => {
+          unparse = {
+            escapeFormulae: options.escapeFormulae,
+            rows: (input as unknown[]).length,
+            spinnerHTML: button.innerHTML,
+          };
+          return originalUnparse(input, options);
+        };
+        URL.createObjectURL = () => "blob:campaign-results-baseline";
+        HTMLAnchorElement.prototype.click = function () {
+          download = {
+            filename: this.download,
+            href: this.href,
+          };
+        };
+        globals.exportAsCSV("results");
+        return {
+          buttonRestored: button.innerHTML === originalHTML,
+          download,
+          unparse,
+        };
+      } finally {
+        globals.Papa.unparse = originalUnparse;
+        URL.createObjectURL = originalCreateObjectURL;
+        HTMLAnchorElement.prototype.click = originalClick;
+      }
+    });
+    expect(exportState).toEqual({
+      buttonRestored: true,
+      download: {
+        filename: "Browser Fixture Campaign - Results.csv",
+        href: "blob:campaign-results-baseline",
+      },
+      unparse: {
+        escapeFormulae: true,
+        rows: 1,
+        spinnerHTML: '<i class="fa fa-spinner fa-spin"></i>',
+      },
+    });
+
+    const completionState = await page.evaluate(async () => {
+      type CompleteGlobals = Window & {
+        Swal: {
+          fire: (...args: unknown[]) => Promise<{ value: boolean }>;
+        };
+        api: {
+          campaignId: {
+            complete: (id: unknown) => {
+              done: (callback: () => void) => unknown;
+              fail: (callback: () => void) => unknown;
+            };
+          };
+        };
+        completeCampaign: () => void;
+        doPoll: boolean;
+      };
+      const globals = window as unknown as CompleteGlobals;
+      const button = document.getElementById("complete_button") as HTMLButtonElement;
+      const originalButtonHTML = button.innerHTML;
+      const originalDisabled = button.disabled;
+      const originalDoPoll = globals.doPoll;
+      const originalFire = globals.Swal.fire;
+      const originalComplete = globals.api.campaignId.complete;
+      const dialogs: string[] = [];
+      let completeCalls = 0;
+
+      const request = {
+        done(callback: () => void) {
+          completeCalls += 1;
+          callback();
+          return request;
+        },
+        fail() {
+          return request;
+        },
+      };
+
+      try {
+        globals.api.campaignId.complete = () => request;
+        globals.Swal.fire = (...args: unknown[]) => {
+          const options = args[0] as
+            | { preConfirm?: () => Promise<void>; title?: string }
+            | string;
+          dialogs.push(typeof options === "string" ? options : (options.title ?? ""));
+          if (typeof options !== "string" && options.preConfirm) {
+            return Promise.resolve(options.preConfirm()).then(() => ({ value: true }));
+          }
+          return Promise.resolve({ value: false });
+        };
+        globals.completeCampaign();
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        await new Promise((resolve) => setTimeout(resolve, 0));
+        return {
+          completeCalls,
+          dialogs,
+          disabled: button.disabled,
+          doPoll: globals.doPoll,
+          text: button.textContent,
+        };
+      } finally {
+        globals.Swal.fire = originalFire;
+        globals.api.campaignId.complete = originalComplete;
+        button.innerHTML = originalButtonHTML;
+        button.disabled = originalDisabled;
+        globals.doPoll = originalDoPoll;
+      }
+    });
+    expect(completionState).toEqual({
+      completeCalls: 1,
+      dialogs: ["Are you sure?", "Campaign Completed!"],
+      disabled: true,
+      doPoll: false,
+      text: "Completed!",
+    });
+
     const chartIDs = [
       "timeline_chart",
       "sent_chart",
@@ -642,6 +783,302 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       "aria-label",
       "Email Reported: 1 recipients (100%)",
     );
+
+    const earlyBreakState = await page.evaluate(() => {
+      type CampaignResult = {
+        id?: string;
+        ip?: string;
+        latitude: number;
+        longitude: number;
+        reported: boolean;
+        send_date: string;
+        status: string;
+      };
+      type CampaignResultsGlobals = Window & {
+        campaign: { id?: number; results: CampaignResult[]; timeline: unknown[] };
+        map: { bubbles: (items: unknown[]) => void } | null;
+        bubbles: Array<{ name?: string; radius: number }>;
+        resultsTable: {
+          row: (index: number) => {
+            data: {
+              (): unknown[];
+              (data: unknown[]): void;
+            };
+            child: { isShown: () => boolean };
+          };
+          rows: () => { every: (callback: (index: number) => void) => void };
+          draw: (resetPaging: boolean) => void;
+        };
+        api: {
+          campaignId: {
+            results: (
+              id: number | undefined,
+            ) => { done: (callback: (campaign: unknown) => void) => void };
+          };
+        };
+        updateMap: (results: CampaignResult[]) => void;
+        poll: () => void;
+      };
+
+      const globals = window as unknown as CampaignResultsGlobals;
+      const originalCampaign = globals.campaign;
+      const originalMap = globals.map;
+      const originalBubbles = globals.bubbles;
+      const originalResults = globals.api.campaignId.results;
+      const originalPush = Array.prototype.push;
+      let laterBubbleReads = 0;
+      let renderedBubbles: Array<{ name?: string; radius: number }> = [];
+      let mapState = { count: 0, firstRadius: 0, laterBubbleReads: 0 };
+
+      try {
+        Array.prototype.push = function (...items: unknown[]): number {
+          for (const item of items) {
+            const bubble = item as {
+              fillKey?: string;
+              ip?: string;
+              name?: string;
+            };
+            if (bubble?.fillKey === "point" && bubble.name === "later") {
+              Object.defineProperty(bubble, "ip", {
+                configurable: true,
+                get: () => {
+                  laterBubbleReads += 1;
+                  return "later";
+                },
+              });
+            }
+          }
+          return Reflect.apply(originalPush, this, items);
+        };
+        globals.map = {
+          bubbles: (items) => {
+            renderedBubbles = items as Array<{ name?: string; radius: number }>;
+          },
+        };
+        globals.campaign = {
+          results: [
+            {
+              latitude: 1,
+              longitude: 1,
+              reported: false,
+              send_date: "",
+              status: "Email Sent",
+            },
+            {
+              ip: "later",
+              latitude: 2,
+              longitude: 2,
+              reported: false,
+              send_date: "",
+              status: "Email Sent",
+            },
+            {
+              latitude: 1,
+              longitude: 1,
+              reported: false,
+              send_date: "",
+              status: "Email Sent",
+            },
+          ],
+          timeline: [],
+        };
+        globals.updateMap(globals.campaign.results);
+        mapState = {
+          count: renderedBubbles.length,
+          firstRadius: renderedBubbles[0]?.radius ?? 0,
+          laterBubbleReads,
+        };
+
+        const rowData = globals.resultsTable.row(0).data();
+        const matchingResult: CampaignResult = {
+          id: String(rowData[0]),
+          latitude: 0,
+          longitude: 0,
+          reported: Boolean(rowData[7]),
+          send_date: String(rowData[8]),
+          status: String(rowData[6]),
+        };
+        let laterResultReads = 0;
+        const laterResult: CampaignResult = {
+          latitude: 0,
+          longitude: 0,
+          reported: matchingResult.reported,
+          send_date: matchingResult.send_date,
+          status: matchingResult.status,
+        };
+        Object.defineProperty(laterResult, "id", {
+          configurable: true,
+          get: () => {
+            laterResultReads += 1;
+            return "must-not-be-read";
+          },
+        });
+        globals.api.campaignId.results = () => ({
+          done: (callback) => {
+            callback({
+              ...originalCampaign,
+              results: [matchingResult, laterResult],
+            });
+          },
+        });
+        globals.poll();
+
+        return {
+          map: mapState,
+          poll: { laterResultReads },
+        };
+      } finally {
+        Array.prototype.push = originalPush;
+        globals.api.campaignId.results = originalResults;
+        globals.campaign = originalCampaign;
+        globals.map = originalMap;
+        globals.bubbles = originalBubbles;
+      }
+    });
+    expect(earlyBreakState).toEqual({
+      map: { count: 2, firstRadius: 3, laterBubbleReads: 0 },
+      poll: { laterResultReads: 0 },
+    });
+
+    const originalTimeline = await page.evaluate(() => {
+      const globals = window as unknown as {
+        campaign: { timeline: unknown[] };
+      };
+      const timeline = globals.campaign.timeline;
+      globals.campaign.timeline = [
+        {
+          email: "fixture@localhost.invalid",
+          message: "Submitted Data",
+          time: new Date("2025-01-02T03:04:05Z").toISOString(),
+          details: JSON.stringify({
+            browser: { "user-agent": "Mozilla/5.0" },
+            payload: {
+              rid: "must-not-be-replayed",
+              __original_url: "https://original.invalid/login",
+              username: "<fixture-user>",
+              empty: "",
+              nil: null,
+              disabled: false,
+              attempts: 0,
+              roles: ["admin", "editor"],
+            },
+          }),
+        },
+      ];
+      return timeline;
+    });
+
+    const detailsCell = page.locator("#resultsTable tbody td.details-control").first();
+    await detailsCell.locator("i").click();
+    const details = page.locator("#resultsTable .timeline-event-details");
+    const detailsResults = page.locator("#resultsTable .timeline-event-results");
+    await expect(details).toHaveCount(1);
+    await expect(detailsResults).not.toBeVisible();
+    await details.locator("i").click();
+    await expect(detailsResults).toBeVisible();
+    await expect(details.locator("i")).toHaveClass(/fa-caret-down/);
+    expect(
+      await detailsResults.locator("tbody tr").evaluateAll((rows) =>
+        rows.map((row) =>
+          Array.from(row.querySelectorAll("td")).map((cell) => cell.textContent),
+        ),
+      ),
+    ).toEqual([
+      ["__original_url", "https://original.invalid/login"],
+      ["username", "<fixture-user>"],
+      ["empty", ""],
+      ["nil", ""],
+      ["disabled", "false"],
+      ["attempts", "0"],
+      ["roles", "admin,editor"],
+    ]);
+    await details.click();
+    await expect(detailsResults).not.toBeVisible();
+    await expect(details.locator("i")).toHaveClass(/fa-caret-right/);
+
+    await page.evaluate(() => {
+      const globals = window as unknown as {
+        __submittedReplay?: {
+          action: string;
+          connectedDuringSubmit: boolean;
+          fields: Array<[string, string]>;
+          method: string;
+          target: string;
+        };
+        __submitBeforeReplay?: typeof HTMLFormElement.prototype.submit;
+      };
+      globals.__submitBeforeReplay = HTMLFormElement.prototype.submit;
+      HTMLFormElement.prototype.submit = function () {
+        globals.__submittedReplay = {
+          action: this.action,
+          connectedDuringSubmit: this.isConnected,
+          fields: Array.from(this.elements)
+            .filter((element): element is HTMLInputElement => element instanceof HTMLInputElement)
+            .map((input) => [input.name, input.value]),
+          method: this.method,
+          target: this.target,
+        };
+      };
+    });
+    await page.getByRole("button", { name: "Replay Credentials" }).click();
+    await page.locator(".swal2-input").fill("https://target.invalid/submit");
+    await page.locator(".swal2-confirm").click();
+    await expect
+      .poll(() =>
+        page.evaluate(
+          () =>
+            (
+              window as unknown as {
+                __submittedReplay?: { action: string };
+              }
+            ).__submittedReplay?.action,
+        ),
+      )
+      .toBe("https://target.invalid/submit");
+    const replayState = await page.evaluate(() => {
+      const globals = window as unknown as {
+        __submittedReplay?: {
+          action: string;
+          connectedDuringSubmit: boolean;
+          fields: Array<[string, string]>;
+          method: string;
+          target: string;
+        };
+        __submitBeforeReplay?: typeof HTMLFormElement.prototype.submit;
+      };
+      const state = {
+        ...globals.__submittedReplay,
+        formsAfterSubmit: document.querySelectorAll("body > form").length,
+      };
+      if (globals.__submitBeforeReplay) {
+        HTMLFormElement.prototype.submit = globals.__submitBeforeReplay;
+      }
+      delete globals.__submitBeforeReplay;
+      delete globals.__submittedReplay;
+      return state;
+    });
+    expect(replayState).toEqual({
+      action: "https://target.invalid/submit",
+      connectedDuringSubmit: true,
+      fields: [
+        ["username", "<fixture-user>"],
+        ["empty", ""],
+        ["nil", ""],
+        ["disabled", "false"],
+        ["attempts", "0"],
+        ["roles", "admin,editor"],
+      ],
+      formsAfterSubmit: 0,
+      method: "post",
+      target: "_blank",
+    });
+    await page.evaluate((timeline) => {
+      const globals = window as unknown as {
+        campaign: { timeline: unknown[] };
+      };
+      globals.campaign.timeline = timeline;
+    }, originalTimeline);
+    await detailsCell.locator("i").click();
 
     const chartData = await page.evaluate(() => {
       const charts = (window as Window & { Chart: ChartLibrary }).Chart;
