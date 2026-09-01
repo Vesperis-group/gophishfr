@@ -1508,6 +1508,304 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     }
   });
 
+  await test.step("sending profile modal keeps its payload and header contracts", async () => {
+    // Baseline for the jQuery removal in sending_profiles.js. Nothing covered
+    // this surface before.
+    const profileRequests: string[] = [];
+    const captureProfile = (request: Request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/smtp/"
+      ) {
+        profileRequests.push(request.postData() ?? "");
+      }
+    };
+    page.on("request", captureProfile);
+
+    await page.getByRole("link", { name: "Sending Profiles" }).click();
+    await expect(page).toHaveURL(/\/sending_profiles$/);
+    await expect(page.locator("#profileTable")).toContainText(
+      "Browser Fixture Sending Profile",
+    );
+
+    // Opened, closed and reopened before submitting once: the submit handler is
+    // rebound on every open, so a migration that stops removing the previous
+    // listener would save more than once per click.
+    await openApplicationModal(page, "New Profile");
+    await closeApplicationModal(page);
+    await openApplicationModal(page, "New Profile");
+
+    // Defaults the modal presents.
+    expect(await page.locator("#interface_type").inputValue()).toBe("SMTP");
+    expect(await page.locator("#ignore_cert_errors").isChecked()).toBe(true);
+
+    const profileName = `BrowserProfile_${Date.now()}`;
+    await page.locator("#name").fill(profileName);
+    await page.locator("#from").fill("fixture@localhost.invalid");
+    await page.locator("#host").fill("127.0.0.1:1");
+    await page.locator("#username").fill("fixture-user");
+    await page.locator("#password").fill("fixture-password");
+
+    // Custom headers are rows in a table, added through a control that clears
+    // its inputs afterwards.
+    await page.locator("#headerKey").fill("X-Fixture-One");
+    await page.locator("#headerValue").fill("one");
+    await page.locator("#addCustomHeader").click();
+    await page.locator("#headerKey").fill("X-Fixture-Two");
+    await page.locator("#headerValue").fill("two");
+    await page.locator("#addCustomHeader").click();
+    expect(await page.locator("#headerKey").inputValue()).toBe("");
+    expect(await page.locator("#headerValue").inputValue()).toBe("");
+    expect((await tableColumnText(page, "headersTable", 0)).sort()).toEqual([
+      "X-Fixture-One",
+      "X-Fixture-Two",
+    ]);
+
+    // Adding the same key again updates the row rather than duplicating it.
+    await page.locator("#headerKey").fill("X-Fixture-One");
+    await page.locator("#headerValue").fill("updated");
+    await page.locator("#addCustomHeader").click();
+    expect((await tableColumnText(page, "headersTable", 0)).sort()).toEqual([
+      "X-Fixture-One",
+      "X-Fixture-Two",
+    ]);
+
+    // Removing a header drops exactly that row.
+    await page
+      .locator("#headersTable tbody tr")
+      .filter({ hasText: "X-Fixture-Two" })
+      .locator("span > i.fa-trash-o")
+      .click();
+    await expect
+      .poll(() => tableColumnText(page, "headersTable", 0))
+      .toEqual(["X-Fixture-One"]);
+
+    await page.locator("#modal #modalSubmit").click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+
+    await expect.poll(() => profileRequests.length).toBe(1);
+    const profile = JSON.parse(profileRequests[0]) as {
+      name: string;
+      interface_type: string;
+      from_address: string;
+      host: string;
+      username: string;
+      password: string;
+      ignore_cert_errors: boolean;
+      headers: Array<{ key: string; value: string }>;
+    };
+    expect(profile.name).toBe(profileName);
+    expect(profile.interface_type).toBe("SMTP");
+    expect(profile.from_address).toBe("fixture@localhost.invalid");
+    expect(profile.host).toBe("127.0.0.1:1");
+    expect(profile.username).toBe("fixture-user");
+    expect(profile.password).toBe("fixture-password");
+    expect(profile.ignore_cert_errors).toBe(true);
+    expect(profile.headers).toEqual([{ key: "X-Fixture-One", value: "updated" }]);
+
+    // Editing that profile through its row control reloads its values, and the
+    // header table is rebuilt from the saved record.
+    await expect(page.locator("#profileTable")).toContainText(profileName);
+    await page
+      .locator("#profileTable tbody tr")
+      .filter({ hasText: profileName })
+      .locator('button[onclick^="edit("]')
+      .click();
+    await expect(page.locator("#modal")).toBeVisible();
+    await expect.poll(() => page.locator("#name").inputValue()).toBe(profileName);
+    expect(await page.locator("#host").inputValue()).toBe("127.0.0.1:1");
+    await expect
+      .poll(() => tableColumnText(page, "headersTable", 0))
+      .toEqual(["X-Fixture-One"]);
+    await closeApplicationModal(page);
+
+    // Dismissing resets every field back to the modal's defaults.
+    await openApplicationModal(page, "New Profile");
+    expect(await page.locator("#name").inputValue()).toBe("");
+    expect(await page.locator("#host").inputValue()).toBe("");
+    expect(await page.locator("#interface_type").inputValue()).toBe("SMTP");
+    expect(await page.locator("#ignore_cert_errors").isChecked()).toBe(true);
+    expect(await tableColumnText(page, "headersTable", 0)).toEqual([]);
+    await closeApplicationModal(page);
+    page.off("request", captureProfile);
+  });
+
+  await test.step("test email flash reports both outcomes and restores the button", async () => {
+    // Baseline for the sendTestEmail migration. The result banner moved from
+    // concatenated HTML to a text node, so this asserts the message the user
+    // actually reads rather than the markup around it -- which holds for both
+    // the jQuery and the native implementation. The endpoint is intercepted so
+    // neither outcome depends on a real SMTP server.
+    const testEmailPayloads: string[] = [];
+    let testEmailOutcome: "success" | "failure" = "success";
+    // The failure path below is served as a real 400, which the browser also
+    // reports on the console. That is expected here, so the entries it adds are
+    // removed again at the end of the step rather than weakening the global
+    // console-error guard for every other step.
+    const consoleErrorsBefore = consoleErrors.length;
+    const failedResponsesBefore = failedLocalResponses.length;
+    await page.route("**/api/util/send_test_email", async (route) => {
+      testEmailPayloads.push(route.request().postData() ?? "");
+      if (testEmailOutcome === "success") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, message: "Email sent" }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: false,
+          message: "dial tcp 127.0.0.1:1: connect: connection refused",
+        }),
+      });
+    });
+
+    await openApplicationModal(page, "New Profile");
+    await page.locator("#from").fill("fixture@localhost.invalid");
+    await page.locator("#host").fill("127.0.0.1:1");
+    await page.locator("#username").fill("fixture-user");
+    await page.locator("#password").fill("fixture-password");
+    await page.locator("#headerKey").fill("X-Fixture-Test");
+    await page.locator("#headerValue").fill("test");
+    await page.locator("#addCustomHeader").click();
+
+    const submit = page.locator("#sendTestModalSubmit");
+    // The template's markup is indented across lines while the dismiss handler
+    // rewrites it on one line, so the label is compared with whitespace
+    // collapsed rather than byte for byte.
+    const buttonLabel = async () =>
+      (await submit.innerHTML()).replace(/\s+/g, " ").trim();
+    const originalLabel = await buttonLabel();
+
+    await page.locator('button:has-text("Send Test Email")').click();
+    await expect(page.locator("#sendTestEmailModal")).toBeVisible();
+    await page.locator("input[name=to_first_name]").fill("Fixture");
+    await page.locator("input[name=to_last_name]").fill("Recipient");
+    await page.locator("input[name=to_email]").fill("recipient@localhost.invalid");
+    await page.locator("input[name=to_position]").fill("Tester");
+
+    await submit.click();
+
+    const flashes = page.locator('[id="sendTestEmailModal.flashes"]');
+    await expect(flashes.locator(".alert-success")).toHaveText(/Email Sent!/);
+    // The spinner label is swapped in for the duration of the request and must
+    // be put back afterwards, otherwise the button stays stuck on "Sending".
+    await expect.poll(buttonLabel).toBe(originalLabel);
+
+    await expect.poll(() => testEmailPayloads.length).toBe(1);
+    const testEmail = JSON.parse(testEmailPayloads[0]) as {
+      first_name: string;
+      last_name: string;
+      email: string;
+      position: string;
+      smtp: {
+        from_address: string;
+        host: string;
+        username: string;
+        password: string;
+        ignore_cert_errors: boolean;
+        headers: Array<{ key: string; value: string }>;
+      };
+    };
+    expect(testEmail.first_name).toBe("Fixture");
+    expect(testEmail.last_name).toBe("Recipient");
+    expect(testEmail.email).toBe("recipient@localhost.invalid");
+    expect(testEmail.position).toBe("Tester");
+    expect(testEmail.smtp.from_address).toBe("fixture@localhost.invalid");
+    expect(testEmail.smtp.host).toBe("127.0.0.1:1");
+    expect(testEmail.smtp.username).toBe("fixture-user");
+    expect(testEmail.smtp.password).toBe("fixture-password");
+    expect(testEmail.smtp.ignore_cert_errors).toBe(true);
+    // The headers come out of the modal's DataTable, unescaped on the way back.
+    expect(testEmail.smtp.headers).toEqual([
+      { key: "X-Fixture-Test", value: "test" },
+    ]);
+
+    // The server's error message has to reach the same banner.
+    testEmailOutcome = "failure";
+    await submit.click();
+    await expect(flashes.locator(".alert-danger")).toHaveText(
+      /connect: connection refused/,
+    );
+    await expect.poll(buttonLabel).toBe(originalLabel);
+    // Only one banner is shown at a time: the success one was replaced.
+    await expect(flashes.locator(".alert-success")).toHaveCount(0);
+
+    // Dismissing the test modal clears the banner and resets the button.
+    await page.locator("#sendTestEmailModal").getByText("Cancel").click();
+    await expect(page.locator("#sendTestEmailModal")).not.toBeVisible();
+    await expect(flashes.locator(".alert")).toHaveCount(0);
+    expect(await buttonLabel()).toBe(originalLabel);
+
+    await closeApplicationModal(page);
+    await page.unroute("**/api/util/send_test_email");
+
+    // Only the deliberate 400 may have been logged.
+    const testEmailConsoleErrors = consoleErrors.slice(consoleErrorsBefore);
+    expect(
+      testEmailConsoleErrors.filter(
+        (entry) => !entry.includes("status of 400 (Bad Request)"),
+      ),
+    ).toEqual([]);
+    consoleErrors.length = consoleErrorsBefore;
+    expect(failedLocalResponses.slice(failedResponsesBefore)).toEqual([
+      "400 /api/util/send_test_email",
+    ]);
+    failedLocalResponses.length = failedResponsesBefore;
+  });
+
+  await test.step("landing page credential options follow the capture toggle", async () => {
+    // Baseline for the show/hide migration. These two blocks are hidden by a
+    // stylesheet rather than by an inline style, which is the case where
+    // jQuery's show() writes an explicit display value instead of clearing it.
+    await page.getByRole("link", { name: "Landing Pages", exact: true }).click();
+    await expect(page).toHaveURL(/\/landing_pages$/);
+
+    await openApplicationModal(page, "New Page");
+    await expect(page.locator("#capture_passwords")).toBeHidden();
+    await expect(page.locator("#redirect_url")).toBeHidden();
+
+    await page.locator('label[for="capture_credentials_checkbox"]').click();
+    expect(await page.locator("#capture_credentials_checkbox").isChecked()).toBe(true);
+    await expect(page.locator("#capture_passwords")).toBeVisible();
+    await expect(page.locator("#redirect_url")).toBeVisible();
+
+    await page.locator('label[for="capture_credentials_checkbox"]').click();
+    expect(await page.locator("#capture_credentials_checkbox").isChecked()).toBe(false);
+    await expect(page.locator("#capture_passwords")).toBeHidden();
+    await expect(page.locator("#redirect_url")).toBeHidden();
+
+    await closeApplicationModal(page);
+
+    // Reopening starts from the same state, with every checkbox cleared.
+    await openApplicationModal(page, "New Page");
+    expect(await page.locator("#capture_credentials_checkbox").isChecked()).toBe(false);
+    expect(await page.locator("#capture_passwords_checkbox").isChecked()).toBe(false);
+    await expect(page.locator("#capture_passwords")).toBeHidden();
+    await expect(page.locator("#redirect_url")).toBeHidden();
+    expect(await page.locator("#name").inputValue()).toBe("");
+    await closeApplicationModal(page);
+
+    // A page saved with credential capture reopens with the options showing.
+    await page
+      .locator("#pagesTable tbody tr")
+      .filter({ hasText: "Browser Fixture Landing Page" })
+      .locator('button[onclick^="edit("]')
+      .click();
+    await expect(page.locator("#modal")).toBeVisible();
+    await expect
+      .poll(() => page.locator("#name").inputValue())
+      .toBe("Browser Fixture Landing Page");
+    expect(await page.locator("#capture_credentials_checkbox").isChecked()).toBe(true);
+    await expect(page.locator("#capture_passwords")).toBeVisible();
+    await expect(page.locator("#redirect_url")).toBeVisible();
+    await closeApplicationModal(page);
+  });
+
   await test.step("template editor round-trips full-document source HTML", async () => {
     await page.getByRole("link", { name: "Email Templates" }).click();
     await expect(page).toHaveURL(/\/templates$/);

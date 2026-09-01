@@ -1,3 +1,28 @@
+// The previous selector escaped the dot in this id, which defeats jQuery's
+// getElementById fast path, so it matched every element carrying the id rather
+// than the first.
+function clearModalFlashes() {
+    document.querySelectorAll('[id="modal.flashes"]').forEach(function (container) {
+        container.replaceChildren()
+    })
+}
+
+// submitHandler holds the listener currently bound to the modal's submit
+// button, which is reused for every record.
+var submitHandler = null
+
+function bindModalSubmit(handler) {
+    // More than one element can carry the id "modalSubmit", one per modal. The
+    // previous selector took jQuery's getElementById fast path and so bound
+    // only the first, which is the page modal's own button.
+    var submit = document.getElementById("modalSubmit")
+    if (submitHandler) {
+        submit.removeEventListener("click", submitHandler)
+    }
+    submitHandler = handler
+    submit.addEventListener("click", submitHandler)
+}
+
 var templates = []
 var htmlEditor
 // attachmentsTable holds the DataTables instance backing the modal's attachment
@@ -23,12 +48,12 @@ function save(idx) {
     var template = {
         attachments: []
     }
-    template.name = $("#name").val()
-    template.subject = $("#subject").val()
-    template.envelope_sender = $("#envelope-sender").val()
+    template.name = document.getElementById("name").value
+    template.subject = document.getElementById("subject").value
+    template.envelope_sender = document.getElementById("envelope-sender").value
     template.html = htmlEditor.getData()
     // If the "Add Tracker Image" checkbox is checked, add the tracker
-    if ($("#use_tracker_checkbox").prop("checked")) {
+    if (document.getElementById("use_tracker_checkbox").checked) {
         if (template.html.indexOf("{{.Tracker}}") == -1 &&
             template.html.indexOf("{{.TrackingUrl}}") == -1) {
             template.html = template.html.replace("</body>", "{{.Tracker}}</body>")
@@ -37,7 +62,7 @@ function save(idx) {
         // Otherwise, remove the tracker
         template.html = template.html.replace("{{.Tracker}}</body>", "</body>")
     }
-    template.text = $("#text_editor").val()
+    template.text = document.getElementById("text_editor").value
     // Add the attachments
     attachmentsTable.rows().data().toArray().forEach(function (target) {
         template.attachments.push({
@@ -73,14 +98,14 @@ function save(idx) {
 }
 
 function dismiss() {
-    $("#modal\\.flashes").empty()
+    clearModalFlashes()
     if (attachmentsTable) {
         attachmentsTable.clear().draw()
     }
-    $("#name").val("")
-    $("#subject").val("")
-    $("#text_editor").val("")
-    $("#html_editor").val("")
+    document.getElementById("name").value = ""
+    document.getElementById("subject").value = ""
+    document.getElementById("text_editor").value = ""
+    document.getElementById("html_editor").value = ""
     if (htmlEditor) {
         htmlEditor.setData("")
         htmlEditor.showSource()
@@ -118,8 +143,14 @@ var deleteTemplate = function (idx) {
                 'success'
             );
         }
-        $('button:contains("OK")').on('click', function () {
-            location.reload()
+        // Every button whose label contains "OK", which is what the previous
+        // selector matched.
+        document.querySelectorAll("button").forEach(function (button) {
+            if (button.textContent.includes("OK")) {
+                button.addEventListener('click', function () {
+                    location.reload()
+                })
+            }
         })
     })
 }
@@ -163,7 +194,7 @@ function attach(files) {
     if (!attachmentsTable) {
         createAttachmentsTable()
     }
-    $.each(files, function (i, file) {
+    Array.prototype.forEach.call(files, function (file) {
         var reader = new FileReader();
         /* Make this a datatable */
         reader.onload = function (e) {
@@ -185,28 +216,26 @@ function attach(files) {
 }
 
 function edit(idx) {
-    $("#modalSubmit").unbind('click').click(function () {
+    bindModalSubmit(function () {
         save(idx)
     })
-    $("#attachmentUpload").unbind('click').click(function () {
-        this.value = null
-    })
+    bindAttachmentUploadReset()
     htmlEditor = GophishHTMLEditor.create("html_editor")
-    $("#attachmentsTable").show()
+    document.getElementById("attachmentsTable").style.display = ""
     createAttachmentsTable()
     var template = {
         attachments: []
     }
     if (idx != -1) {
-        $("#templateModalLabel").text("Edit Template")
+        document.getElementById("templateModalLabel").textContent = "Edit Template"
         template = templates[idx]
-        $("#name").val(template.name)
-        $("#subject").val(template.subject)
-        $("#envelope-sender").val(template.envelope_sender)
+        document.getElementById("name").value = template.name
+        document.getElementById("subject").value = template.subject
+        document.getElementById("envelope-sender").value = template.envelope_sender
         htmlEditor.setData(template.html)
-        $("#text_editor").val(template.text)
+        document.getElementById("text_editor").value = template.text
         attachmentRows = []
-        $.each(template.attachments, function (i, file) {
+        template.attachments.forEach(function (file) {
             var icon = icons[file.type] || "fa-file-o"
             // Add the record to the modal
             attachmentRows.push([
@@ -219,39 +248,37 @@ function edit(idx) {
         })
         attachmentsTable.rows.add(attachmentRows).draw()
         if (template.html.indexOf("{{.Tracker}}") != -1) {
-            $("#use_tracker_checkbox").prop("checked", true)
+            document.getElementById("use_tracker_checkbox").checked = true
         } else {
-            $("#use_tracker_checkbox").prop("checked", false)
+            document.getElementById("use_tracker_checkbox").checked = false
         }
 
     } else {
-        $("#templateModalLabel").text("New Template")
+        document.getElementById("templateModalLabel").textContent = "New Template"
         htmlEditor.setData("")
     }
     htmlEditor.showSource()
 }
 
 function copy(idx) {
-    $("#modalSubmit").unbind('click').click(function () {
+    bindModalSubmit(function () {
         save(-1)
     })
-    $("#attachmentUpload").unbind('click').click(function () {
-        this.value = null
-    })
+    bindAttachmentUploadReset()
     htmlEditor = GophishHTMLEditor.create("html_editor")
-    $("#attachmentsTable").show()
+    document.getElementById("attachmentsTable").style.display = ""
     createAttachmentsTable()
     var template = {
         attachments: []
     }
     template = templates[idx]
-    $("#name").val("Copy of " + template.name)
-    $("#subject").val(template.subject)
-    $("#envelope-sender").val(template.envelope_sender)
+    document.getElementById("name").value = "Copy of " + template.name
+    document.getElementById("subject").value = template.subject
+    document.getElementById("envelope-sender").value = template.envelope_sender
     htmlEditor.setData(template.html)
     htmlEditor.showSource()
-    $("#text_editor").val(template.text)
-    $.each(template.attachments, function (i, file) {
+    document.getElementById("text_editor").value = template.text
+    template.attachments.forEach(function (file) {
         var icon = icons[file.type] || "fa-file-o"
         // Add the record to the modal
         attachmentsTable.row.add([
@@ -263,15 +290,15 @@ function copy(idx) {
         ]).draw()
     })
     if (template.html.indexOf("{{.Tracker}}") != -1) {
-        $("#use_tracker_checkbox").prop("checked", true)
+        document.getElementById("use_tracker_checkbox").checked = true
     } else {
-        $("#use_tracker_checkbox").prop("checked", false)
+        document.getElementById("use_tracker_checkbox").checked = false
     }
 }
 
 function importEmail() {
-    raw = $("#email_content").val()
-    convert_links = $("#convert_links_checkbox").prop("checked")
+    raw = document.getElementById("email_content").value
+    convert_links = document.getElementById("convert_links_checkbox").checked
     if (!raw) {
         modalError("No Content Specified!")
     } else {
@@ -280,13 +307,13 @@ function importEmail() {
                 convert_links: convert_links
             })
             .done(function (data) {
-                $("#text_editor").val(data.text)
+                document.getElementById("text_editor").value = data.text
                 htmlEditor.setData(data.html)
-                $("#subject").val(data.subject)
+                document.getElementById("subject").value = data.subject
                 // If the HTML is provided, let's open that view in the editor
                 if (data.html) {
                     htmlEditor.showPreview()
-                    $('.nav-tabs a[href="#html"]').click()
+                    document.querySelector('.nav-tabs a[href="#html"]').click()
                 }
                 bsModalHide("#importEmailModal")
             })
@@ -297,15 +324,15 @@ function importEmail() {
 }
 
 function load() {
-    $("#templateTable").hide()
-    $("#emptyMessage").hide()
-    $("#loading").show()
+    document.getElementById("templateTable").style.display = "none"
+    document.getElementById("emptyMessage").style.display = "none"
+    document.getElementById("loading").style.display = ""
     api.templates.get()
         .done(function (ts) {
             templates = ts
-            $("#loading").hide()
+            document.getElementById("loading").style.display = "none"
             if (templates.length > 0) {
-                $("#templateTable").show()
+                document.getElementById("templateTable").style.display = ""
                 templateTable = new DataTable("#templateTable", {
                     destroy: true,
                     columnDefs: [{
@@ -315,7 +342,7 @@ function load() {
                 });
                 templateTable.clear()
                 templateRows = []
-                $.each(templates, function (i, template) {
+                templates.forEach(function (template, i) {
                     templateRows.push([
                         escapeHtml(template.name),
                         moment(template.modified_date).format('MMMM Do YYYY, h:mm:ss a'),
@@ -333,22 +360,40 @@ function load() {
                 templateTable.rows.add(templateRows).draw()
                 bsInitTooltips()
             } else {
-                $("#emptyMessage").show()
+                document.getElementById("emptyMessage").style.display = ""
             }
         })
         .fail(function () {
-            $("#loading").hide()
+            document.getElementById("loading").style.display = "none"
             errorFlash("Error fetching templates")
         })
 }
 
-$(document).ready(function () {
+// bindAttachmentUploadReset clears the file input before each new selection,
+// so choosing the same file twice still fires a change event. It is bound once
+// rather than rebound on every modal open.
+var attachmentUploadResetBound = false
+
+function bindAttachmentUploadReset() {
+    if (attachmentUploadResetBound) {
+        return
+    }
+    attachmentUploadResetBound = true
+    document.getElementById("attachmentUpload").addEventListener("click", function () {
+        this.value = null
+    })
+}
+
+// The application scripts are plain classic scripts at the end of <body>, so
+// the document is still parsing when they run and DOMContentLoaded has not
+// fired yet.
+document.addEventListener('DOMContentLoaded', function () {
     // Modal dismiss handlers (native Bootstrap 5 events, no jQuery bridge)
     document.getElementById('modal').addEventListener('hidden.bs.modal', function (event) {
         dismiss()
     });
     document.getElementById('importEmailModal').addEventListener('hidden.bs.modal', function (event) {
-        $("#email_content").val("")
+        document.getElementById("email_content").value = ""
     })
     // Handle Deletion. Bound once here rather than rebound every time the modal
     // opens, and the row is resolved from the clicked icon with a native DOM

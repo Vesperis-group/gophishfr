@@ -1,3 +1,28 @@
+// The previous selector escaped the dot in this id, which defeats jQuery's
+// getElementById fast path, so it matched every element carrying the id rather
+// than the first.
+function clearModalFlashes() {
+    document.querySelectorAll('[id="modal.flashes"]').forEach(function (container) {
+        container.replaceChildren()
+    })
+}
+
+// submitHandler holds the listener currently bound to the modal's submit
+// button, which is reused for every record.
+var submitHandler = null
+
+function bindModalSubmit(handler) {
+    // More than one element can carry the id "modalSubmit", one per modal. The
+    // previous selector took jQuery's getElementById fast path and so bound
+    // only the first, which is the page modal's own button.
+    var submit = document.getElementById("modalSubmit")
+    if (submitHandler) {
+        submit.removeEventListener("click", submitHandler)
+    }
+    submitHandler = handler
+    submit.addEventListener("click", submitHandler)
+}
+
 var profiles = []
 
 // headers holds the DataTables instance backing the modal's custom-header list.
@@ -17,33 +42,31 @@ function sendTestEmail() {
     })
     var test_email_request = {
         template: {},
-        first_name: $("input[name=to_first_name]").val(),
-        last_name: $("input[name=to_last_name]").val(),
-        email: $("input[name=to_email]").val(),
-        position: $("input[name=to_position]").val(),
+        first_name: document.querySelector("input[name=to_first_name]").value,
+        last_name: document.querySelector("input[name=to_last_name]").value,
+        email: document.querySelector("input[name=to_email]").value,
+        position: document.querySelector("input[name=to_position]").value,
         url: '',
         smtp: {
-            from_address: $("#from").val(),
-            host: $("#host").val(),
-            username: $("#username").val(),
-            password: $("#password").val(),
-            ignore_cert_errors: $("#ignore_cert_errors").prop("checked"),
+            from_address: document.getElementById("from").value,
+            host: document.getElementById("host").value,
+            username: document.getElementById("username").value,
+            password: document.getElementById("password").value,
+            ignore_cert_errors: document.getElementById("ignore_cert_errors").checked,
             headers: headerRecords,
         }
     }
-    btnHtml = $("#sendTestModalSubmit").html()
-    $("#sendTestModalSubmit").html('<i class="fa fa-spinner fa-spin"></i> Sending')
+    btnHtml = document.getElementById("sendTestModalSubmit").innerHTML
+    document.getElementById("sendTestModalSubmit").innerHTML = '<i class="fa fa-spinner fa-spin"></i> Sending'
     // Send the test email
     api.send_test_email(test_email_request)
         .done(function (data) {
-            $("#sendTestEmailModal\\.flashes").empty().append("<div style=\"text-align:center\" class=\"alert alert-success\">\
-	    <i class=\"fa fa-check-circle\"></i> Email Sent!</div>")
-            $("#sendTestModalSubmit").html(btnHtml)
+            showTestEmailFlash("alert-success", "fa-check-circle", "Email Sent!")
+            document.getElementById("sendTestModalSubmit").innerHTML = btnHtml
         })
         .fail(function (data) {
-            $("#sendTestEmailModal\\.flashes").empty().append("<div style=\"text-align:center\" class=\"alert alert-danger\">\
-	    <i class=\"fa fa-exclamation-circle\"></i> " + escapeHtml(data.responseJSON.message) + "</div>")
-            $("#sendTestModalSubmit").html(btnHtml)
+            showTestEmailFlash("alert-danger", "fa-exclamation-circle", data.responseJSON.message)
+            document.getElementById("sendTestModalSubmit").innerHTML = btnHtml
         })
 }
 
@@ -58,13 +81,13 @@ function save(idx) {
             value: unescapeHtml(header[1]),
         })
     })
-    profile.name = $("#name").val()
-    profile.interface_type = $("#interface_type").val()
-    profile.from_address = $("#from").val()
-    profile.host = $("#host").val()
-    profile.username = $("#username").val()
-    profile.password = $("#password").val()
-    profile.ignore_cert_errors = $("#ignore_cert_errors").prop("checked")
+    profile.name = document.getElementById("name").value
+    profile.interface_type = document.getElementById("interface_type").value
+    profile.from_address = document.getElementById("from").value
+    profile.host = document.getElementById("host").value
+    profile.username = document.getElementById("username").value
+    profile.password = document.getElementById("password").value
+    profile.ignore_cert_errors = document.getElementById("ignore_cert_errors").checked
     if (idx != -1) {
         profile.id = profiles[idx].id
         api.SMTPId.put(profile)
@@ -91,14 +114,14 @@ function save(idx) {
 }
 
 function dismiss() {
-    $("#modal\\.flashes").empty()
-    $("#name").val("")
-    $("#interface_type").val("SMTP")
-    $("#from").val("")
-    $("#host").val("")
-    $("#username").val("")
-    $("#password").val("")
-    $("#ignore_cert_errors").prop("checked", true)
+    clearModalFlashes()
+    document.getElementById("name").value = ""
+    document.getElementById("interface_type").value = "SMTP"
+    document.getElementById("from").value = ""
+    document.getElementById("host").value = ""
+    document.getElementById("username").value = ""
+    document.getElementById("password").value = ""
+    document.getElementById("ignore_cert_errors").checked = true
     if (headers) {
         headers.clear().draw()
     }
@@ -106,8 +129,10 @@ function dismiss() {
 }
 
 var dismissSendTestEmailModal = function () {
-    $("#sendTestEmailModal\\.flashes").empty()
-    $("#sendTestModalSubmit").html("<i class='fa fa-envelope'></i> Send")
+    document.querySelectorAll('[id="sendTestEmailModal.flashes"]').forEach(function (container) {
+        container.replaceChildren()
+    })
+    document.getElementById("sendTestModalSubmit").innerHTML = "<i class='fa fa-envelope'></i> Send"
 }
 
 
@@ -141,8 +166,14 @@ var deleteProfile = function (idx) {
                 'success'
             );
         }
-        $('button:contains("OK")').on('click', function () {
-            location.reload()
+        // Every button whose label contains "OK", which is what the previous
+        // selector matched.
+        document.querySelectorAll("button").forEach(function (button) {
+            if (button.textContent.includes("OK")) {
+                button.addEventListener('click', function () {
+                    location.reload()
+                })
+            }
         })
     })
 }
@@ -156,53 +187,53 @@ function edit(idx) {
         }]
     })
 
-    $("#modalSubmit").unbind('click').click(function () {
+    bindModalSubmit(function () {
         save(idx)
     })
     var profile = {}
     if (idx != -1) {
-        $("#profileModalLabel").text("Edit Sending Profile")
+        document.getElementById("profileModalLabel").textContent = "Edit Sending Profile"
         profile = profiles[idx]
-        $("#name").val(profile.name)
-        $("#interface_type").val(profile.interface_type)
-        $("#from").val(profile.from_address)
-        $("#host").val(profile.host)
-        $("#username").val(profile.username)
-        $("#password").val(profile.password)
-        $("#ignore_cert_errors").prop("checked", profile.ignore_cert_errors)
-        $.each(profile.headers, function (i, record) {
+        applyProfileFields(profile, profile.name)
+        profile.headers.forEach(function (record) {
             addCustomHeader(record.key, record.value)
         });
     } else {
-        $("#profileModalLabel").text("New Sending Profile")
+        document.getElementById("profileModalLabel").textContent = "New Sending Profile"
     }
 }
 
 function copy(idx) {
-    $("#modalSubmit").unbind('click').click(function () {
+    bindModalSubmit(function () {
         save(-1)
     })
     var profile = {}
     profile = profiles[idx]
-    $("#name").val("Copy of " + profile.name)
-    $("#interface_type").val(profile.interface_type)
-    $("#from").val(profile.from_address)
-    $("#host").val(profile.host)
-    $("#username").val(profile.username)
-    $("#password").val(profile.password)
-    $("#ignore_cert_errors").prop("checked", profile.ignore_cert_errors)
+    applyProfileFields(profile, "Copy of " + profile.name)
+}
+
+// applyProfileFields writes a stored profile into the modal. The name is
+// passed separately because copying prefixes it.
+function applyProfileFields(profile, name) {
+    document.getElementById("name").value = name
+    document.getElementById("interface_type").value = profile.interface_type
+    document.getElementById("from").value = profile.from_address
+    document.getElementById("host").value = profile.host
+    document.getElementById("username").value = profile.username
+    document.getElementById("password").value = profile.password
+    document.getElementById("ignore_cert_errors").checked = profile.ignore_cert_errors
 }
 
 function load() {
-    $("#profileTable").hide()
-    $("#emptyMessage").hide()
-    $("#loading").show()
+    document.getElementById("profileTable").style.display = "none"
+    document.getElementById("emptyMessage").style.display = "none"
+    document.getElementById("loading").style.display = ""
     api.SMTP.get()
         .done(function (ss) {
             profiles = ss
-            $("#loading").hide()
+            document.getElementById("loading").style.display = "none"
             if (profiles.length > 0) {
-                $("#profileTable").show()
+                document.getElementById("profileTable").style.display = ""
                 profileTable = new DataTable("#profileTable", {
                     destroy: true,
                     columnDefs: [{
@@ -212,7 +243,7 @@ function load() {
                 });
                 profileTable.clear()
                 profileRows = []
-                $.each(profiles, function (i, profile) {
+                profiles.forEach(function (profile, i) {
                     profileRows.push([
                         escapeHtml(profile.name),
                         profile.interface_type,
@@ -231,11 +262,11 @@ function load() {
                 profileTable.rows.add(profileRows).draw()
                 bsInitTooltips()
             } else {
-                $("#emptyMessage").show()
+                document.getElementById("emptyMessage").style.display = ""
             }
         })
         .fail(function () {
-            $("#loading").hide()
+            document.getElementById("loading").style.display = "none"
             errorFlash("Error fetching profiles")
         })
 }
@@ -268,7 +299,24 @@ function addCustomHeader(header, value) {
     headersTable.draw();
 }
 
-$(document).ready(function () {
+// showTestEmailFlash renders the test-email result. The message is inserted as
+// text, matching the page-level flash helpers.
+function showTestEmailFlash(variantClass, iconClass, message) {
+    var alert = document.createElement("div")
+    alert.style.textAlign = "center"
+    alert.className = "alert " + variantClass
+    var icon = document.createElement("i")
+    icon.className = "fa " + iconClass
+    alert.append(icon, " " + message)
+    document.querySelectorAll('[id="sendTestEmailModal.flashes"]').forEach(function (container) {
+        container.replaceChildren(alert.cloneNode(true))
+    })
+}
+
+// The application scripts are plain classic scripts at the end of <body>, so
+// the document is still parsing when they run and DOMContentLoaded has not
+// fired yet.
+document.addEventListener('DOMContentLoaded', function () {
     // Modal dismiss handlers (native Bootstrap 5 events, no jQuery bridge)
     document.getElementById('modal').addEventListener('hidden.bs.modal', function (event) {
         dismiss()
@@ -277,19 +325,22 @@ $(document).ready(function () {
         dismissSendTestEmailModal()
     })
     // Code to deal with custom email headers
-    $("#addCustomHeader").on('click', function () {
-        headerKey = $("#headerKey").val();
-        headerValue = $("#headerValue").val();
+    document.getElementById("addCustomHeader").addEventListener('click', function (event) {
+        // The previous handler returned false, which cancelled the default
+        // action as well as further propagation.
+        event.preventDefault();
+        event.stopPropagation();
+        headerKey = document.getElementById("headerKey").value;
+        headerValue = document.getElementById("headerValue").value;
 
         if (headerKey == "" || headerValue == "") {
-            return false;
+            return;
         }
         addCustomHeader(headerKey, headerValue);
         // Reset user input.
-        $("#headerKey").val('');
-        $("#headerValue").val('');
-        $("#headerKey").focus();
-        return false;
+        document.getElementById("headerKey").value = '';
+        document.getElementById("headerValue").value = '';
+        document.getElementById("headerKey").focus();
     });
     // Handle Deletion. The row is resolved from the clicked icon with a native
     // DOM lookup, because the table's row selector no longer goes through

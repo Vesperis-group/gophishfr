@@ -1,5 +1,14 @@
 var groups = []
 
+// The previous selector escaped the dot in this id, which defeats jQuery's
+// getElementById fast path, so it matched every element carrying the id rather
+// than the first.
+function clearModalFlashes() {
+    document.querySelectorAll('[id="modal.flashes"]').forEach(function (container) {
+        container.replaceChildren()
+    })
+}
+
 // targets holds the DataTables instance backing the modal's target list. It is
 // recreated every time the modal opens, which is what the destroy option did
 // before and is what resets the table's ordering and search between edits.
@@ -19,7 +28,7 @@ function save(id) {
         })
     })
     var group = {
-        name: $("#name").val(),
+        name: document.getElementById("name").value,
         targets: targetRecords
     }
     // Submit the group
@@ -57,8 +66,8 @@ function dismiss() {
     if (targets) {
         targets.clear().draw()
     }
-    $("#name").val("")
-    $("#modal\\.flashes").empty()
+    document.getElementById("name").value = ""
+    clearModalFlashes()
 }
 
 function edit(id) {
@@ -69,19 +78,19 @@ function edit(id) {
             targets: "no-sort"
         }]
     })
-    $("#modalSubmit").unbind('click').click(function () {
+    bindModalSubmit(function () {
         save(id)
     })
     if (id == -1) {
-        $("#groupModalLabel").text("New Group");
+        document.getElementById("groupModalLabel").textContent = "New Group";
         var group = {}
     } else {
-        $("#groupModalLabel").text("Edit Group");
+        document.getElementById("groupModalLabel").textContent = "Edit Group";
         api.groupId.get(id)
             .done(function (group) {
-                $("#name").val(group.name)
+                document.getElementById("name").value = group.name
                 targetRows = []
-                $.each(group.targets, function (i, record) {
+                group.targets.forEach(function (record) {
                   targetRows.push([
                       escapeHtml(record.first_name),
                       escapeHtml(record.last_name),
@@ -140,7 +149,7 @@ function addImportedTargets(records) {
 
 function importCSVFiles(input) {
     var files = Array.prototype.slice.call(input.files)
-    $("#modal\\.flashes").empty()
+    clearModalFlashes()
 
     if (files.length === 0) {
         return
@@ -223,8 +232,14 @@ var deleteGroup = function (id) {
                 'success'
             );
         }
-        $('button:contains("OK")').on('click', function () {
-            location.reload()
+        // Every button whose label contains "OK", which is what the previous
+        // selector matched.
+        document.querySelectorAll("button").forEach(function (button) {
+            if (button.textContent.includes("OK")) {
+                button.addEventListener('click', function () {
+                    location.reload()
+                })
+            }
         })
     })
 }
@@ -261,16 +276,16 @@ function addTarget(firstNameInput, lastNameInput, emailInput, positionInput) {
 }
 
 function load() {
-    $("#groupTable").hide()
-    $("#emptyMessage").hide()
-    $("#loading").show()
+    document.getElementById("groupTable").style.display = "none"
+    document.getElementById("emptyMessage").style.display = "none"
+    document.getElementById("loading").style.display = ""
     api.groups.summary()
         .done(function (response) {
-            $("#loading").hide()
+            document.getElementById("loading").style.display = "none"
             if (response.total > 0) {
                 groups = response.groups
-                $("#emptyMessage").hide()
-                $("#groupTable").show()
+                document.getElementById("emptyMessage").style.display = "none"
+                document.getElementById("groupTable").style.display = ""
                 var groupTable = new DataTable("#groupTable", {
                     destroy: true,
                     columnDefs: [{
@@ -280,7 +295,7 @@ function load() {
                 });
                 groupTable.clear();
                 groupRows = []
-                $.each(groups, function (i, group) {
+                groups.forEach(function (group) {
                     groupRows.push([
                         escapeHtml(group.name),
                         escapeHtml(group.num_targets),
@@ -295,7 +310,7 @@ function load() {
                 })
                 groupTable.rows.add(groupRows).draw()
             } else {
-                $("#emptyMessage").show()
+                document.getElementById("emptyMessage").style.display = ""
             }
         })
         .fail(function () {
@@ -303,11 +318,31 @@ function load() {
         })
 }
 
-$(document).ready(function () {
+// submitHandler holds the listener currently bound to the modal's submit
+// button, which is reused for every group.
+var submitHandler = null
+
+function bindModalSubmit(handler) {
+    var submit = document.getElementById("modalSubmit")
+    if (submitHandler) {
+        submit.removeEventListener("click", submitHandler)
+    }
+    submitHandler = handler
+    submit.addEventListener("click", submitHandler)
+}
+
+// The application scripts are plain classic scripts at the end of <body>, so
+// the document is still parsing when they run and DOMContentLoaded has not
+// fired yet.
+document.addEventListener('DOMContentLoaded', function () {
     load()
     // Setup the event listeners
     // Handle manual additions
-    $("#targetForm").submit(function () {
+    document.getElementById("targetForm").addEventListener("submit", function (event) {
+        // The previous handler returned false, which cancelled the browser's
+        // own submission as well as further propagation.
+        event.preventDefault()
+        event.stopPropagation()
         // Validate the form data
         var targetForm = document.getElementById("targetForm")
         if (!targetForm.checkValidity()) {
@@ -315,16 +350,18 @@ $(document).ready(function () {
             return
         }
         addTarget(
-            $("#firstName").val(),
-            $("#lastName").val(),
-            $("#email").val(),
-            $("#position").val());
+            document.getElementById("firstName").value,
+            document.getElementById("lastName").value,
+            document.getElementById("email").value,
+            document.getElementById("position").value);
         targets.draw();
 
-        // Reset user input.
-        $("#targetForm>div>input").val('');
-        $("#firstName").focus();
-        return false;
+        // Reset user input. The previous selector matched every input directly
+        // inside a div child of the form, so the whole set is cleared here too.
+        document.querySelectorAll("#targetForm > div > input").forEach(function (input) {
+            input.value = ''
+        });
+        document.getElementById("firstName").focus();
     });
     // Handle Deletion. The row is resolved from the clicked icon with a native
     // DOM lookup, because the table's row selector no longer goes through
@@ -346,5 +383,5 @@ $(document).ready(function () {
     document.getElementById("csvupload").addEventListener("change", function () {
         importCSVFiles(this)
     })
-    $("#csv-template").click(downloadCSVTemplate)
+    document.getElementById("csv-template").addEventListener("click", downloadCSVTemplate)
 });
