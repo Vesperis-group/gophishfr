@@ -462,7 +462,7 @@ var api = {
     },
     webhooks: {
         get: function() {
-            return query("/webhooks/", "GET", {}, false)
+            return requestJSON("/webhooks/", "GET", {})
         },
         post: function(webhook) {
             return query("/webhooks/", "POST", webhook, false)
@@ -470,7 +470,7 @@ var api = {
     },
     webhookId: {
         get: function(id) {
-            return query("/webhooks/" + id, "GET", {}, false)
+            return requestJSON("/webhooks/" + id, "GET", {})
         },
         put: function(webhook) {
             return requestJSON("/webhooks/" + webhook.id, "PUT", webhook)
