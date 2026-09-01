@@ -184,6 +184,11 @@ async function selectedLabels(page: Page, selectId: string): Promise<string[]> {
 // openGroupDropdown opens the Tom Select control backing the groups field
 // through its own public instance, which is stable regardless of where the
 // campaign modal is in its rebuild cycle.
+//
+// refreshOptions(true) is Tom Select's own "show the dropdown" path. It is used
+// instead of refreshOptions(false) because addItem() re-runs it as
+// refreshOptions(self.isFocused && ...), so after a selection the dropdown's
+// state depends on focus and reopening it is otherwise not deterministic.
 async function openGroupDropdown(page: Page): Promise<void> {
   await page.evaluate(() => {
     const select = document.querySelector("#users") as HTMLSelectElement & {
@@ -193,7 +198,7 @@ async function openGroupDropdown(page: Page): Promise<void> {
       throw new Error("groups Tom Select was not initialized");
     }
     select.tomselect.open();
-    select.tomselect.refreshOptions(false);
+    select.tomselect.refreshOptions(true);
   });
   await expect(page.locator(".ts-dropdown")).toBeVisible();
 }
@@ -630,14 +635,11 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator(".ts-dropdown .option")).toContainText(
       "Browser Fixture Group",
     );
-    await page.keyboard.press("Enter");
-    await expect(page.locator(".ts-control .item")).toContainText(
-      "Browser Fixture Group",
-    );
 
-    // The dropdown renders inside the modal without overflowing it.
+    // The dropdown renders inside the modal without overflowing it. Measured
+    // while it still lists options, because selecting the only fixture group
+    // leaves nothing to show and the geometry would be meaningless.
     const modalRect = await page.locator("#modal .modal-content").boundingBox();
-    await openGroupDropdown(page);
     const dropdownRect = await page.locator(".ts-dropdown").boundingBox();
     if (modalRect && dropdownRect) {
       expect(dropdownRect.x).toBeGreaterThanOrEqual(modalRect.x - 5);
@@ -645,6 +647,11 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
         modalRect.x + modalRect.width + 5,
       );
     }
+
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".ts-control .item")).toContainText(
+      "Browser Fixture Group",
+    );
     await page.keyboard.press("Escape");
 
     const urlHelp = page.locator('label[for="url"] [data-bs-toggle="tooltip"]');
