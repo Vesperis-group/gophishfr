@@ -3,16 +3,16 @@ let users = []
 // Save attempts to POST or PUT to /users/
 const save = (id) => {
     // Validate that the passwords match
-    if ($("#password").val() !== $("#confirm_password").val()) {
+    if (document.getElementById("password").value !== document.getElementById("confirm_password").value) {
         modalError("Passwords must match.")
         return
     }
     let user = {
-        username: $("#username").val(),
-        password: $("#password").val(),
-        role: $("#role").val(),
-        password_change_required: $("#force_password_change_checkbox").prop('checked'),
-        account_locked: $("#account_locked_checkbox").prop('checked')
+        username: document.getElementById("username").value,
+        password: document.getElementById("password").value,
+        role: document.getElementById("role").value,
+        password_change_required: document.getElementById("force_password_change_checkbox").checked,
+        account_locked: document.getElementById("account_locked_checkbox").checked
     }
     // Submit the user
     if (id != -1) {
@@ -46,35 +46,55 @@ const save = (id) => {
 }
 
 const dismiss = () => {
-    $("#username").val("")
-    $("#password").val("")
-    $("#confirm_password").val("")
-    $("#role").val("")
-    $("#force_password_change_checkbox").prop('checked', true)
-    $("#account_locked_checkbox").prop('checked', false)
-    $("#modal\\.flashes").empty()
+    document.getElementById("username").value = ""
+    document.getElementById("password").value = ""
+    document.getElementById("confirm_password").value = ""
+    // No option carries an empty value, so this leaves the select with nothing
+    // selected, which is what the previous call did.
+    document.getElementById("role").value = ""
+    document.getElementById("force_password_change_checkbox").checked = true
+    document.getElementById("account_locked_checkbox").checked = false
+    // The previous selector matched every element carrying this id, not just
+    // the first.
+    document.querySelectorAll('[id="modal.flashes"]').forEach((container) => {
+        container.replaceChildren()
+    })
+}
+
+// submitHandler holds the listener currently bound to the modal's submit
+// button. The button is reused for every user, so the previous listener has to
+// be removed or a single click would save more than once.
+let submitHandler = null
+
+const setRole = (slug) => {
+    const role = document.getElementById("role")
+    role.value = slug
+    role.dispatchEvent(new Event("change", { bubbles: true }))
 }
 
 const edit = (id) => {
-    $("#username").attr("disabled", false);
-    $("#modalSubmit").unbind('click').click(() => {
+    document.getElementById("username").disabled = false
+    const submit = document.getElementById("modalSubmit")
+    if (submitHandler) {
+        submit.removeEventListener("click", submitHandler)
+    }
+    submitHandler = () => {
         save(id)
-    })
+    }
+    submit.addEventListener("click", submitHandler)
     if (id == -1) {
-        $("#userModalLabel").text("New User")
-        $("#role").val("user")
-        $("#role").trigger("change")
+        document.getElementById("userModalLabel").textContent = "New User"
+        setRole("user")
     } else {
-        $("#userModalLabel").text("Edit User")
+        document.getElementById("userModalLabel").textContent = "Edit User"
         api.userId.get(id)
             .done((user) => {
-                $("#username").val(user.username)
-                $("#role").val(user.role.slug)
-                $("#role").trigger("change")
-                $("#force_password_change_checkbox").prop('checked', user.password_change_required)
-                $("#account_locked_checkbox").prop('checked', user.account_locked)
+                document.getElementById("username").value = user.username
+                setRole(user.role.slug)
+                document.getElementById("force_password_change_checkbox").checked = user.password_change_required
+                document.getElementById("account_locked_checkbox").checked = user.account_locked
                 if (user.username == "admin") {
-                    $("#username").attr("disabled", true);
+                    document.getElementById("username").disabled = true
                 }
             })
             .fail(function () {
@@ -128,8 +148,14 @@ const deleteUser = (id) => {
                 'success'
             );
         }
-        $('button:contains("OK")').on('click', function () {
-            location.reload()
+        // Every button whose label contains "OK", which is what the previous
+        // selector matched.
+        document.querySelectorAll("button").forEach((button) => {
+            if (button.textContent.includes("OK")) {
+                button.addEventListener('click', function () {
+                    location.reload()
+                })
+            }
         })
     })
 }
@@ -185,13 +211,13 @@ const impersonate = (id) => {
 }
 
 const load = () => {
-    $("#userTable").hide()
-    $("#loading").show()
+    document.getElementById("userTable").style.display = "none"
+    document.getElementById("loading").style.display = ""
     api.users.get()
         .done((us) => {
             users = us
-            $("#loading").hide()
-            $("#userTable").show()
+            document.getElementById("loading").style.display = "none"
+            document.getElementById("userTable").style.display = ""
             let userTable = new DataTable("#userTable", {
                 destroy: true,
                 columnDefs: [{
@@ -201,7 +227,7 @@ const load = () => {
             });
             userTable.clear();
             userRows = []
-            $.each(users, (i, user) => {
+            users.forEach((user) => {
                 lastlogin = ""
                 if (user.last_login != "0001-01-01T00:00:00Z") {
                     lastlogin = moment(user.last_login).format('MMMM Do YYYY, h:mm:ss a')
@@ -229,22 +255,34 @@ const load = () => {
         })
 }
 
-$(document).ready(function () {
+// The application scripts are plain classic scripts at the end of <body>, so
+// the document is still parsing when they run and DOMContentLoaded has not
+// fired yet.
+document.addEventListener('DOMContentLoaded', function () {
     load()
     // Setup the event listeners
     document.getElementById('modal').addEventListener('hide.bs.modal', function () {
         dismiss();
     });
-    $("#new_button").on("click", function () {
+    document.getElementById("new_button").addEventListener("click", function () {
         edit(-1)
     })
-    $("#userTable").on('click', '.edit_button', function (e) {
-        edit($(this).attr('data-user-id'))
-    })
-    $("#userTable").on('click', '.delete_button', function (e) {
-        deleteUser($(this).attr('data-user-id'))
-    })
-    $("#userTable").on('click', '.impersonate_button', function (e) {
-        impersonate($(this).attr('data-user-id'))
+    // Rows are rebuilt whenever the table is redrawn, so these stay delegated
+    // and resolve the clicked button rather than the table.
+    document.getElementById("userTable").addEventListener('click', function (e) {
+        const button = e.target.closest('.edit_button, .delete_button, .impersonate_button')
+        if (!button || !this.contains(button)) {
+            return
+        }
+        const userId = button.getAttribute('data-user-id')
+        if (button.classList.contains('edit_button')) {
+            edit(userId)
+            return
+        }
+        if (button.classList.contains('delete_button')) {
+            deleteUser(userId)
+            return
+        }
+        impersonate(userId)
     })
 });

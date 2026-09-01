@@ -1,19 +1,19 @@
 let webhooks = [];
 
 const dismiss = () => {
-    $("#name").val("");
-    $("#url").val("");
-    $("#secret").val("");
-    $("#is_active").prop("checked", false);
-    $("#flashes").empty();
+    document.getElementById("name").value = "";
+    document.getElementById("url").value = "";
+    document.getElementById("secret").value = "";
+    document.getElementById("is_active").checked = false;
+    document.getElementById("flashes").replaceChildren();
 };
 
 const saveWebhook = (id) => {
     let wh = {
-        name: $("#name").val(),
-        url: $("#url").val(),
-        secret: $("#secret").val(),
-        is_active: $("#is_active").is(":checked"),
+        name: document.getElementById("name").value,
+        url: document.getElementById("url").value,
+        secret: document.getElementById("secret").value,
+        is_active: document.getElementById("is_active").checked,
     };
     if (id != -1) {
         wh.id = parseInt(id);
@@ -42,13 +42,13 @@ const saveWebhook = (id) => {
 };
 
 const load = () => {
-    $("#webhookTable").hide();
-    $("#loading").show();
+    document.getElementById("webhookTable").style.display = "none";
+    document.getElementById("loading").style.display = "";
     api.webhooks.get()
         .done((whs) => {
             webhooks = whs;
-            $("#loading").hide()
-            $("#webhookTable").show()
+            document.getElementById("loading").style.display = "none"
+            document.getElementById("webhookTable").style.display = ""
             let webhookTable = new DataTable("#webhookTable", {
                 destroy: true,
                 columnDefs: [{
@@ -57,7 +57,7 @@ const load = () => {
                 }]
             });
             webhookTable.clear();
-            $.each(webhooks, (i, webhook) => {
+            webhooks.forEach((webhook) => {
                 webhookTable.row.add([
                     escapeHtml(webhook.name),
                     escapeHtml(webhook.url),
@@ -83,24 +83,34 @@ const load = () => {
         })
 };
 
+// submitHandler holds the listener currently bound to the modal's submit
+// button. The button is reused for every webhook, so the previous listener has
+// to be removed or a single click would save more than once.
+let submitHandler = null;
+
 const editWebhook = (id) => {
-    $("#modalSubmit").unbind("click").click(() => {
+    const submit = document.getElementById("modalSubmit");
+    if (submitHandler) {
+        submit.removeEventListener("click", submitHandler);
+    }
+    submitHandler = () => {
         saveWebhook(id);
-    });
+    };
+    submit.addEventListener("click", submitHandler);
     if (id !== -1) {
-        $("#webhookModalLabel").text("Edit Webhook")
+        document.getElementById("webhookModalLabel").textContent = "Edit Webhook"
         api.webhookId.get(id)
           .done(function(wh) {
-              $("#name").val(wh.name);
-              $("#url").val(wh.url);
-              $("#secret").val(wh.secret);
-              $("#is_active").prop("checked", wh.is_active);
+              document.getElementById("name").value = wh.name;
+              document.getElementById("url").value = wh.url;
+              document.getElementById("secret").value = wh.secret;
+              document.getElementById("is_active").checked = wh.is_active;
           })
           .fail(function () {
               errorFlash("Error fetching webhook")
           });
     } else {
-        $("#webhookModalLabel").text("New Webhook")
+        document.getElementById("webhookModalLabel").textContent = "New Webhook"
     }
 };
 
@@ -141,8 +151,14 @@ const deleteWebhook = (id) => {
                 "success"
             );
         }
-        $("button:contains('OK')").on("click", function() {
-            location.reload();
+        // Every button whose label contains "OK", which is what the previous
+        // selector matched.
+        document.querySelectorAll("button").forEach((button) => {
+            if (button.textContent.includes("OK")) {
+                button.addEventListener("click", function() {
+                    location.reload();
+                })
+            }
         })
     })
 };
@@ -165,21 +181,34 @@ const pingUrl = (btn, whId) => {
         });
 };
 
-$(document).ready(function() {
+// The application scripts are plain classic scripts at the end of <body>, so
+// the document is still parsing when they run and DOMContentLoaded has not
+// fired yet.
+document.addEventListener('DOMContentLoaded', function() {
     load();
     document.getElementById('modal').addEventListener('hide.bs.modal', function() {
         dismiss();
     });
-    $("#new_button").on("click", function() {
+    document.getElementById("new_button").addEventListener("click", function() {
         editWebhook(-1);
     });
-    $("#webhookTable").on("click", ".edit_button", function(e) {
-        editWebhook($(this).attr("data-webhook-id"));
-    });
-    $("#webhookTable").on("click", ".delete_button", function(e) {
-        deleteWebhook($(this).attr("data-webhook-id"));
-    });
-    $("#webhookTable").on("click", ".ping_button", function(e) {
-        pingUrl(e.currentTarget, e.currentTarget.dataset.webhookId);
+    // Rows are rebuilt whenever the table is redrawn, so these stay delegated.
+    // The handler receives the button that was clicked: under the previous
+    // delegation that was what both `this` and `currentTarget` referred to,
+    // whereas a native listener's currentTarget is the table itself.
+    document.getElementById("webhookTable").addEventListener("click", function(e) {
+        const button = e.target.closest(".edit_button, .delete_button, .ping_button");
+        if (!button || !this.contains(button)) {
+            return;
+        }
+        if (button.classList.contains("edit_button")) {
+            editWebhook(button.getAttribute("data-webhook-id"));
+            return;
+        }
+        if (button.classList.contains("delete_button")) {
+            deleteWebhook(button.getAttribute("data-webhook-id"));
+            return;
+        }
+        pingUrl(button, button.dataset.webhookId);
     });
 });

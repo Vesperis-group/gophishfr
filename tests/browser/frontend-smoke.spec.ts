@@ -1,4 +1,11 @@
-import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
+import {
+  expect,
+  test,
+  type Frame,
+  type Locator,
+  type Page,
+  type Request,
+} from "@playwright/test";
 
 const baseURL = requiredEnvironmentVariable("GOPHISHFR_BROWSER_BASE_URL");
 const username = requiredEnvironmentVariable("GOPHISHFR_BROWSER_USERNAME");
@@ -1193,6 +1200,312 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       .toBe(0);
     await expect(page.locator("#pagesTable tbody")).toContainText("No matching records");
     await tableSearchInput(page, "pagesTable").fill("");
+  });
+
+  await test.step("user modal contracts survive repeated opening", async () => {
+    // Baseline for the jQuery removal in users.js. The submit handler is
+    // rebound every time the modal opens, so a migration that stops removing
+    // the previous listener would save twice per click.
+    const userRequests: string[] = [];
+    const captureUser = (request: Request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/users/"
+      ) {
+        userRequests.push(request.postData() ?? "");
+      }
+    };
+    page.on("request", captureUser);
+
+    await page.getByRole("link", { name: "User Management" }).click();
+    await expect(page).toHaveURL(/\/users$/);
+    await expect(page.locator("#userTable")).toContainText(username);
+
+    // Open, close and reopen before submitting once.
+    await openApplicationModal(page, "New User");
+    await closeApplicationModal(page);
+    await openApplicationModal(page, "New User");
+
+    // Defaults the modal must present.
+    expect(await page.locator("#role").inputValue()).toBe("user");
+    expect(
+      await page.locator("#force_password_change_checkbox").isChecked(),
+    ).toBe(true);
+    expect(await page.locator("#account_locked_checkbox").isChecked()).toBe(false);
+    expect(await page.locator("#username").isDisabled()).toBe(false);
+
+    // Mismatched passwords are rejected in the browser, before any request.
+    const newUsername = `browser_user_${Date.now()}`;
+    await page.locator("#username").fill(newUsername);
+    await page.locator("#password").fill("SyntheticFixture#1");
+    await page.locator("#confirm_password").fill("SomethingElse#2");
+    await page.locator("#modal #modalSubmit").click();
+    await expect(page.locator('[id="modal.flashes"]')).toContainText(
+      "Passwords must match.",
+    );
+    expect(userRequests).toHaveLength(0);
+
+    // One click must produce exactly one request even though the modal was
+    // opened twice.
+    await page.locator("#confirm_password").fill("SyntheticFixture#1");
+    await page.locator("#modal #modalSubmit").click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+    await expect.poll(() => userRequests.length).toBe(1);
+    const created = JSON.parse(userRequests[0]) as {
+      username: string;
+      role: string;
+      password_change_required: boolean;
+      account_locked: boolean;
+    };
+    expect(created.username).toBe(newUsername);
+    expect(created.role).toBe("user");
+    expect(created.password_change_required).toBe(true);
+    expect(created.account_locked).toBe(false);
+
+    // The row's edit control is bound by delegation, so it works on a row that
+    // did not exist when the page loaded.
+    await expect(page.locator("#userTable")).toContainText(newUsername);
+    await page
+      .locator("#userTable tbody tr")
+      .filter({ hasText: newUsername })
+      .locator("button.edit_button")
+      .click();
+    await expect(page.locator("#modal")).toBeVisible();
+    await expect.poll(() => page.locator("#username").inputValue()).toBe(newUsername);
+    await closeApplicationModal(page);
+    page.off("request", captureUser);
+  });
+
+  await test.step("webhook row controls act on the row that was clicked", async () => {
+    // Baseline for the jQuery removal in webhooks.js. The ping handler receives
+    // the button through the event, which under delegation is the matched
+    // element rather than the table. A migration that passes the container
+    // instead would silently disable nothing.
+    const webhookRequests: string[] = [];
+    const captureWebhook = (request: Request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/webhooks/"
+      ) {
+        webhookRequests.push(request.postData() ?? "");
+      }
+    };
+    page.on("request", captureWebhook);
+
+    await page.getByRole("link", { name: "Webhooks" }).click();
+    await expect(page).toHaveURL(/\/webhooks$/);
+
+    const webhookName = `browser_webhook_${Date.now()}`;
+    await openApplicationModal(page, "New Webhook");
+    await page.locator("#name").fill(webhookName);
+    // Unroutable on purpose: the ping below must fail fast and never leave the
+    // machine.
+    await page.locator("#url").fill("http://127.0.0.1:1/hook");
+    await page.locator("#secret").fill("synthetic-secret");
+    // The checkbox itself is visually replaced by its label, so the label is
+    // what a user actually clicks.
+    await page.locator('label[for="is_active"]').click();
+    expect(await page.locator("#is_active").isChecked()).toBe(true);
+    await page.locator("#modal #modalSubmit").click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+
+    await expect.poll(() => webhookRequests.length).toBe(1);
+    const webhook = JSON.parse(webhookRequests[0]) as {
+      name: string;
+      url: string;
+      secret: string;
+      is_active: boolean;
+    };
+    expect(webhook.name).toBe(webhookName);
+    expect(webhook.url).toBe("http://127.0.0.1:1/hook");
+    expect(webhook.secret).toBe("synthetic-secret");
+    expect(webhook.is_active).toBe(true);
+
+    await expect(page.locator("#webhookTable")).toContainText(webhookName);
+    const row = page
+      .locator("#webhookTable tbody tr")
+      .filter({ hasText: webhookName });
+
+    // The ping result is stubbed so the assertion is about the button the
+    // handler received, not about reaching an unroutable host.
+    await page.route("**/api/webhooks/*/validate", async (route) => {
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ name: webhookName }),
+      });
+    });
+    await row.locator("button.ping_button").click();
+    await expect(page.locator('[id="flashes"]').first()).toContainText(
+      "webhook succeeded",
+    );
+    // The table itself must never have been treated as the button.
+    expect(
+      await page.evaluate(
+        () =>
+          (document.getElementById("webhookTable") as HTMLElement & {
+            disabled?: unknown;
+          }).disabled,
+      ),
+    ).toBeUndefined();
+    await expect(row.locator("button.ping_button")).toBeEnabled();
+
+    // Editing through the delegated control loads that row's values.
+    await row.locator("button.edit_button").click();
+    await expect(page.locator("#modal")).toBeVisible();
+    await expect.poll(() => page.locator("#name").inputValue()).toBe(webhookName);
+    expect(await page.locator("#is_active").isChecked()).toBe(true);
+    await closeApplicationModal(page);
+    await page.unroute("**/api/webhooks/*/validate");
+    page.off("request", captureWebhook);
+  });
+
+  await test.step("settings controls keep their state contracts", async () => {
+    // Baseline for the jQuery removal in settings.js.
+    await Promise.all([
+      // The page's own initialisation fetches the IMAP settings, so waiting for
+      // that response proves the scripts have run and the handlers are bound.
+      // Without it the submit below can reach the browser's native submission.
+      page.waitForResponse(
+        (response) => new URL(response.url()).pathname === "/api/imap/",
+      ),
+      page.getByRole("link", { name: "Account Settings" }).click(),
+    ]);
+    await expect(page).toHaveURL(/\/settings$/);
+
+    // Submitting must not navigate: the handler has to cancel the browser's own
+    // submission and post in the background instead. The response is stubbed so
+    // the assertion is about that, and so the suite's "no failed request"
+    // invariant is not spent on what the server makes of an unchanged form.
+    const settingsBodies: string[] = [];
+    await page.route("**/settings", async (route) => {
+      settingsBodies.push(route.request().postData() ?? "");
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ message: "Settings updated" }),
+      });
+    });
+    const navigations: string[] = [];
+    const recordNavigation = (frame: Frame) => {
+      if (frame === page.mainFrame()) {
+        navigations.push(frame.url());
+      }
+    };
+    page.on("framenavigated", recordNavigation);
+    await page.locator("#settingsForm button[type=submit]").click();
+    await page.waitForTimeout(750);
+    page.off("framenavigated", recordNavigation);
+    expect(navigations).toEqual([]);
+    // The body is still produced by jQuery's serializer, which the follow-up
+    // AJAX change has to reproduce exactly.
+    expect(settingsBodies).toHaveLength(1);
+    expect(settingsBodies[0]).toContain("username=");
+    expect(settingsBodies[0]).toContain("csrf_token=");
+    await page.unroute("**/settings");
+
+    // The map preference lives on the UI tab. Its input is visually replaced by
+    // its label, so the label is what gets clicked.
+    await page.locator('a[href="#uiSettings"]').click();
+    await expect(page.locator("#use_map")).toBeAttached();
+    const before = await page.locator("#use_map").isChecked();
+    await page.locator('label[for="use_map"]').click();
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("gophish.use_map")))
+      .toBe(String(!before));
+    await page.locator('label[for="use_map"]').click();
+    await expect
+      .poll(() => page.evaluate(() => localStorage.getItem("gophish.use_map")))
+      .toBe(String(before));
+
+    // The reporting tab carries the IMAP form and the advanced area.
+    await page.locator("#reporttab").click();
+    await expect(page.locator("#advancedarea")).toBeHidden();
+    await page.locator("#advanced").click();
+    await expect(page.locator("#advancedarea")).toBeVisible();
+    await page.locator("#advanced").click();
+    await expect(page.locator("#advancedarea")).toBeHidden();
+
+    // Validation refuses to call the API without a host, and leaves the inputs
+    // usable.
+    await page.locator("#imaphost").fill("");
+    await page.locator("#validateimap").click();
+    await expect(page.locator('[id="flashes"]').first()).toContainText(
+      "No IMAP Host specified",
+    );
+    expect(await page.locator("#imaphost").isDisabled()).toBe(false);
+
+    // Every control the form locks during a connection test must be locked
+    // while the request is in flight and released afterwards. The whole set is
+    // asserted, not one input, because the list of controls is maintained by
+    // hand: a wrong or missing id would throw part-way through and leave the
+    // form permanently disabled.
+    const imapControls = [
+      "imaphost",
+      "imapport",
+      "imapusername",
+      "imappassword",
+      "use_imap",
+      "use_tls",
+      "ignorecerterrors",
+      "folder",
+      "restrictdomain",
+      "deletecampaign",
+      "lastlogin",
+      "imapfreq",
+      "validateimap",
+    ];
+    const disabledStates = () =>
+      page.evaluate(
+        (ids) =>
+          Object.fromEntries(
+            ids.map((id) => [
+              id,
+              (document.getElementById(id) as HTMLInputElement | null)?.disabled ?? null,
+            ]),
+          ),
+        imapControls,
+      );
+    const allTrue = Object.fromEntries(imapControls.map((id) => [id, true]));
+    const allFalse = Object.fromEntries(imapControls.map((id) => [id, false]));
+
+    // The response is held so the in-flight state can be observed, and stubbed
+    // so no connection is attempted.
+    let releaseValidation: () => void = () => {};
+    const validationHeld = new Promise<void>((resolve) => {
+      releaseValidation = resolve;
+    });
+    await page.route("**/api/imap/validate", async (route) => {
+      await validationHeld;
+      await route.fulfill({
+        status: 200,
+        contentType: "application/json",
+        body: JSON.stringify({ success: true, message: "ok" }),
+      });
+    });
+
+    const originalButtonHtml = await page
+      .locator("#validateimap")
+      .evaluate((button) => button.innerHTML);
+    await page.locator("#imaphost").fill("127.0.0.1");
+    await page.locator("#imapport").fill("993");
+    await page.locator("#validateimap").click();
+    await expect.poll(disabledStates).toEqual(allTrue);
+    await expect(page.locator("#validateimap")).toContainText("Testing...");
+
+    releaseValidation();
+    await expect.poll(disabledStates).toEqual(allFalse);
+    await expect
+      .poll(() => page.locator("#validateimap").evaluate((b) => b.innerHTML))
+      .toBe(originalButtonHtml);
+    await page.unroute("**/api/imap/validate");
+
+    // The success dialog is dismissed so it cannot block later steps.
+    const dialogConfirm = page.locator(".swal2-confirm");
+    if (await dialogConfirm.isVisible()) {
+      await dialogConfirm.click();
+      await expect(page.locator(".swal2-popup")).not.toBeVisible();
+    }
   });
 
   await test.step("template editor round-trips full-document source HTML", async () => {
