@@ -5,6 +5,7 @@ import {
   type Locator,
   type Page,
   type Request,
+  type Response,
 } from "@playwright/test";
 
 const baseURL = requiredEnvironmentVariable("GOPHISHFR_BROWSER_BASE_URL");
@@ -284,7 +285,7 @@ async function openGroupDropdown(page: Page): Promise<void> {
 }
 
 test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
-  test.setTimeout(60_000);
+  test.setTimeout(90_000);
 
   const sandboxServiceWorkerError =
     "Failed to read the 'serviceWorker' property from 'Navigator': Service worker is disabled because the context is sandboxed and lacks the 'allow-same-origin' flag.";
@@ -775,7 +776,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await page.unroute(/\/api\/campaigns\/\d+\/results/);
   });
 
-  await test.step("campaign controls initialize Bootstrap and jQuery plugins", async () => {
+  await test.step("campaign controls initialize Bootstrap and native widgets", async () => {
     await page.getByRole("link", { name: "Campaigns", exact: true }).click();
     await expect(page).toHaveURL(/\/campaigns$/);
 
@@ -902,6 +903,208 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       ),
     ).toBe(true);
     await closeApplicationModal(page);
+  });
+
+  await test.step("campaign setup, copy and empty launch keep their state contracts", async () => {
+    await openApplicationModal(page, "New Campaign");
+    await waitForSelectOption(page, "template", "Browser Fixture Template");
+    await waitForSelectOption(page, "page", "Browser Fixture Landing Page");
+    await waitForSelectOption(page, "profile", "Browser Fixture Sending Profile");
+    await waitForSelectOption(page, "users", "Browser Fixture Group");
+
+    const optionState = () =>
+      page.evaluate(() => {
+        const groups = document.querySelector("#users") as HTMLSelectElement & {
+          tomselect?: { options: Record<string, unknown> };
+        };
+        return {
+          groups: Object.keys(groups.tomselect?.options ?? {}).sort(),
+          groupWrappers: document.querySelectorAll("#users + .ts-wrapper").length,
+          pages: Array.from(
+            (document.querySelector("#page") as HTMLSelectElement).options,
+          ).map((option) => [option.value, option.text]),
+          profiles: Array.from(
+            (document.querySelector("#profile") as HTMLSelectElement).options,
+          ).map((option) => [option.value, option.text]),
+          templates: Array.from(
+            (document.querySelector("#template") as HTMLSelectElement).options,
+          ).map((option) => [option.value, option.text]),
+        };
+      });
+
+    const beforeRepeatedSetup = await optionState();
+    let repeatedGroupResponses = 0;
+    const countRepeatedGroupResponse = (response: Response) => {
+      if (new URL(response.url()).pathname === "/api/groups/summary") {
+        repeatedGroupResponses += 1;
+      }
+    };
+    page.on("response", countRepeatedGroupResponse);
+    await page.evaluate(() => {
+      const scope = window as Window & { setupOptions: () => void };
+      scope.setupOptions();
+      scope.setupOptions();
+    });
+    await expect.poll(() => repeatedGroupResponses).toBe(2);
+    page.off("response", countRepeatedGroupResponse);
+    expect(await optionState()).toEqual(beforeRepeatedSetup);
+    await closeApplicationModal(page);
+
+    // Copy is driven by a dynamically rendered table button. The source record
+    // is fetched after setupOptions(), so this also pins the order in which the
+    // copied values and rebuilt options become observable.
+    await page.locator('a[href="#activeCampaigns"]').click();
+    await expect(page.locator("#activeCampaigns")).toHaveClass(/active/);
+    await page
+      .locator("#campaignTable tbody tr")
+      .filter({ hasText: "Browser Fixture Campaign" })
+      .locator('button[onclick^="copy("]')
+      .click();
+    await expect(page.locator("#modal")).toBeVisible();
+    await expect.poll(() => page.locator("#name").inputValue()).toBe(
+      "Copy of Browser Fixture Campaign",
+    );
+    await waitForSelectOption(page, "template", "Browser Fixture Template");
+    expect(await selectedLabels(page, "template")).toEqual([
+      "Browser Fixture Template",
+    ]);
+    expect(await selectedLabels(page, "page")).toEqual([
+      "Browser Fixture Landing Page",
+    ]);
+    expect(await selectedLabels(page, "profile")).toEqual([
+      "Browser Fixture Sending Profile",
+    ]);
+    expect(await page.locator("#url").inputValue()).toBe("http://127.0.0.1:1");
+    expect(await selectedLabels(page, "users")).toEqual([]);
+    await closeApplicationModal(page);
+
+    // An empty launch date is rejected in the browser and must not reach the
+    // campaign endpoint.
+    const campaignRequests: string[] = [];
+    const captureCampaign = (request: Request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/campaigns/"
+      ) {
+        campaignRequests.push(request.postData() ?? "");
+      }
+    };
+    page.on("request", captureCampaign);
+    await openApplicationModal(page, "New Campaign");
+    await page.locator("#launch_date").fill("");
+    await page.locator("#launchButton").click();
+    await page.locator(".swal2-confirm").click();
+    await expect(page.locator('[id="modal.flashes"]')).toContainText(
+      "Please specify a launch date",
+    );
+    expect(campaignRequests).toEqual([]);
+    page.off("request", captureCampaign);
+    await closeApplicationModal(page);
+  });
+
+  await test.step("campaign test email keeps its payload and flash contracts", async () => {
+    const testEmailPayloads: string[] = [];
+    let testEmailOutcome: "success" | "failure" = "success";
+    const consoleErrorsBefore = consoleErrors.length;
+    const failedResponsesBefore = failedLocalResponses.length;
+    await page.route("**/api/util/send_test_email", async (route) => {
+      testEmailPayloads.push(route.request().postData() ?? "");
+      if (testEmailOutcome === "success") {
+        await route.fulfill({
+          status: 200,
+          contentType: "application/json",
+          body: JSON.stringify({ success: true, message: "Email sent" }),
+        });
+        return;
+      }
+      await route.fulfill({
+        status: 400,
+        contentType: "application/json",
+        body: JSON.stringify({
+          success: false,
+          message: "dial tcp 127.0.0.1:1: connect: connection refused",
+        }),
+      });
+    });
+
+    await openApplicationModal(page, "New Campaign");
+    await waitForSelectOption(page, "template", "Browser Fixture Template");
+    await waitForSelectOption(page, "page", "Browser Fixture Landing Page");
+    await waitForSelectOption(page, "profile", "Browser Fixture Sending Profile");
+    await page
+      .locator("#template")
+      .selectOption({ label: "Browser Fixture Template" });
+    await page
+      .locator("#page")
+      .selectOption({ label: "Browser Fixture Landing Page" });
+    await page
+      .locator("#profile")
+      .selectOption({ label: "Browser Fixture Sending Profile" });
+    await page.locator("#url").fill("http://127.0.0.1:1");
+
+    await page.locator('button:has-text("Send Test Email")').click();
+    await expect(page.locator("#sendTestEmailModal")).toBeVisible();
+    await page.locator("input[name=to_first_name]").fill("Fixture");
+    await page.locator("input[name=to_last_name]").fill("Recipient");
+    await page.locator("input[name=to_email]").fill("recipient@localhost.invalid");
+    await page.locator("input[name=to_position]").fill("Tester");
+
+    const submit = page.locator("#sendTestModalSubmit");
+    const buttonLabel = async () =>
+      (await submit.innerHTML()).replace(/\s+/g, " ").trim();
+    const originalLabel = await buttonLabel();
+    const flashes = page.locator('[id="sendTestEmailModal.flashes"]');
+
+    await submit.click();
+    await expect(flashes.locator(".alert-success")).toHaveText(/Email Sent!/);
+    await expect.poll(buttonLabel).toBe(originalLabel);
+
+    await expect.poll(() => testEmailPayloads.length).toBe(1);
+    const testEmail = JSON.parse(testEmailPayloads[0]) as {
+      template: { name: string };
+      first_name: string;
+      last_name: string;
+      email: string;
+      position: string;
+      url: string;
+      page: { name: string };
+      smtp: { name: string };
+    };
+    expect(testEmail).toEqual({
+      template: { name: "Browser Fixture Template" },
+      first_name: "Fixture",
+      last_name: "Recipient",
+      email: "recipient@localhost.invalid",
+      position: "Tester",
+      url: "http://127.0.0.1:1",
+      page: { name: "Browser Fixture Landing Page" },
+      smtp: { name: "Browser Fixture Sending Profile" },
+    });
+
+    testEmailOutcome = "failure";
+    await submit.click();
+    await expect(flashes.locator(".alert-danger")).toHaveText(
+      /connect: connection refused/,
+    );
+    await expect.poll(buttonLabel).toBe(originalLabel);
+    await expect(flashes.locator(".alert-success")).toHaveCount(0);
+
+    await page.locator("#sendTestEmailModal").getByText("Cancel").click();
+    await expect(page.locator("#sendTestEmailModal")).not.toBeVisible();
+    await closeApplicationModal(page);
+    await page.unroute("**/api/util/send_test_email");
+
+    const testEmailConsoleErrors = consoleErrors.slice(consoleErrorsBefore);
+    expect(
+      testEmailConsoleErrors.filter(
+        (entry) => !entry.includes("status of 400 (Bad Request)"),
+      ),
+    ).toEqual([]);
+    consoleErrors.length = consoleErrorsBefore;
+    expect(failedLocalResponses.slice(failedResponsesBefore)).toEqual([
+      "400 /api/util/send_test_email",
+    ]);
+    failedLocalResponses.length = failedResponsesBefore;
   });
 
   await test.step("group modal and DataTables interaction remain functional", async () => {
