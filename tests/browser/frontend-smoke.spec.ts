@@ -468,6 +468,96 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await responsivePage.close();
   });
 
+  await test.step("shared UI helpers keep their exact contracts", async () => {
+    // Baseline for the jQuery removal in these helpers. Written and run against
+    // the jQuery implementation first, so the migration has something to
+    // preserve rather than something to define.
+    type SharedHelpers = Window & {
+      escapeHtml: (value: unknown) => string;
+      unescapeHtml: (value: string) => string;
+      errorFlash: (message: string) => void;
+      successFlash: (message: string) => void;
+      modalError: (message: string) => void;
+    };
+
+    // escapeHtml escapes markup but deliberately leaves quotes alone, which is
+    // what every table cell and modal message in the application relies on.
+    const escaped = await page.evaluate(() => {
+      const helpers = window as unknown as SharedHelpers;
+      return {
+        markup: helpers.escapeHtml("<b>bold</b>"),
+        ampersand: helpers.escapeHtml("Tom & Jerry"),
+        entity: helpers.escapeHtml("&amp;"),
+        quotes: helpers.escapeHtml(`"double" and 'single'`),
+        empty: helpers.escapeHtml(""),
+        number: helpers.escapeHtml(42),
+        script: helpers.escapeHtml('<script>window.__escapeRan = true;<\/script>'),
+      };
+    });
+    expect(escaped.markup).toBe("&lt;b&gt;bold&lt;/b&gt;");
+    expect(escaped.ampersand).toBe("Tom &amp; Jerry");
+    expect(escaped.entity).toBe("&amp;amp;");
+    expect(escaped.quotes).toBe("\"double\" and 'single'");
+    expect(escaped.empty).toBe("");
+    expect(escaped.number).toBe("42");
+    expect(escaped.script).not.toContain("<script>");
+    expect(await page.evaluate(() => "__escapeRan" in window)).toBe(false);
+
+    // Absent values must stay empty. The previous implementation treated
+    // undefined as a read rather than a write, so both helpers returned "";
+    // assigning it straight to innerHTML would instead yield the literal text
+    // "undefined" in every table cell built from a missing field.
+    const absent = await page.evaluate(() => {
+      const helpers = window as unknown as SharedHelpers;
+      return {
+        escapeUndefined: helpers.escapeHtml(undefined),
+        escapeNull: helpers.escapeHtml(null),
+        unescapeUndefined: helpers.unescapeHtml(undefined as unknown as string),
+        unescapeNull: helpers.unescapeHtml(null as unknown as string),
+      };
+    });
+    expect(absent.escapeUndefined).toBe("");
+    expect(absent.escapeNull).toBe("");
+    expect(absent.unescapeUndefined).toBe("");
+    expect(absent.unescapeNull).toBe("");
+
+    // unescapeHtml is the inverse, and the pair must round-trip the strings the
+    // tables store.
+    const roundTrip = await page.evaluate(() => {
+      const helpers = window as unknown as SharedHelpers;
+      const samples = [
+        "plain",
+        "<b>bold</b>",
+        "Tom & Jerry",
+        "&amp;",
+        `"quoted" & 'single'`,
+        "accented éàü",
+        "",
+      ];
+      return samples.map((sample) => ({
+        sample,
+        result: helpers.unescapeHtml(helpers.escapeHtml(sample)),
+      }));
+    });
+    for (const { sample, result } of roundTrip) {
+      expect(result, `round trip changed ${JSON.stringify(sample)}`).toBe(sample);
+    }
+
+    // The sidebar marks exactly the entry matching the current path.
+    const nav = await page.evaluate(() => {
+      const items = Array.from(document.querySelectorAll(".nav-sidebar li"));
+      return {
+        active: items
+          .filter((item) => item.classList.contains("active"))
+          .map((item) => (item.querySelector("a") as HTMLAnchorElement).getAttribute("href")),
+        total: items.length,
+      };
+    });
+    expect(nav.total).toBeGreaterThan(1);
+    // The dashboard is the current page, so its entry is the only active one.
+    expect(nav.active).toEqual(["/"]);
+  });
+
   await test.step("dashboard charts preserve values, labels, and navigation", async () => {
     const chartIDs = [
       "overview_chart",
@@ -681,10 +771,71 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   await test.step("campaign controls initialize Bootstrap and jQuery plugins", async () => {
     await page.getByRole("link", { name: "Campaigns", exact: true }).click();
     await expect(page).toHaveURL(/\/campaigns$/);
+
     await expect(page.getByRole("heading", { name: "Campaigns" })).toBeVisible();
     await expect(page.locator("#campaignTable")).toContainText(
       "Browser Fixture Campaign",
     );
+
+    // Baseline for the flash helpers, asserted here because this page is the
+    // one that carries two elements with the id "flashes". Only the first is
+    // ever written to, and the migration must keep that: resolving the id to
+    // every match instead of the first would start writing messages into the
+    // campaign modal as well.
+    const flashContainers = await page.locator('[id="flashes"]').count();
+    expect(flashContainers).toBe(2);
+    const flashes = await page.evaluate(() => {
+      const helpers = window as unknown as {
+        errorFlash: (message: string) => void;
+        successFlash: (message: string) => void;
+      };
+      const containers = Array.from(
+        document.querySelectorAll('[id="flashes"]'),
+      ) as HTMLElement[];
+      helpers.errorFlash("first problem");
+      const afterError = {
+        first: containers[0].children.length,
+        second: containers[1].children.length,
+        text: containers[0].textContent ?? "",
+        klass: (containers[0].firstElementChild as HTMLElement).className,
+      };
+      helpers.successFlash("all good");
+      const afterSuccess = {
+        first: containers[0].children.length,
+        text: containers[0].textContent ?? "",
+        klass: (containers[0].firstElementChild as HTMLElement).className,
+        icons: containers[0].querySelectorAll("i.fa").length,
+      };
+      containers.forEach((container) => container.replaceChildren());
+      return { afterError, afterSuccess };
+    });
+    expect(flashes.afterError.first).toBe(1);
+    expect(flashes.afterError.second).toBe(0);
+    expect(flashes.afterError.text).toContain("first problem");
+    expect(flashes.afterError.klass).toContain("alert-danger");
+    expect(flashes.afterSuccess.first).toBe(1);
+    expect(flashes.afterSuccess.text).toContain("all good");
+    expect(flashes.afterSuccess.text).not.toContain("first problem");
+    expect(flashes.afterSuccess.klass).toContain("alert-success");
+    expect(flashes.afterSuccess.icons).toBe(1);
+
+    // Intentional behaviour change, and the only one in this migration: the
+    // message is inserted as text. Previously it was appended as HTML, so
+    // markup in a server message rendered as markup.
+    const markupFlash = await page.evaluate(() => {
+      const helpers = window as unknown as { errorFlash: (message: string) => void };
+      const container = document.getElementById("flashes") as HTMLElement;
+      helpers.errorFlash('<img src=x onerror="window.__flashRan = true">');
+      const result = {
+        images: container.querySelectorAll("img").length,
+        text: container.textContent ?? "",
+      };
+      container.replaceChildren();
+      return result;
+    });
+    expect(markupFlash.images).toBe(0);
+    expect(markupFlash.text).toContain("<img src=x");
+    expect(await page.evaluate(() => "__flashRan" in window)).toBe(false);
 
     await page.locator('a[href="#archivedCampaigns"]').click();
     await expect(page.locator("#archivedCampaigns")).toHaveClass(/active/);
@@ -947,6 +1098,32 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(names).toContain("attachment-01.txt");
     expect(names).toContain("attachment-12.txt");
     page.off("request", captureTemplate);
+  });
+
+  await test.step("import errors reach the modal the user is looking at", async () => {
+    // Regression guard. Two elements on this page carry the id "modal.flashes":
+    // one in the template modal and one in the import modal stacked on top of
+    // it. The message must reach both, or an import failure is rendered behind
+    // the modal the user is actually looking at and nothing appears.
+    await page.getByRole("link", { name: "Email Templates" }).click();
+    await expect(page).toHaveURL(/\/templates$/);
+    await expect(page.locator("#templateTable")).toContainText(
+      "Browser Fixture Template",
+    );
+    expect(await page.locator('[id="modal.flashes"]').count()).toBe(2);
+
+    await openApplicationModal(page, "New Template");
+    await page.locator('#modal button[onclick^="bsModalShow(\'#importEmailModal\'"]').click();
+    await expect(page.locator("#importEmailModal")).toBeVisible();
+
+    await page.locator("#importEmailModal #modalSubmit").click();
+    await expect(
+      page.locator('#importEmailModal [id="modal.flashes"]'),
+    ).toContainText("No Content Specified!");
+
+    await page.locator('#importEmailModal [data-bs-dismiss="modal"]').first().click();
+    await expect(page.locator("#importEmailModal")).not.toBeVisible();
+    await closeApplicationModal(page);
   });
 
   await test.step("landing page table sorts, searches and pages through its data", async () => {
