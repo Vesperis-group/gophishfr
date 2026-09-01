@@ -42,6 +42,16 @@ function managedFile(packageName, ...segments) {
   return path.join(packageDirectory, ...segments);
 }
 
+// Licence headings name a version, so read it from the installed package rather
+// than repeating it here. Transitive packages resolve through caret ranges, and
+// a hard-coded heading would keep claiming the old version after a bump —
+// a wrong attribution that fails silently.
+function managedVersion(packageName) {
+  return JSON.parse(
+    fsSync.readFileSync(managedFile(packageName, "package.json"), "utf8"),
+  ).version;
+}
+
 function packageDirectory(packageName) {
   let current = path.dirname(require.resolve(packageName));
   while (current !== path.dirname(current)) {
@@ -69,7 +79,7 @@ const vendorScriptPaths = [
   managedFile("datatables.net-bs5", "js", "dataTables.bootstrap5.min.js"),
   vendoredScript("datetime-moment.js"),
   vendoredScript("sweetalert2.min.js"),
-  managedFile("select2", "dist", "js", "select2.min.js"),
+  managedFile("tom-select", "dist", "js", "tom-select.complete.min.js"),
   vendoredScript("core.min.js"),
   path.join(chartPackageDirectory, "dist", "chart.umd.js"),
   path.join(hammerPackageDirectory, "hammer.min.js"),
@@ -101,7 +111,7 @@ const stylesheetSources = [
   path.join(stylesheetSourceDirectory, "font-awesome.min.css"),
   path.join(stylesheetSourceDirectory, "checkbox.css"),
   path.join(stylesheetSourceDirectory, "sweetalert2.min.css"),
-  managedFile("select2", "dist", "css", "select2.min.css"),
+  managedFile("tom-select", "dist", "css", "tom-select.bootstrap5.min.css"),
 ];
 
 const managedVendorLicenses = [
@@ -146,12 +156,29 @@ const managedVendorLicenses = [
     sourcePath: managedFile("papaparse", "LICENSE"),
   },
   {
-    component: "Select2 4.0.13",
-    sourcePath: managedFile("select2", "LICENSE.md"),
+    component: `Tom Select ${managedVersion("tom-select")}`,
+    sourcePath: managedFile("tom-select", "LICENSE"),
+  },
+  {
+    component: `@orchidjs/unicode-variants ${managedVersion("@orchidjs/unicode-variants")}`,
+    sourcePath: managedFile("@orchidjs/unicode-variants", "LICENSE"),
   },
   {
     component: "UAParser.js 0.7.41",
     sourcePath: managedFile("ua-parser-js", "license.md"),
+  },
+];
+
+// @orchidjs/sifter is Apache-2.0 in its package metadata but ships no license
+// file, so its attribution points at the identical text distributed with Tom
+// Select rather than inventing one.
+const declaredOnlyLicenses = [
+  {
+    component: `@orchidjs/sifter ${managedVersion("@orchidjs/sifter")}`,
+    text:
+      "Apache License, Version 2.0, as declared in the package metadata. " +
+      "The package ships no license file; the full text is the one reproduced " +
+      "above for Tom Select.",
   },
 ];
 
@@ -204,9 +231,13 @@ async function buildManagedVendorLicenses() {
       return `${component}\n${"=".repeat(component.length)}\n\n${license.trim()}`;
     }),
   );
+  const declaredNotices = declaredOnlyLicenses.map(
+    ({ component, text }) =>
+      `${component}\n${"=".repeat(component.length)}\n\n${text}`,
+  );
   await fs.writeFile(
     path.join(javascriptOutputDirectory, "vendor.min.js.LICENSE.txt"),
-    `${notices.join("\n\n")}\n`,
+    `${notices.concat(declaredNotices).join("\n\n")}\n`,
   );
 }
 

@@ -8,6 +8,92 @@ var labels = {
     "Error": "text-bg-danger"
 }
 
+// Campaign selects are native controls. The submitted payload has always
+// carried the visible label of the chosen option, so the option text stays the
+// source of truth here; only the widget around it changed.
+//
+// The leading blank option is the placeholder. The previous widget mapped it to
+// an empty label, so an untouched control has always submitted "" rather than
+// the placeholder wording, and that must stay true.
+function selectedOptionText(select) {
+    var option = select.options[select.selectedIndex]
+    if (!option || option.value === "") {
+        return ""
+    }
+    return option.text
+}
+
+// fillSelectOptions rebuilds a single-choice select from an API collection,
+// sorted case-insensitively by label as the previous widget sorted its dropdown.
+// The placeholder stays selected, which is the state the previous widget
+// rendered as placeholder text.
+function fillSelectOptions(select, items, placeholder) {
+    var sorted = items.slice().sort(function (a, b) {
+        return a.name.toLowerCase().localeCompare(b.name.toLowerCase())
+    })
+    select.innerHTML = ""
+    var placeholderOption = document.createElement("option")
+    placeholderOption.value = ""
+    placeholderOption.text = placeholder
+    placeholderOption.disabled = true
+    placeholderOption.selected = true
+    select.appendChild(placeholderOption)
+    sorted.forEach(function (item) {
+        var option = document.createElement("option")
+        option.value = item.id
+        option.text = item.name
+        select.appendChild(option)
+    })
+}
+
+// setSelectPlaceholder renames the placeholder entry, which is how a campaign
+// copy reports a template, page, or profile that no longer exists. The
+// submitted value stays empty, exactly as before.
+function setSelectPlaceholder(select, placeholder) {
+    var option = select.options[0]
+    if (option && option.value === "") {
+        option.text = placeholder
+        select.value = ""
+    }
+}
+
+// groupSelect holds the Tom Select instance backing the multiple-choice groups
+// control, the only field that still needs search and removable tags.
+var groupSelect = null
+
+function setupGroupSelect() {
+    if (groupSelect) {
+        return groupSelect
+    }
+    groupSelect = new TomSelect("#users", {
+        plugins: ["remove_button"],
+        placeholder: "Select Groups",
+        maxOptions: null,
+        sortField: { field: "text", direction: "asc" },
+        render: {
+            // Built as a DOM node so the group name, which is user-supplied,
+            // can never be interpreted as markup. The title carries the target
+            // count the previous widget exposed as an option tooltip.
+            option: function (data) {
+                var option = document.createElement("div")
+                option.textContent = data.text
+                if (data.title) {
+                    option.title = data.title
+                }
+                return option
+            },
+        },
+    })
+    return groupSelect
+}
+
+function selectedGroupNames() {
+    var select = document.getElementById("users")
+    return Array.prototype.slice.call(select.selectedOptions).map(function (option) {
+        return option.text
+    })
+}
+
 var campaigns = []
 var campaign = {}
 
@@ -51,11 +137,8 @@ function launch() {
         showLoaderOnConfirm: true,
         preConfirm: function () {
             return new Promise(function (resolve, reject) {
-                groups = []
-                $("#users").select2("data").forEach(function (group) {
-                    groups.push({
-                        name: group.text
-                    });
+                groups = selectedGroupNames().map(function (name) {
+                    return { name: name }
                 })
                 // Validate our fields
                 var launch_date = utcFromLocalDateTimeInput($("#launch_date").val())
@@ -70,14 +153,14 @@ function launch() {
                 campaign = {
                     name: $("#name").val(),
                     template: {
-                        name: $("#template").select2("data")[0].text
+                        name: selectedOptionText(document.getElementById("template"))
                     },
                     url: $("#url").val(),
                     page: {
-                        name: $("#page").select2("data")[0].text
+                        name: selectedOptionText(document.getElementById("page"))
                     },
                     smtp: {
-                        name: $("#profile").select2("data")[0].text
+                        name: selectedOptionText(document.getElementById("profile"))
                     },
                     launch_date: launch_date,
                     send_by_date: send_by_date || null,
@@ -114,7 +197,7 @@ function launch() {
 function sendTestEmail() {
     var test_email_request = {
         template: {
-            name: $("#template").select2("data")[0].text
+            name: selectedOptionText(document.getElementById("template"))
         },
         first_name: $("input[name=to_first_name]").val(),
         last_name: $("input[name=to_last_name]").val(),
@@ -122,10 +205,10 @@ function sendTestEmail() {
         position: $("input[name=to_position]").val(),
         url: $("#url").val(),
         page: {
-            name: $("#page").select2("data")[0].text
+            name: selectedOptionText(document.getElementById("page"))
         },
         smtp: {
-            name: $("#profile").select2("data")[0].text
+            name: selectedOptionText(document.getElementById("profile"))
         }
     }
     btnHtml = $("#sendTestModalSubmit").html()
@@ -147,11 +230,13 @@ function sendTestEmail() {
 function dismiss() {
     $("#modal\\.flashes").empty();
     $("#name").val("");
-    $("#template").val("").change();
-    $("#page").val("").change();
+    document.getElementById("template").value = "";
+    document.getElementById("page").value = "";
     $("#url").val("");
-    $("#profile").val("").change();
-    $("#users").val("").change();
+    document.getElementById("profile").value = "";
+    if (groupSelect) {
+        groupSelect.clear(true);
+    }
     bsModalHide("#modal");
 }
 
@@ -198,37 +283,28 @@ function setupOptions() {
             if (groups.length == 0) {
                 modalError("No groups found!")
                 return false;
-            } else {
-                var group_s2 = $.map(groups, function (obj) {
-                    obj.text = obj.name
-                    obj.title = obj.num_targets + " targets"
-                    return obj
-                });
-                $("#users.form-control").select2({
-                    placeholder: "Select Groups",
-                    data: group_s2,
-                });
             }
+            var select = setupGroupSelect()
+            select.clear(true)
+            select.clearOptions()
+            select.addOptions(groups.map(function (group) {
+                return {
+                    text: group.name,
+                    title: group.num_targets + " targets",
+                    value: String(group.id),
+                }
+            }))
         });
     api.templates.get()
         .done(function (templates) {
             if (templates.length == 0) {
                 modalError("No templates found!")
                 return false
-            } else {
-                var template_s2 = $.map(templates, function (obj) {
-                    obj.text = obj.name
-                    return obj
-                });
-                var template_select = $("#template.form-control")
-                template_select.select2({
-                    placeholder: "Select a Template",
-                    data: template_s2,
-                });
-                if (templates.length === 1) {
-                    template_select.val(template_s2[0].id)
-                    template_select.trigger('change.select2')
-                }
+            }
+            var template_select = document.getElementById("template")
+            fillSelectOptions(template_select, templates, "Select a Template")
+            if (templates.length === 1) {
+                template_select.value = templates[0].id
             }
         });
     api.pages.get()
@@ -236,20 +312,11 @@ function setupOptions() {
             if (pages.length == 0) {
                 modalError("No pages found!")
                 return false
-            } else {
-                var page_s2 = $.map(pages, function (obj) {
-                    obj.text = obj.name
-                    return obj
-                });
-                var page_select = $("#page.form-control")
-                page_select.select2({
-                    placeholder: "Select a Landing Page",
-                    data: page_s2,
-                });
-                if (pages.length === 1) {
-                    page_select.val(page_s2[0].id)
-                    page_select.trigger('change.select2')
-                }
+            }
+            var page_select = document.getElementById("page")
+            fillSelectOptions(page_select, pages, "Select a Landing Page")
+            if (pages.length === 1) {
+                page_select.value = pages[0].id
             }
         });
     api.SMTP.get()
@@ -257,20 +324,14 @@ function setupOptions() {
             if (profiles.length == 0) {
                 modalError("No profiles found!")
                 return false
-            } else {
-                var profile_s2 = $.map(profiles, function (obj) {
-                    obj.text = obj.name
-                    return obj
-                });
-                var profile_select = $("#profile.form-control")
-                profile_select.select2({
-                    placeholder: "Select a Sending Profile",
-                    data: profile_s2,
-                }).select2("val", profile_s2[0]);
-                if (profiles.length === 1) {
-                    profile_select.val(profile_s2[0].id)
-                    profile_select.trigger('change.select2')
-                }
+            }
+            var profile_select = document.getElementById("profile")
+            fillSelectOptions(profile_select, profiles, "Select a Sending Profile")
+            // The legacy `select2("val", profile_s2[0])` call stringified an
+            // object, matched no option, and therefore left the placeholder
+            // selected. Only the single-profile case ever preselected.
+            if (profiles.length === 1) {
+                profile_select.value = profiles[0].id
             }
         });
 }
@@ -285,32 +346,23 @@ function copy(idx) {
     api.campaignId.get(campaigns[idx].id)
         .done(function (campaign) {
             $("#name").val("Copy of " + campaign.name)
+            var template_select = document.getElementById("template")
             if (!campaign.template.id) {
-                $("#template").val("").change();
-                $("#template").select2({
-                    placeholder: campaign.template.name
-                });
+                setSelectPlaceholder(template_select, campaign.template.name)
             } else {
-                $("#template").val(campaign.template.id.toString());
-                $("#template").trigger("change.select2")
+                template_select.value = campaign.template.id.toString()
             }
+            var page_select = document.getElementById("page")
             if (!campaign.page.id) {
-                $("#page").val("").change();
-                $("#page").select2({
-                    placeholder: campaign.page.name
-                });
+                setSelectPlaceholder(page_select, campaign.page.name)
             } else {
-                $("#page").val(campaign.page.id.toString());
-                $("#page").trigger("change.select2")
+                page_select.value = campaign.page.id.toString()
             }
+            var profile_select = document.getElementById("profile")
             if (!campaign.smtp.id) {
-                $("#profile").val("").change();
-                $("#profile").select2({
-                    placeholder: campaign.smtp.name
-                });
+                setSelectPlaceholder(profile_select, campaign.smtp.name)
             } else {
-                $("#profile").val(campaign.smtp.id.toString());
-                $("#profile").trigger("change.select2")
+                profile_select.value = campaign.smtp.id.toString()
             }
             $("#url").val(campaign.url)
         })
@@ -402,19 +454,4 @@ $(document).ready(function () {
             $("#loading").hide()
             errorFlash("Error fetching campaigns")
         })
-    // Select2 Defaults
-    $.fn.select2.defaults.set("width", "100%");
-    $.fn.select2.defaults.set("dropdownParent", $("#modal_body"));
-    $.fn.select2.defaults.set("theme", "default");
-    $.fn.select2.defaults.set("sorter", function (data) {
-        return data.sort(function (a, b) {
-            if (a.text.toLowerCase() > b.text.toLowerCase()) {
-                return 1;
-            }
-            if (a.text.toLowerCase() < b.text.toLowerCase()) {
-                return -1;
-            }
-            return 0;
-        });
-    })
 })

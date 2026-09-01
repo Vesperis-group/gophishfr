@@ -8,6 +8,92 @@ the normal Yarn dependency graph. Generated files under `static/js/dist` and
 scripts under `static/js/src/app` and the project-specific stylesheets
 `main.css`, `dashboard.css`, and `docs.css` are first-party sources.
 
+## Update (Select2 removal, 2026-09-01)
+
+Select2 4.0.13 was removed. Four of the five selects it decorated became plain
+native `<select>` elements, and only the campaign group multi-select was given a
+replacement component: `tom-select@2.6.2` (Apache-2.0), a framework-independent
+library with an official Bootstrap 5 theme and documented accessibility testing.
+Tom Select pulls exactly two dependencies, `@orchidjs/sifter@1.1.0` and
+`@orchidjs/unicode-variants@1.1.2`, both Apache-2.0.
+
+Select2 decorated five controls across two pages:
+
+| Control | Page | Select2 features actually used | After |
+| --- | --- | --- | --- |
+| `#template` | `/campaigns` | placeholder, search, sorted options | Native `<select>` |
+| `#page` | `/campaigns` | placeholder, search, sorted options | Native `<select>` |
+| `#profile` | `/campaigns` | placeholder, search, sorted options | Native `<select>` |
+| `#role` | `/users` | none beyond styling; 2 static options | Native `<select>` |
+| `#users` | `/campaigns` | multi-select, tags, search, remove control | Tom Select |
+
+The three campaign selects keep a disabled placeholder option whose text is
+displayed but whose **value is empty**, so an untouched control submits an empty
+name — the same string Select2's blank option produced through `data()`. The
+placeholder wording is never submitted. `#role` has no placeholder: it ships two
+real options, `admin` and `user`, and always had one of them selected.
+Select2's `sorter` was replaced by explicit case-insensitive `localeCompare`
+ordering when the options are filled, and by Tom Select's `sortField` for the
+group picker. Multi-select therefore keeps click-to-add and a per-tag remove
+control: no Ctrl/Cmd+click regression was introduced.
+
+The backend contract is unchanged. The campaign payload has always submitted
+option **labels** (`template.name`, `page.name`, `smtp.name`, `groups[].name`),
+not values, and the migrated code reproduces that byte for byte.
+
+Establishing that contract required measuring the old widget rather than
+reading it. The legacy templates carry a blank `<option></option>` as the first
+entry of `#template`, `#page` and `#profile`, and a probe that loaded the
+previous `vendor.min.js` and replayed the exact old `setupOptions()` code
+showed what it really did:
+
+- the blank option stays selected by default, so an untouched control submitted
+  an **empty** name — not the placeholder wording;
+- Select2's `sorter` only ordered the rendered dropdown, never the underlying
+  `<option>` elements;
+- `.select2("val", profile_s2[0])` passed an *object* to `jQuery.val()`, which
+  stringified it to `"[object Object]"`, matched no option, and therefore
+  preselected nothing; only the `profiles.length === 1` branch ever
+  preselected a sending profile;
+- a copied campaign whose template no longer exists displayed the missing name
+  as a placeholder but still submitted an empty name.
+
+That empty name is load-bearing on the server: `controllers/api/util.go` keys
+the default test-template path on `Template.Name == ""`, and
+`models/campaign.go` keys `Validate()` on the same emptiness. Submitting the
+placeholder wording instead would have silently changed both.
+
+Two intermediate implementations of this change were wrong against that
+measured behaviour — one submitted the placeholder wording, another preselected
+the first alphabetical sending profile — and both were corrected before commit.
+The current code keeps a disabled blank placeholder option whose text is shown
+but whose value is empty, so `selectedOptionText()` returns `""` for it, and it
+preselects only when a collection holds exactly one entry. The group picker
+still drives the real `<select>`, so its option values remain the ones the
+server already received, and each group option keeps the
+`title="N targets"` tooltip the previous widget set.
+`docs/FRONTEND_BROWSER_TESTS.md` coverage was
+extended to assert the submitted payload, the empty-name placeholder contract
+including the deleted-template case, the single-entry preselection, the
+per-tag removal, the empty-search state, the option tooltip, and the absence of
+any `.select2-container` node.
+
+Removing Select2 removed a jQuery plugin but not jQuery: 11 first-party
+application scripts still contain 433 jQuery usages, driven by DataTables (10
+files) and Moment.js formatting (10 files). DataTables is now the **only**
+remaining jQuery plugin, which leaves it as the single external blocker for a
+future jQuery 4 evaluation. The `#role-select` wrapper div, which existed only
+to host Select2's `dropdownParent`, is retained as inert markup.
+
+`@orchidjs/sifter` declares Apache-2.0 in its package metadata but ships no
+license file. Rather than fail the licence gate or silently drop the notice,
+`scripts/build-frontend.js` gained a `declaredOnlyLicenses` mechanism that emits
+an explicit declared-only notice pointing at the reproduced Apache-2.0 text.
+
+Choices.js was considered and rejected: it would not have avoided Apache-2.0
+anyway, since it depends on `fuse.js` (Apache-2.0), and it offers no official
+Bootstrap 5 theme.
+
 ## Update (DateTimePicker removal, 2026-08-20)
 
 The manually vendored Bootstrap DateTimePicker (JS 4.17.37, CSS 4.15.35) was
@@ -233,19 +319,20 @@ them in a fixed order, and emits their complete license texts in
 
 | Component | Version | Usage | License | Audit status |
 | --- | --- | --- | --- | --- |
-| jQuery | 3.7.1 | Single global runtime instance for DataTables, Select2, and first-party code; the exact direct dependency naturally satisfies all transitive ranges | MIT | `CLEAN`; remediates CVE-2015-9251, CVE-2019-11358, CVE-2020-11022, CVE-2020-11023 from 1.10.2 |
+| jQuery | 3.7.1 | Single global runtime instance for DataTables and first-party code; the exact direct dependency naturally satisfies all transitive ranges | MIT | `CLEAN`; remediates CVE-2015-9251, CVE-2019-11358, CVE-2020-11022, CVE-2020-11023 from 1.10.2 |
 | Chart.js / `@kurkle/color` | 4.5.1 / 0.3.4 | Dashboard and campaign charts | MIT | `CLEAN` |
 | chartjs-plugin-zoom / Hammer.JS | 2.2.0 / 2.0.8 | Timeline pan and zoom | MIT | `CLEAN` |
 | Bootstrap / Popper | 5.3.8 / 2.11.8 | Global layout, navbar, modal, tabs, dropdown, tooltip | MIT | `CLEAN`; exact Yarn dependencies replacing the manually vendored Bootstrap 3 JS/CSS above |
 | DataTables / Bootstrap 5 integration (`datatables.net-bs5`) | 1.13.11 | Admin tables | MIT | `CLEAN`; its jQuery range resolves to the single direct `jquery@3.7.1` installation |
 | Moment.js | 2.30.1 | Date parsing and formatting | MIT | `CLEAN`, maintenance mode |
 | Papa Parse | 5.6.0 | CSV import and export | MIT | `CLEAN` |
-| Select2 | 4.0.13 | Campaign and role selectors | MIT | `CLEAN` |
+| Tom Select / `@orchidjs/sifter` / `@orchidjs/unicode-variants` | 2.6.2 / 1.1.0 / 1.1.2 | Campaign group multi-select only; framework-independent, no jQuery | Apache-2.0 | `CLEAN`; replaces Select2 4.0.13 |
 | UAParser.js | 0.7.41 | Recipient-controlled user-agent parsing | MIT | `CLEAN` |
 | zxcvbn | 4.4.2 | Password-strength feedback | MIT | `CLEAN`, old release |
 | CodeMirror / Lezer | CodeMirror packages 6.x; Lezer packages 1.x, exact versions in `yarn.lock` | Canonical full-document HTML source editing, syntax highlighting, search, keyboard commands, and GophishFR placeholder completion | MIT | `CLEAN`; self-hosted Webpack bundle, no remote service or license key |
 
-Yarn audit reports zero advisories across 113 resolved dependencies. A
+Yarn audit reports zero advisories across 115 resolved dependencies, and
+Retire.js 5.4.3 reports zero findings against the generated bundles. A
 temporary npm resolution, created outside the worktree without retaining a
 `package-lock.json`, reports zero advisories across 108 dependencies. GitHub
 reports zero open Dependabot alerts.
@@ -257,7 +344,7 @@ reports zero open Dependabot alerts.
 | Moment.js | Vendored 2.10.3 | Yarn 2.30.1 | `SAFE_UPDATE`, `MOVE_TO_PACKAGE_MANAGER` | Same major API; removes browser-relevant ReDoS findings |
 | Papa Parse | Vendored 5.2.0 | Yarn 5.6.0 | `SAFE_UPDATE`, `MOVE_TO_PACKAGE_MANAGER` | Same major API; establishes lockfile provenance |
 | DataTables | Vendored 1.10.11 | Yarn 1.13.11 | `SAFE_UPDATE`, `MOVE_TO_PACKAGE_MANAGER` | Last 1.x API line; removes prototype-pollution and XSS findings |
-| Select2 | Vendored 4.0.3 | Yarn 4.0.13 | `SAFE_UPDATE`, `MOVE_TO_PACKAGE_MANAGER` | Narrow 4.0 update; removes CVE-2016-10744 without 4.1 behavior changes |
+| Select2 | Vendored 4.0.3 | Yarn 4.0.13 — **superseded**: removed entirely; see the Select2 removal update | `SAFE_UPDATE`, `MOVE_TO_PACKAGE_MANAGER` | Narrow 4.0 update; removes CVE-2016-10744 without 4.1 behavior changes |
 | UAParser.js | Vendored 0.7.18 | Yarn 0.7.41 | `SAFE_UPDATE`, `MOVE_TO_PACKAGE_MANAGER` | Same 0.7 API; removes three ReDoS findings on recipient-controlled input |
 | Chartist | Vendored JS 0.9.2, CSS, and dead first-party selectors | Removed | `SAFE_REMOVE` | No runtime reference; Chart.js had already replaced the chart stack |
 | DataTables standalone CSS | Unreferenced source files | Removed | `SAFE_REMOVE` | Bootstrap integration CSS is the only stylesheet built |
@@ -297,9 +384,9 @@ calls replaced with `.done()`/`.fail()`/`.always()`. Vendored DateTimePicker
 before `.show()` so jQuery 3 could override Bootstrap's hidden dropdown state,
 until that picker was replaced by native controls.
 Vendored blueimp File Upload `.pipe()` was temporarily replaced with `.then()`
-before the plugin was removed. Select2 4.0.13 and DataTables 1.13.11 remain
-confirmed compatible under jQuery 3.7.1, as did DateTimePicker 4.17.37 until it
-was replaced by native controls.
+before the plugin was removed. DataTables 1.13.11 remains
+confirmed compatible under jQuery 3.7.1, as did Select2 4.0.13 and
+DateTimePicker 4.17.37 until both were replaced.
 
 jQuery Migrate 3.6.0 was evaluated as a temporary diagnostic option but was
 not added or loaded: the static audit identified the removed APIs directly,
@@ -308,13 +395,14 @@ exception or console error. No Migrate code is present in the runtime,
 manifest, lockfile, or test dependencies.
 
 **JQUERY4_BLOCKED reasons** (preliminary):
-- Select2 4.0.13: uses internal jQuery APIs removed in 4.x (`$.expr[':']`)
 - DataTables 1.x: uses `$.camelCase` and other internals removed in 4.x
 - first-party application scripts still use jQuery for Ajax, DOM, and events
 - Resolution: remain on 3.7.1 until plugin majors are upgraded or replaced
 
 The DateTimePicker blocker was removed with the picker itself: campaign
-scheduling no longer runs any jQuery plugin.
+scheduling no longer runs any jQuery plugin. The Select2 blocker
+(`$.expr[':']`, removed in jQuery 4.x) was removed with Select2 itself:
+DataTables is now the only remaining jQuery plugin.
 
 ### Bootstrap JS 3.0.2
 
@@ -342,16 +430,23 @@ CVE-2024-6485. The durable remediation is a supported Bootstrap migration.
 
 ## Reproducibility
 
-The post-DateTimePicker frontend build contains 19 generated files and
-2,856,640 bytes, 45,426 bytes smaller than the previous build of 2,902,066
-bytes. The vendor bundle decreased from 1,083,088 to 1,045,486 bytes and the
-stylesheet from 338,328 to 330,625 bytes. Two independent immutable
+The post-Select2 frontend build contains 19 generated files and
+2,860,106 bytes, 3,466 bytes larger than the previous build of 2,856,640
+bytes. That growth is entirely license text: `vendor.min.js.LICENSE.txt` grew
+from 13,682 to 35,477 bytes (+21,795) because Tom Select and its two
+`@orchidjs` dependencies are Apache-2.0 and the full license text is
+reproduced. The executed code shrank by 18,329 bytes: the vendor bundle
+decreased from 1,045,486 to 1,026,331 bytes (-19,155, Tom Select being smaller
+than Select2) and `users.min.js` from 5,383 to 5,036 bytes (-347), against
+`campaigns.min.js` growing from 8,612 to 9,049 bytes (+437) for the native
+select helpers and the stylesheet from 330,625 to 331,361 bytes (+736).
+Two independent immutable
 installations and clean builds produced the
 same per-file hashes, left `yarn.lock` unchanged, and produced this aggregate
 SHA-256 manifest:
 
 ```text
-f2ae0043d798fb5b1e027ccbbe8548cbb2a0ad2deed5e6caf673c9ce5873e622
+742ffe360924756f13a378b7867f4795c94faf79ec1b2f7726b1d389029ea162
 ```
 
 Webpack reports performance-budget warnings for the approximately 532 KiB

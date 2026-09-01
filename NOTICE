@@ -37,9 +37,12 @@ libraries are emitted beside the generated JavaScript bundles.
 
 The package-managed components in the generated frontend vendor bundle include
 jQuery, Bootstrap, Popper, Chart.js, @kurkle/color,
-chartjs-plugin-zoom, Hammer.JS, DataTables, Moment.js, Papa Parse, Select2,
-and UAParser.js under the MIT License. Their complete copyright and license
-notices are distributed in `static/js/dist/vendor.min.js.LICENSE.txt`. Manually
+chartjs-plugin-zoom, Hammer.JS, DataTables, Moment.js, Papa Parse,
+and UAParser.js under the MIT License. The same bundle includes Tom Select and
+its `@orchidjs/sifter` and `@orchidjs/unicode-variants` dependencies under the
+Apache License, Version 2.0. Their complete copyright and license
+notices, including the full Apache License text, are distributed in
+`static/js/dist/vendor.min.js.LICENSE.txt`. Manually
 retained browser libraries in that bundle preserve their available source
 license banners and are inventoried in `docs/FRONTEND_VENDOR_INVENTORY.md`.
 
@@ -94,3 +97,7 @@ unknown; this limitation is documented in the frontend inventory.
 
 Highcharts is not distributed by GophishFR. Its historical removal and
 replacement are recorded in the frontend inventory.
+
+Select2 is no longer distributed by GophishFR. It was removed in favour of
+native `<select>` controls and Tom Select for the multi-select group picker.
+Its historical removal is recorded in the frontend inventory.
