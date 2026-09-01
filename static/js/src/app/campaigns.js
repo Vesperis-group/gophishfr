@@ -97,6 +97,30 @@ function selectedGroupNames() {
 var campaigns = []
 var campaign = {}
 
+// The escaped dot in the previous jQuery selectors bypassed its
+// getElementById fast path, so every element carrying the id was updated.
+function clearCampaignFlashes(id) {
+    document.querySelectorAll('[id="' + id + '"]').forEach(function (container) {
+        container.replaceChildren()
+    })
+}
+
+function showCampaignFlash(id, variantClass, iconClass, message) {
+    document.querySelectorAll('[id="' + id + '"]').forEach(function (container) {
+        container.replaceChildren(buildFlash(variantClass, iconClass, message))
+    })
+}
+
+// :contains() is a jQuery-only selector. It matched every button whose text
+// contains "OK", so the native equivalent keeps that cardinality.
+function bindOkayButtons(handler) {
+    document.querySelectorAll("button").forEach(function (button) {
+        if (button.textContent.includes("OK")) {
+            button.addEventListener("click", handler)
+        }
+    })
+}
+
 // The launch date fields are native datetime-local controls. The browser holds
 // a local wall-clock value formatted as YYYY-MM-DDTHH:mm while the API has
 // always received an instant in UTC, so both directions are converted here.
@@ -141,7 +165,7 @@ function launch() {
                     return { name: name }
                 })
                 // Validate our fields
-                var launch_date = utcFromLocalDateTimeInput($("#launch_date").val())
+                var launch_date = utcFromLocalDateTimeInput(document.getElementById("launch_date").value)
                 if (!launch_date) {
                     // Refuse to schedule rather than post a launch date the API
                     // cannot parse, which is what an empty control used to do.
@@ -149,13 +173,13 @@ function launch() {
                     Swal.close()
                     return
                 }
-                var send_by_date = utcFromLocalDateTimeInput($("#send_by_date").val())
+                var send_by_date = utcFromLocalDateTimeInput(document.getElementById("send_by_date").value)
                 campaign = {
-                    name: $("#name").val(),
+                    name: document.getElementById("name").value,
                     template: {
                         name: selectedOptionText(document.getElementById("template"))
                     },
-                    url: $("#url").val(),
+                    url: document.getElementById("url").value,
                     page: {
                         name: selectedOptionText(document.getElementById("page"))
                     },
@@ -173,8 +197,11 @@ function launch() {
                         campaign = data
                     })
                     .fail(function (data) {
-                        $("#modal\\.flashes").empty().append("<div style=\"text-align:center\" class=\"alert alert-danger\">\
-            <i class=\"fa fa-exclamation-circle\"></i> " + data.responseJSON.message + "</div>")
+                        showCampaignFlash(
+                            "modal.flashes",
+                            "alert-danger",
+                            "fa-exclamation-circle",
+                            data.responseJSON.message)
                         Swal.close()
                     })
             })
@@ -187,7 +214,7 @@ function launch() {
                 'success'
             );
         }
-        $('button:contains("OK")').on('click', function () {
+        bindOkayButtons(function () {
             window.location = "/campaigns/" + campaign.id.toString()
         })
     })
@@ -199,11 +226,11 @@ function sendTestEmail() {
         template: {
             name: selectedOptionText(document.getElementById("template"))
         },
-        first_name: $("input[name=to_first_name]").val(),
-        last_name: $("input[name=to_last_name]").val(),
-        email: $("input[name=to_email]").val(),
-        position: $("input[name=to_position]").val(),
-        url: $("#url").val(),
+        first_name: document.querySelector("input[name=to_first_name]").value,
+        last_name: document.querySelector("input[name=to_last_name]").value,
+        email: document.querySelector("input[name=to_email]").value,
+        position: document.querySelector("input[name=to_position]").value,
+        url: document.getElementById("url").value,
         page: {
             name: selectedOptionText(document.getElementById("page"))
         },
@@ -211,28 +238,35 @@ function sendTestEmail() {
             name: selectedOptionText(document.getElementById("profile"))
         }
     }
-    btnHtml = $("#sendTestModalSubmit").html()
-    $("#sendTestModalSubmit").html('<i class="fa fa-spinner fa-spin"></i> Sending')
+    var submit = document.getElementById("sendTestModalSubmit")
+    btnHtml = submit.innerHTML
+    submit.innerHTML = '<i class="fa fa-spinner fa-spin"></i> Sending'
     // Send the test email
     api.send_test_email(test_email_request)
         .done(function (data) {
-            $("#sendTestEmailModal\\.flashes").empty().append("<div style=\"text-align:center\" class=\"alert alert-success\">\
-            <i class=\"fa fa-check-circle\"></i> Email Sent!</div>")
-            $("#sendTestModalSubmit").html(btnHtml)
+            showCampaignFlash(
+                "sendTestEmailModal.flashes",
+                "alert-success",
+                "fa-check-circle",
+                "Email Sent!")
+            submit.innerHTML = btnHtml
         })
         .fail(function (data) {
-            $("#sendTestEmailModal\\.flashes").empty().append("<div style=\"text-align:center\" class=\"alert alert-danger\">\
-            <i class=\"fa fa-exclamation-circle\"></i> " + data.responseJSON.message + "</div>")
-            $("#sendTestModalSubmit").html(btnHtml)
+            showCampaignFlash(
+                "sendTestEmailModal.flashes",
+                "alert-danger",
+                "fa-exclamation-circle",
+                data.responseJSON.message)
+            submit.innerHTML = btnHtml
         })
 }
 
 function dismiss() {
-    $("#modal\\.flashes").empty();
-    $("#name").val("");
+    clearCampaignFlashes("modal.flashes");
+    document.getElementById("name").value = "";
     document.getElementById("template").value = "";
     document.getElementById("page").value = "";
-    $("#url").val("");
+    document.getElementById("url").value = "";
     document.getElementById("profile").value = "";
     if (groupSelect) {
         groupSelect.clear(true);
@@ -270,7 +304,7 @@ function deleteCampaign(idx) {
                 'success'
             );
         }
-        $('button:contains("OK")').on('click', function () {
+        bindOkayButtons(function () {
             location.reload()
         })
     })
@@ -345,7 +379,7 @@ function copy(idx) {
     // Set our initial values
     api.campaignId.get(campaigns[idx].id)
         .done(function (campaign) {
-            $("#name").val("Copy of " + campaign.name)
+            document.getElementById("name").value = "Copy of " + campaign.name
             var template_select = document.getElementById("template")
             if (!campaign.template.id) {
                 setSelectPlaceholder(template_select, campaign.template.name)
@@ -364,18 +398,21 @@ function copy(idx) {
             } else {
                 profile_select.value = campaign.smtp.id.toString()
             }
-            $("#url").val(campaign.url)
+            document.getElementById("url").value = campaign.url
         })
         .fail(function (data) {
-            $("#modal\\.flashes").empty().append("<div style=\"text-align:center\" class=\"alert alert-danger\">\
-            <i class=\"fa fa-exclamation-circle\"></i> " + data.responseJSON.message + "</div>")
+            showCampaignFlash(
+                "modal.flashes",
+                "alert-danger",
+                "fa-exclamation-circle",
+                data.responseJSON.message)
         })
 }
 
-$(document).ready(function () {
+document.addEventListener("DOMContentLoaded", function () {
     // Prefill the launch date with the current local time, as the previous
     // picker did; the optional "send emails by" field stays empty.
-    $("#launch_date").val(localDateTimeInputValue(new Date()))
+    document.getElementById("launch_date").value = localDateTimeInputValue(new Date())
     // Modal dismiss handler (native Bootstrap 5 event, no jQuery bridge)
     document.getElementById('modal').addEventListener('hidden.bs.modal', function (event) {
         dismiss()
@@ -383,10 +420,10 @@ $(document).ready(function () {
     api.campaigns.summary()
         .done(function (data) {
             campaigns = data.campaigns
-            $("#loading").hide()
+            document.getElementById("loading").style.display = "none"
             if (campaigns.length > 0) {
-                $("#campaignTable").show()
-                $("#campaignTableArchive").show()
+                document.getElementById("campaignTable").style.display = ""
+                document.getElementById("campaignTableArchive").style.display = ""
 
                 activeCampaignsTable = new DataTable("#campaignTable", {
                     columnDefs: [{
@@ -410,7 +447,7 @@ $(document).ready(function () {
                     'active': [],
                     'archived': []
                 }
-                $.each(campaigns, function (i, campaign) {
+                campaigns.forEach(function (campaign, i) {
                     label = labels[campaign.status] || "text-bg-secondary";
 
                     //section for tooltips on the status of a campaign to show some quick stats
@@ -447,11 +484,14 @@ $(document).ready(function () {
                 archivedCampaignsTable.rows.add(rows['archived']).draw()
                 bsInitTooltips()
             } else {
-                $("#emptyMessage").show()
+                // The page contains two elements with this id. A plain jQuery
+                // id selector used its getElementById fast path, so only the
+                // first empty-state block was shown.
+                document.getElementById("emptyMessage").style.display = ""
             }
         })
         .fail(function () {
-            $("#loading").hide()
+            document.getElementById("loading").style.display = "none"
             errorFlash("Error fetching campaigns")
         })
 })
