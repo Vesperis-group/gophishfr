@@ -72,41 +72,72 @@ function bsModalShow(selector, trigger) {
 }
 window.bsModalShow = bsModalShow;
 
+// buildFlash renders one dismissable message. The message is inserted as text
+// rather than parsed as markup: these strings come from API responses, and the
+// previous implementation appended them as HTML, which made any markup in a
+// server message render as markup. Nothing in the application relies on that.
+function buildFlash(variantClass, iconClass, message) {
+    var alert = document.createElement("div")
+    alert.style.textAlign = "center"
+    alert.className = "alert " + variantClass
+    var icon = document.createElement("i")
+    icon.className = "fa " + iconClass
+    alert.append(icon, " " + message)
+    return alert
+}
+
+// showFlash replaces the contents of the page-level message area. There can be
+// more than one element carrying the "flashes" id on a page, and only the first
+// has ever been written to, which getElementById preserves.
+function showFlash(variantClass, iconClass, message) {
+    var container = document.getElementById("flashes")
+    if (!container) {
+        return null
+    }
+    container.replaceChildren(buildFlash(variantClass, iconClass, message))
+    return container
+}
+
 function errorFlash(message) {
-    $("#flashes").empty()
-    $("#flashes").append("<div style=\"text-align:center\" class=\"alert alert-danger\">\
-        <i class=\"fa fa-exclamation-circle\"></i> " + message + "</div>")
+    showFlash("alert-danger", "fa-exclamation-circle", message)
 }
 
 function successFlash(message) {
-    $("#flashes").empty()
-    $("#flashes").append("<div style=\"text-align:center\" class=\"alert alert-success\">\
-        <i class=\"fa fa-check-circle\"></i> " + message + "</div>")
+    showFlash("alert-success", "fa-check-circle", message)
 }
 
 // Fade message after n seconds
 function errorFlashFade(message, fade) {
-    $("#flashes").empty()
-    $("#flashes").append("<div style=\"text-align:center\" class=\"alert alert-danger\">\
-        <i class=\"fa fa-exclamation-circle\"></i> " + message + "</div>")
-    setTimeout(function(){
-        $("#flashes").empty()
+    var container = showFlash("alert-danger", "fa-exclamation-circle", message)
+    if (!container) {
+        return
+    }
+    setTimeout(function () {
+        container.replaceChildren()
     }, fade * 1000);
 }
 // Fade message after n seconds
 function successFlashFade(message, fade) {
-    $("#flashes").empty()
-    $("#flashes").append("<div style=\"text-align:center\" class=\"alert alert-success\">\
-        <i class=\"fa fa-check-circle\"></i> " + message + "</div>")
-    setTimeout(function(){
-        $("#flashes").empty()
+    var container = showFlash("alert-success", "fa-check-circle", message)
+    if (!container) {
+        return
+    }
+    setTimeout(function () {
+        container.replaceChildren()
     }, fade * 1000);
-
 }
 
 function modalError(message) {
-    $("#modal\\.flashes").empty().append("<div style=\"text-align:center\" class=\"alert alert-danger\">\
-        <i class=\"fa fa-exclamation-circle\"></i> " + message + "</div>")
+    // Unlike "#flashes", the escaped-dot selector this replaces did not resolve
+    // through getElementById: it matched every element carrying the id. Two
+    // pages carry two of them, one in the page modal and one in a stacked
+    // import modal, so writing to only the first would hide import errors
+    // behind the modal on top.
+    document.querySelectorAll('[id="modal.flashes"]').forEach(function (container) {
+        container.replaceChildren(
+            buildFlash("alert-danger", "fa-exclamation-circle", message)
+        )
+    })
 }
 
 function query(endpoint, method, data, async) {
@@ -124,12 +155,22 @@ function query(endpoint, method, data, async) {
 }
 
 function escapeHtml(text) {
-    return $("<div/>").text(text).html()
+    var element = document.createElement("div")
+    element.textContent = text
+    return element.innerHTML
 }
 window.escapeHtml = escapeHtml
 
 function unescapeHtml(html) {
-    return $("<div/>").html(html).text()
+    // The previous implementation treated undefined as "read", not "write", and
+    // so returned an empty string. Assigning it to innerHTML would instead
+    // produce the literal text "undefined".
+    if (html === undefined) {
+        return ""
+    }
+    var element = document.createElement("div")
+    element.innerHTML = html
+    return element.textContent
 }
 
 /**
@@ -369,15 +410,17 @@ var api = {
 }
 window.api = api
 
-// Register our moment.js datatables listeners
-$(document).ready(function () {
+// The application scripts are plain classic scripts at the end of <body>, so
+// the document is still parsing when they run and DOMContentLoaded has not
+// fired yet.
+document.addEventListener('DOMContentLoaded', function () {
     // Setup nav highlighting
     var path = location.pathname;
-    $('.nav-sidebar li').each(function () {
-        var $this = $(this);
+    document.querySelectorAll('.nav-sidebar li').forEach(function (item) {
         // if the current path is like this link, make it active
-        if ($this.find("a").attr('href') === path) {
-            $this.addClass('active');
+        var link = item.querySelector('a');
+        if (link && link.getAttribute('href') === path) {
+            item.classList.add('active');
         }
     })
     // Registers the date format the tables render, so their date columns are

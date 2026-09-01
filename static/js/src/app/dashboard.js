@@ -104,11 +104,13 @@ function generateStatsPieCharts(campaigns) {
     var stats_series_data = {}
     var total = 0
 
-    $.each(campaigns, function (i, campaign) {
-        $.each(campaign.stats, function (status, count) {
+    campaigns.forEach(function (campaign) {
+        Object.entries(campaign.stats).forEach(function (entry) {
+            var status = entry[0]
+            var count = entry[1]
             if (status == "total") {
                 total += count
-                return true
+                return
             }
             if (!stats_series_data[status]) {
                 stats_series_data[status] = count;
@@ -117,11 +119,13 @@ function generateStatsPieCharts(campaigns) {
             }
         })
     })
-    $.each(stats_series_data, function (status, count) {
+    Object.entries(stats_series_data).forEach(function (entry) {
+        var status = entry[0]
+        var count = entry[1]
         // I don't like this, but I guess it'll have to work.
         // Turns submitted_data into Submitted Data
         if (!(status in statsMapping)) {
-            return true
+            return
         }
         status_label = statsMapping[status]
         stats_data.push({
@@ -147,7 +151,7 @@ function generateStatsPieCharts(campaigns) {
 
 function generateTimelineChart(campaigns) {
     var overview_data = []
-    $.each(campaigns, function (i, campaign) {
+    campaigns.forEach(function (campaign) {
         var campaign_date = moment.utc(campaign.created_date).local()
         // Add it to the chart data
         campaign.y = 0
@@ -169,13 +173,18 @@ function generateTimelineChart(campaigns) {
     })
 }
 
-$(document).ready(function () {
+// The application scripts are plain classic scripts at the end of <body>, so
+// the document is still parsing when they run and DOMContentLoaded has not
+// fired yet.
+document.addEventListener('DOMContentLoaded', function () {
     api.campaigns.summary()
         .done(function (data) {
-            $("#loading").hide()
+            document.getElementById("loading").style.display = "none"
             campaigns = data.campaigns
             if (campaigns.length > 0) {
-                $("#dashboard").show()
+                // The markup hides this with an inline style, so clearing the
+                // inline value is what reveals it.
+                document.getElementById("dashboard").style.display = ""
                 // Create the overview chart data
                 campaignTable = new DataTable("#campaignTable", {
                     columnDefs: [{
@@ -208,7 +217,7 @@ $(document).ready(function () {
                     ]
                 });
                 campaignRows = []
-                $.each(campaigns, function (i, campaign) {
+                campaigns.forEach(function (campaign, i) {
                     var campaign_date = moment(campaign.created_date).format('MMMM Do YYYY, h:mm:ss a')
                     var label = statuses[campaign.status].label || "text-bg-secondary";
                     //section for tooltips on the status of a campaign to show some quick stats
@@ -244,7 +253,7 @@ $(document).ready(function () {
                 generateStatsPieCharts(campaigns)
                 generateTimelineChart(campaigns)
             } else {
-                $("#emptyMessage").show()
+                document.getElementById("emptyMessage").style.display = ""
             }
         })
         .fail(function () {
