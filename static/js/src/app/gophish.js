@@ -295,7 +295,7 @@ var api = {
     campaignId: {
         // get() - Queries the API for GET /campaigns/:id
         get: function (id) {
-            return query("/campaigns/" + id, "GET", {}, true)
+            return requestJSON("/campaigns/" + id, "GET", {})
         },
         // delete() - Deletes a campaign at DELETE /campaigns/:id
         delete: function (id) {
@@ -303,11 +303,11 @@ var api = {
         },
         // results() - Queries the API for GET /campaigns/:id/results
         results: function (id) {
-            return query("/campaigns/" + id + "/results", "GET", {}, true)
+            return requestJSON("/campaigns/" + id + "/results", "GET", {})
         },
         // complete() - Completes a campaign at POST /campaigns/:id/complete
         complete: function (id) {
-            return query("/campaigns/" + id + "/complete", "GET", {}, true)
+            return requestJSON("/campaigns/" + id + "/complete", "GET", {})
         },
         // summary() - Queries the API for GET /campaigns/summary
         summary: function (id) {
@@ -326,7 +326,7 @@ var api = {
         },
         // summary() - Queries the API for GET /groups/summary
         summary: function () {
-            return query("/groups/summary", "GET", {}, true)
+            return requestJSON("/groups/summary", "GET", {})
         }
     },
     // groupId contains the endpoints for /groups/:id
@@ -431,7 +431,7 @@ var api = {
             return query("/imap/", "POST", e, !1)
         },
         validate: function(e) {
-            return query("/imap/validate", "POST", e, true)
+            return requestJSON("/imap/validate", "POST", e)
         }
     },
     // users contains the endpoints for /users
@@ -442,7 +442,7 @@ var api = {
         },
         // post() - Posts a user to POST /users
         post: function (user) {
-            return query("/users/", "POST", user, true)
+            return requestJSON("/users/", "POST", user)
         }
     },
     // userId contains the endpoints for /users/:id
@@ -453,11 +453,11 @@ var api = {
         },
         // put() - Puts a user to PUT /users/:id
         put: function (user) {
-            return query("/users/" + user.id, "PUT", user, true)
+            return requestJSON("/users/" + user.id, "PUT", user)
         },
         // delete() - Deletes a user at DELETE /users/:id
         delete: function (id) {
-            return query("/users/" + id, "DELETE", {}, true)
+            return requestJSON("/users/" + id, "DELETE", {})
         }
     },
     webhooks: {
@@ -473,7 +473,7 @@ var api = {
             return query("/webhooks/" + id, "GET", {}, false)
         },
         put: function(webhook) {
-            return query("/webhooks/" + webhook.id, "PUT", webhook, true)
+            return requestJSON("/webhooks/" + webhook.id, "PUT", webhook)
         },
         delete: function(id) {
             return query("/webhooks/" + id, "DELETE", {}, false)
@@ -495,7 +495,7 @@ var api = {
         return requestJSON("/util/send_test_email", "POST", req)
     },
     reset: function () {
-        return query("/reset", "POST", {}, true)
+        return requestJSON("/reset", "POST", {})
     }
 }
 window.api = api

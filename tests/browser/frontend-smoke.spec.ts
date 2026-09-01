@@ -699,6 +699,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
             complete: (id: unknown) => {
               done: (callback: () => void) => unknown;
               fail: (callback: () => void) => unknown;
+              then: (callback: () => void) => Promise<void>;
             };
           };
         };
@@ -723,6 +724,11 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
         },
         fail() {
           return request;
+        },
+        then(callback: () => void) {
+          completeCalls += 1;
+          callback();
+          return Promise.resolve();
         },
       };
 
@@ -763,6 +769,41 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       doPoll: false,
       text: "Completed!",
     });
+
+    const completionConsoleErrorsBefore = consoleErrors.length;
+    const completionFailedResponsesBefore = failedLocalResponses.length;
+    await page.route("**/api/campaigns/*/complete*", (route) =>
+      route.fulfill({
+        body: JSON.stringify({ message: "synthetic completion failure" }),
+        contentType: "application/json",
+        status: 400,
+      }),
+    );
+    await page.locator("#complete_button").click();
+    await page.locator(".swal2-confirm").click();
+    await expect(page.locator(".swal2-validation-message")).toContainText(
+      "synthetic completion failure",
+    );
+    await expect(page.locator(".swal2-popup")).toBeVisible();
+    await expect(page.locator("#complete_button")).toBeEnabled();
+    await expect(page.locator("#complete_button")).toContainText("Complete");
+    expect(
+      await page.evaluate(
+        () => (window as Window & { doPoll: boolean }).doPoll,
+      ),
+    ).toBe(true);
+    await page.locator(".swal2-cancel").click();
+    await page.unroute("**/api/campaigns/*/complete*");
+    expect(
+      consoleErrors
+        .slice(completionConsoleErrorsBefore)
+        .filter((entry) => !entry.includes("status of 400 (Bad Request)")),
+    ).toEqual([]);
+    consoleErrors.length = completionConsoleErrorsBefore;
+    expect(failedLocalResponses.slice(completionFailedResponsesBefore)).toEqual([
+      expect.stringMatching(/^400 \/api\/campaigns\/\d+\/complete$/),
+    ]);
+    failedLocalResponses.length = completionFailedResponsesBefore;
 
     const chartIDs = [
       "timeline_chart",
@@ -813,7 +854,10 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
           campaignId: {
             results: (
               id: number | undefined,
-            ) => { done: (callback: (campaign: unknown) => void) => void };
+            ) => {
+               done: (callback: (campaign: unknown) => void) => void;
+               then: (callback: (campaign: unknown) => void) => void;
+            };
           };
         };
         updateMap: (results: CampaignResult[]) => void;
@@ -913,14 +957,18 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
             return "must-not-be-read";
           },
         });
-        globals.api.campaignId.results = () => ({
-          done: (callback) => {
+        globals.api.campaignId.results = () => {
+          const handleResult = (callback: (campaign: unknown) => void) => {
             callback({
               ...originalCampaign,
               results: [matchingResult, laterResult],
             });
-          },
-        });
+          };
+          return {
+            done: handleResult,
+            then: handleResult,
+          };
+        };
         globals.poll();
 
         return {
@@ -1211,6 +1259,70 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       timelinePoints: 6,
     });
     await page.unroute(/\/api\/campaigns\/\d+\/results/);
+
+    const refreshConsoleErrorsBefore = consoleErrors.length;
+    const refreshFailedResponsesBefore = failedLocalResponses.length;
+    await page.route(/\/api\/campaigns\/\d+\/results/, (route) =>
+      route.fulfill({
+        body: JSON.stringify({ message: "synthetic campaign refresh failure" }),
+        contentType: "application/json",
+        status: 503,
+      }),
+    );
+    await page.getByRole("button", { name: "Refresh" }).click();
+    await expect(page.locator("#refresh_message")).toBeHidden();
+    await expect(page.locator("#refresh_btn")).toBeVisible();
+    await expect(page.locator('[id="flashes"]').first()).toContainText(
+      "Error refreshing campaign results: synthetic campaign refresh failure",
+    );
+    await page.unroute(/\/api\/campaigns\/\d+\/results/);
+    expect(
+      consoleErrors
+        .slice(refreshConsoleErrorsBefore)
+        .filter((entry) => !entry.includes("status of 503 (Service Unavailable)")),
+    ).toEqual([]);
+    consoleErrors.length = refreshConsoleErrorsBefore;
+    expect(failedLocalResponses.slice(refreshFailedResponsesBefore)).toEqual([
+      expect.stringMatching(/^503 \/api\/campaigns\/\d+\/results$/),
+    ]);
+    failedLocalResponses.length = refreshFailedResponsesBefore;
+
+    const reportConsoleErrorsBefore = consoleErrors.length;
+    const reportFailedResponsesBefore = failedLocalResponses.length;
+    await page.route("**/api/campaigns/*", async (route) => {
+      if (/^\/api\/campaigns\/\d+$/.test(new URL(route.request().url()).pathname)) {
+        await route.fulfill({
+          body: JSON.stringify({ message: "synthetic report lookup failure" }),
+          contentType: "application/json",
+          status: 500,
+        });
+        return;
+      }
+      await route.continue();
+    });
+    await page.evaluate(() => {
+      const scope = window as unknown as {
+        campaign: { id: number };
+        report_mail: (resultID: string, campaignID: number) => void;
+      };
+      scope.report_mail("synthetic-result", scope.campaign.id);
+    });
+    await page.getByRole("button", { name: "Continue" }).click();
+    await expect(page.locator(".swal2-popup")).toContainText(
+      "synthetic report lookup failure",
+    );
+    await page.getByRole("button", { name: "Close" }).click();
+    await page.unroute("**/api/campaigns/*");
+    expect(
+      consoleErrors
+        .slice(reportConsoleErrorsBefore)
+        .filter((entry) => !entry.includes("status of 500 (Internal Server Error)")),
+    ).toEqual([]);
+    consoleErrors.length = reportConsoleErrorsBefore;
+    expect(failedLocalResponses.slice(reportFailedResponsesBefore)).toEqual([
+      expect.stringMatching(/^500 \/api\/campaigns\/\d+$/),
+    ]);
+    failedLocalResponses.length = reportFailedResponsesBefore;
   });
 
   await test.step("campaign controls initialize Bootstrap and native widgets", async () => {
@@ -1385,6 +1497,33 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect.poll(() => repeatedGroupResponses).toBe(2);
     page.off("response", countRepeatedGroupResponse);
     expect(await optionState()).toEqual(beforeRepeatedSetup);
+
+    const setupConsoleErrorsBefore = consoleErrors.length;
+    const setupFailedResponsesBefore = failedLocalResponses.length;
+    await page.route("**/api/groups/summary*", (route) =>
+      route.fulfill({
+        body: JSON.stringify({ message: "synthetic group setup failure" }),
+        contentType: "application/json",
+        status: 503,
+      }),
+    );
+    await page.evaluate(() => {
+      (window as Window & { setupOptions: () => void }).setupOptions();
+    });
+    await expect(page.locator('[id="modal.flashes"]')).toContainText(
+      "synthetic group setup failure",
+    );
+    await page.unroute("**/api/groups/summary*");
+    expect(
+      consoleErrors
+        .slice(setupConsoleErrorsBefore)
+        .filter((entry) => !entry.includes("status of 503 (Service Unavailable)")),
+    ).toEqual([]);
+    consoleErrors.length = setupConsoleErrorsBefore;
+    expect(failedLocalResponses.slice(setupFailedResponsesBefore)).toEqual([
+      "503 /api/groups/summary",
+    ]);
+    failedLocalResponses.length = setupFailedResponsesBefore;
     await closeApplicationModal(page);
 
     // Copy is driven by a dynamically rendered table button. The source record
@@ -1912,7 +2051,63 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       .click();
     await expect(page.locator("#modal")).toBeVisible();
     await expect.poll(() => page.locator("#username").inputValue()).toBe(newUsername);
+
+    const userErrorConsoleBefore = consoleErrors.length;
+    const userErrorResponsesBefore = failedLocalResponses.length;
+    await page.route("**/api/users/*", async (route) => {
+      if (route.request().method() === "PUT") {
+        await route.fulfill({
+          body: JSON.stringify({ message: "synthetic user update failure" }),
+          contentType: "application/json",
+          status: 400,
+        });
+        return;
+      }
+      await route.continue();
+    });
+    await page.locator("#modal #modalSubmit").click();
+    await expect(page.locator("#modal")).toBeVisible();
+    await expect(page.locator('[id="modal.flashes"]')).toContainText(
+      "synthetic user update failure",
+    );
+    await page.unroute("**/api/users/*");
     await closeApplicationModal(page);
+
+    const createdUserRow = page
+      .locator("#userTable tbody tr")
+      .filter({ hasText: newUsername });
+    await page.route("**/api/users/*", async (route) => {
+      if (route.request().method() === "DELETE") {
+        await route.fulfill({
+          body: JSON.stringify({ message: "synthetic user deletion failure" }),
+          contentType: "application/json",
+          status: 400,
+        });
+        return;
+      }
+      await route.continue();
+    });
+    await createdUserRow.locator("button.delete_button").click();
+    await page.getByRole("button", { name: "Delete" }).click();
+    await expect(page.locator(".swal2-validation-message")).toContainText(
+      "synthetic user deletion failure",
+    );
+    await page.unroute("**/api/users/*");
+    await page.getByRole("button", { name: "Delete" }).click();
+    await expect(page.locator(".swal2-popup")).toContainText("User Deleted!");
+    await page.getByRole("button", { name: "OK" }).click();
+
+    expect(
+      consoleErrors
+        .slice(userErrorConsoleBefore)
+        .filter((entry) => !entry.includes("status of 400 (Bad Request)")),
+    ).toEqual([]);
+    consoleErrors.length = userErrorConsoleBefore;
+    expect(failedLocalResponses.slice(userErrorResponsesBefore)).toEqual([
+      expect.stringMatching(/^400 \/api\/users\/\d+$/),
+      expect.stringMatching(/^400 \/api\/users\/\d+$/),
+    ]);
+    failedLocalResponses.length = userErrorResponsesBefore;
     page.off("request", captureUser);
   });
 
@@ -2023,7 +2218,41 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator("#modal")).toBeVisible();
     await expect.poll(() => page.locator("#name").inputValue()).toBe(webhookName);
     expect(await page.locator("#is_active").isChecked()).toBe(true);
-    await closeApplicationModal(page);
+
+    const webhookUpdateConsoleBefore = consoleErrors.length;
+    const webhookUpdateResponsesBefore = failedLocalResponses.length;
+    const updatedWebhookName = `${webhookName}_updated`;
+    await page.route("**/api/webhooks/*", async (route) => {
+      if (route.request().method() === "PUT") {
+        await route.fulfill({
+          body: JSON.stringify({ message: "synthetic webhook update failure" }),
+          contentType: "application/json",
+          status: 400,
+        });
+        return;
+      }
+      await route.continue();
+    });
+    await page.locator("#name").fill(updatedWebhookName);
+    await page.locator("#modal #modalSubmit").click();
+    await expect(page.locator("#modal")).toBeVisible();
+    await expect(page.locator('[id="modal.flashes"]')).toContainText(
+      "synthetic webhook update failure",
+    );
+    await page.unroute("**/api/webhooks/*");
+    await page.locator("#modal #modalSubmit").click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+    await expect(page.locator("#webhookTable")).toContainText(updatedWebhookName);
+    expect(
+      consoleErrors
+        .slice(webhookUpdateConsoleBefore)
+        .filter((entry) => !entry.includes("status of 400 (Bad Request)")),
+    ).toEqual([]);
+    consoleErrors.length = webhookUpdateConsoleBefore;
+    expect(failedLocalResponses.slice(webhookUpdateResponsesBefore)).toEqual([
+      expect.stringMatching(/^400 \/api\/webhooks\/\d+$/),
+    ]);
+    failedLocalResponses.length = webhookUpdateResponsesBefore;
     await page.unroute("**/api/webhooks/*/validate");
     page.off("request", captureWebhook);
   });
@@ -2040,6 +2269,31 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       page.getByRole("link", { name: "Account Settings" }).click(),
     ]);
     await expect(page).toHaveURL(/\/settings$/);
+
+    const resetConsoleErrorsBefore = consoleErrors.length;
+    const resetFailedResponsesBefore = failedLocalResponses.length;
+    await page.route("**/api/reset", (route) =>
+      route.fulfill({
+        body: JSON.stringify({ message: "synthetic reset failure" }),
+        contentType: "application/json",
+        status: 400,
+      }),
+    );
+    await page.locator("#apiResetForm button").click();
+    await expect(page.locator('[id="flashes"]').first()).toContainText(
+      "synthetic reset failure",
+    );
+    await page.unroute("**/api/reset");
+    expect(
+      consoleErrors
+        .slice(resetConsoleErrorsBefore)
+        .filter((entry) => !entry.includes("status of 400 (Bad Request)")),
+    ).toEqual([]);
+    consoleErrors.length = resetConsoleErrorsBefore;
+    expect(failedLocalResponses.slice(resetFailedResponsesBefore)).toEqual([
+      "400 /api/reset",
+    ]);
+    failedLocalResponses.length = resetFailedResponsesBefore;
 
     // Submitting must not navigate: the handler has to cancel the browser's own
     // submission and post in the background instead. The response is stubbed so
@@ -2174,6 +2428,36 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       await dialogConfirm.click();
       await expect(page.locator(".swal2-popup")).not.toBeVisible();
     }
+
+    const imapConsoleErrorsBefore = consoleErrors.length;
+    const imapFailedResponsesBefore = failedLocalResponses.length;
+    await page.route("**/api/imap/validate", (route) =>
+      route.fulfill({
+        body: JSON.stringify({ message: "synthetic IMAP validation failure" }),
+        contentType: "application/json",
+        status: 503,
+      }),
+    );
+    await page.locator("#validateimap").click();
+    await expect.poll(disabledStates).toEqual(allFalse);
+    await expect
+      .poll(() => page.locator("#validateimap").evaluate((b) => b.innerHTML))
+      .toBe(originalButtonHtml);
+    await expect(page.locator(".swal2-popup")).toContainText(
+      "An unecpected error occured.",
+    );
+    await page.locator(".swal2-confirm").click();
+    await page.unroute("**/api/imap/validate");
+    expect(
+      consoleErrors
+        .slice(imapConsoleErrorsBefore)
+        .filter((entry) => !entry.includes("status of 503 (Service Unavailable)")),
+    ).toEqual([]);
+    consoleErrors.length = imapConsoleErrorsBefore;
+    expect(failedLocalResponses.slice(imapFailedResponsesBefore)).toEqual([
+      "503 /api/imap/validate",
+    ]);
+    failedLocalResponses.length = imapFailedResponsesBefore;
   });
 
   await test.step("sending profile modal keeps its payload and header contracts", async () => {

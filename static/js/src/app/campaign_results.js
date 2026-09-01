@@ -172,14 +172,10 @@ function completeCampaign() {
         allowOutsideClick: false,
         showLoaderOnConfirm: true,
         preConfirm: function () {
-            return new Promise(function (resolve, reject) {
-                api.campaignId.complete(campaign.id)
-                    .done(function (msg) {
-                        resolve()
-                    })
-                    .fail(function (data) {
-                        reject(data.responseJSON.message)
-                    })
+            return api.campaignId.complete(campaign.id).then(function () {
+            }, function (error) {
+                Swal.showValidationMessage(requestErrorMessage(error))
+                return false
             })
         }
     }).then(function (result) {
@@ -519,7 +515,7 @@ function createStatusLabel(status, send_date) {
  */
 function poll() {
     api.campaignId.results(campaign.id)
-        .done(function (c) {
+        .then(function (c) {
             campaign = c
             /* Update the timeline */
             var timeline_series_data = []
@@ -611,6 +607,10 @@ function poll() {
             bsInitTooltips()
             document.getElementById("refresh_message").style.display = "none"
             document.getElementById("refresh_btn").style.display = "inline-block"
+        }, function (error) {
+            document.getElementById("refresh_message").style.display = "none"
+            document.getElementById("refresh_btn").style.display = "inline-block"
+            errorFlash("Error refreshing campaign results: " + requestErrorMessage(error))
         })
 }
 
@@ -618,7 +618,7 @@ function load() {
     campaign.id = window.location.pathname.split('/').slice(-1)[0]
     var use_map = JSON.parse(localStorage.getItem('gophish.use_map'))
     api.campaignId.results(campaign.id)
-        .done(function (c) {
+        .then(function (c) {
             campaign = c
             if (campaign) {
                 document.querySelectorAll("title").forEach(function (title) {
@@ -825,8 +825,7 @@ function load() {
                 }
                 updateMap(campaign.results)
             }
-        })
-        .fail(function () {
+        }, function () {
             document.getElementById("loading").style.display = "none"
             errorFlash(" Campaign not found!")
         })
@@ -860,7 +859,7 @@ function report_mail(rid, cid) {
         showLoaderOnConfirm: true
     }).then(function (result) {
         if (result.value){
-            api.campaignId.get(cid).done((function(c) {
+            api.campaignId.get(cid).then(function(c) {
                 report_url = new URL(c.url)
                 report_url.pathname = '/report'
                 report_url.search = "?rid=" + rid 
@@ -883,7 +882,14 @@ function report_mail(rid, cid) {
                         confirmButtonText: 'Close'
                     });
                 });
-            }));
+            }, function (error) {
+                Swal.fire({
+                    title: 'Error',
+                    text: requestErrorMessage(error),
+                    type: 'error',
+                    confirmButtonText: 'Close'
+                });
+            });
         }
     })
 }

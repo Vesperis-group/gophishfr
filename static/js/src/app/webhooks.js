@@ -18,14 +18,13 @@ const saveWebhook = (id) => {
     if (id != -1) {
         wh.id = parseInt(id);
         api.webhookId.put(wh)
-            .done(function(data) {
+            .then(function(data) {
                 dismiss();
                 load();
                 bsModalHide("#modal");
                 successFlash(`Webhook "${escapeHtml(wh.name)}" has been updated successfully!`);
-            })
-            .fail(function(data) {
-                modalError(data.responseJSON.message)
+            }, function(error) {
+                modalError(requestErrorMessage(error))
             })
     } else {
         api.webhooks.post(wh)
