@@ -388,7 +388,7 @@ $(document).ready(function () {
                 $("#campaignTable").show()
                 $("#campaignTableArchive").show()
 
-                activeCampaignsTable = $("#campaignTable").DataTable({
+                activeCampaignsTable = new DataTable("#campaignTable", {
                     columnDefs: [{
                         orderable: false,
                         targets: "no-sort"
@@ -397,7 +397,7 @@ $(document).ready(function () {
                         [1, "desc"]
                     ]
                 });
-                archivedCampaignsTable = $("#campaignTableArchive").DataTable({
+                archivedCampaignsTable = new DataTable("#campaignTableArchive", {
                     columnDefs: [{
                         orderable: false,
                         targets: "no-sort"

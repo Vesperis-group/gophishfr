@@ -281,35 +281,44 @@ p {
     /* Smaller font on modal tables */
 }
 
-.dataTables_info {
+.dt-info {
     font-size: 15px;
 }
 
 /* Sort Icons */
 
-table.dataTable thead .sorting:after,
-table.dataTable thead .sorting_asc:after,
-table.dataTable thead .sorting_desc:after {
+/* The table draws its own CSS-triangle indicators inside a `dt-column-order`
+   element. They are replaced here by the icon set used everywhere else, which
+   is what this project displayed before. The icon is attached to the column
+   title rather than to the cell, because the cell's contents are laid out in a
+   flex container and a pseudo-element on the cell would drop onto its own
+   line. */
+
+table.dataTable thead > tr > th .dt-column-order {
+    display: none !important;
+}
+
+table.dataTable thead > tr > th.dt-orderable-asc .dt-column-title::after,
+table.dataTable thead > tr > th.dt-orderable-desc .dt-column-title::after,
+table.dataTable thead > tr > th.dt-ordering-asc .dt-column-title::after,
+table.dataTable thead > tr > th.dt-ordering-desc .dt-column-title::after {
     font-family: 'FontAwesome' !important;
-    position: relative !important;
-    display: initial !important;
-    top: initial !important;
-    right: initial !important;
-    left: 6px;
+    margin-left: 6px;
     color: #1abc9c;
 }
 
-table.dataTable thead .sorting:after {
+table.dataTable thead > tr > th.dt-orderable-asc .dt-column-title::after,
+table.dataTable thead > tr > th.dt-orderable-desc .dt-column-title::after {
     content: "\f0dc" !important;
     color: initial;
 }
 
-table.dataTable thead .sorting_asc:after {
+table.dataTable thead > tr > th.dt-ordering-asc .dt-column-title::after {
     content: "\f0de" !important;
     opacity: .8 !important;
 }
 
-table.dataTable thead .sorting_desc:after {
+table.dataTable thead > tr > th.dt-ordering-desc .dt-column-title::after {
     content: "\f0dd" !important;
     opacity: .8 !important;
 }
@@ -587,7 +596,7 @@ table.dataTable {
     overflow-x: hidden;
 }
 
-.dataTables_wrapper {
+.dt-container {
     overflow-x: auto;
     -webkit-overflow-scrolling: touch;
 }

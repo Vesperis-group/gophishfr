@@ -192,7 +192,7 @@ const load = () => {
             users = us
             $("#loading").hide()
             $("#userTable").show()
-            let userTable = $("#userTable").DataTable({
+            let userTable = new DataTable("#userTable", {
                 destroy: true,
                 columnDefs: [{
                     orderable: false,

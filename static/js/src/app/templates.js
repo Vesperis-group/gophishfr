@@ -1,5 +1,9 @@
 var templates = []
 var htmlEditor
+// attachmentsTable holds the DataTables instance backing the modal's attachment
+// list. It is recreated every time the modal opens, which is what the destroy
+// option did before.
+var attachmentsTable = null
 var icons = {
     "application/vnd.ms-excel": "fa-file-excel-o",
     "text/plain": "fa-file-text-o",
@@ -35,7 +39,7 @@ function save(idx) {
     }
     template.text = $("#text_editor").val()
     // Add the attachments
-    $.each($("#attachmentsTable").DataTable().rows().data(), function (i, target) {
+    attachmentsTable.rows().data().toArray().forEach(function (target) {
         template.attachments.push({
             name: unescapeHtml(target[1]),
             content: target[3],
@@ -70,7 +74,9 @@ function save(idx) {
 
 function dismiss() {
     $("#modal\\.flashes").empty()
-    $("#attachmentsTable").dataTable().DataTable().clear().draw()
+    if (attachmentsTable) {
+        attachmentsTable.clear().draw()
+    }
     $("#name").val("")
     $("#subject").val("")
     $("#text_editor").val("")
@@ -128,20 +134,35 @@ function deleteTemplate(idx) {
     }
 }
 
+// The attachment table's configuration is shared by every entry point that
+// opens the modal, so the three paths cannot drift apart.
+var attachmentsTableOptions = {
+    destroy: true,
+    order: [
+        [1, "asc"]
+    ],
+    columnDefs: [{
+        orderable: false,
+        targets: "no-sort"
+    }, {
+        className: "datatable_hidden",
+        targets: [3, 4]
+    }]
+}
+
+function createAttachmentsTable() {
+    attachmentsTable = new DataTable("#attachmentsTable", attachmentsTableOptions)
+    return attachmentsTable
+}
+
 function attach(files) {
-    attachmentsTable = $("#attachmentsTable").DataTable({
-        destroy: true,
-        "order": [
-            [1, "asc"]
-        ],
-        columnDefs: [{
-            orderable: false,
-            targets: "no-sort"
-        }, {
-            sClass: "datatable_hidden",
-            targets: [3, 4]
-        }]
-    });
+    // The table is deliberately not rebuilt here. It already holds the
+    // template's attachments, and rebuilding it drops every row that has no
+    // rendered node, which silently loses attachments once a template has more
+    // than one page of them.
+    if (!attachmentsTable) {
+        createAttachmentsTable()
+    }
     $.each(files, function (i, file) {
         var reader = new FileReader();
         /* Make this a datatable */
@@ -172,19 +193,7 @@ function edit(idx) {
     })
     htmlEditor = GophishHTMLEditor.create("html_editor")
     $("#attachmentsTable").show()
-    attachmentsTable = $('#attachmentsTable').DataTable({
-        destroy: true,
-        "order": [
-            [1, "asc"]
-        ],
-        columnDefs: [{
-            orderable: false,
-            targets: "no-sort"
-        }, {
-            sClass: "datatable_hidden",
-            targets: [3, 4]
-        }]
-    });
+    createAttachmentsTable()
     var template = {
         attachments: []
     }
@@ -220,12 +229,6 @@ function edit(idx) {
         htmlEditor.setData("")
     }
     htmlEditor.showSource()
-    // Handle Deletion
-    $("#attachmentsTable").unbind('click').on("click", "span>i.fa-trash-o", function () {
-        attachmentsTable.row($(this).parents('tr'))
-            .remove()
-            .draw();
-    })
 }
 
 function copy(idx) {
@@ -237,19 +240,7 @@ function copy(idx) {
     })
     htmlEditor = GophishHTMLEditor.create("html_editor")
     $("#attachmentsTable").show()
-    attachmentsTable = $('#attachmentsTable').DataTable({
-        destroy: true,
-        "order": [
-            [1, "asc"]
-        ],
-        columnDefs: [{
-            orderable: false,
-            targets: "no-sort"
-        }, {
-            sClass: "datatable_hidden",
-            targets: [3, 4]
-        }]
-    });
+    createAttachmentsTable()
     var template = {
         attachments: []
     }
@@ -270,12 +261,6 @@ function copy(idx) {
             file.content,
             file.type || "application/octet-stream"
         ]).draw()
-    })
-    // Handle Deletion
-    $("#attachmentsTable").unbind('click').on("click", "span>i.fa-trash-o", function () {
-        attachmentsTable.row($(this).parents('tr'))
-            .remove()
-            .draw();
     })
     if (template.html.indexOf("{{.Tracker}}") != -1) {
         $("#use_tracker_checkbox").prop("checked", true)
@@ -321,7 +306,7 @@ function load() {
             $("#loading").hide()
             if (templates.length > 0) {
                 $("#templateTable").show()
-                templateTable = $("#templateTable").DataTable({
+                templateTable = new DataTable("#templateTable", {
                     destroy: true,
                     columnDefs: [{
                         orderable: false,
@@ -364,6 +349,20 @@ $(document).ready(function () {
     });
     document.getElementById('importEmailModal').addEventListener('hidden.bs.modal', function (event) {
         $("#email_content").val("")
+    })
+    // Handle Deletion. Bound once here rather than rebound every time the modal
+    // opens, and the row is resolved from the clicked icon with a native DOM
+    // lookup because the table's row selector no longer goes through jQuery.
+    document.getElementById("attachmentsTable").addEventListener("click", function (event) {
+        var icon = event.target.closest("span > i.fa-trash-o")
+        if (!icon || !attachmentsTable) {
+            return
+        }
+        var row = icon.closest("tr")
+        if (!row) {
+            return
+        }
+        attachmentsTable.row(row).remove().draw()
     })
     load()
 

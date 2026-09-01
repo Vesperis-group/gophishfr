@@ -98,6 +98,11 @@ unknown; this limitation is documented in the frontend inventory.
 Highcharts is not distributed by GophishFR. Its historical removal and
 replacement are recorded in the frontend inventory.
 
+The DataTables date/time sorting plug-in that depended on Moment.js is no
+longer distributed. DataTables 3 provides that capability itself, and the
+vendored `static/js/src/vendor/datetime-moment.js` was removed with the
+upgrade.
+
 Select2 is no longer distributed by GophishFR. It was removed in favour of
 native `<select>` controls and Tom Select for the multi-select group picker.
 Its historical removal is recorded in the frontend inventory.

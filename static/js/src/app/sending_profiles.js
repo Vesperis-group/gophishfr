@@ -1,10 +1,16 @@
 var profiles = []
 
+// headers holds the DataTables instance backing the modal's custom-header list.
+// It is recreated every time the modal opens, which is what the destroy option
+// did before.
+var headers = null
+
 // Attempts to send a test email by POSTing to /campaigns/
 function sendTestEmail() {
-    var headers = [];
-    $.each($("#headersTable").DataTable().rows().data(), function (i, header) {
-        headers.push({
+    // Named apart from the module-level DataTables instance this reads from.
+    var headerRecords = [];
+    headers.rows().data().toArray().forEach(function (header) {
+        headerRecords.push({
             key: unescapeHtml(header[0]),
             value: unescapeHtml(header[1]),
         })
@@ -22,7 +28,7 @@ function sendTestEmail() {
             username: $("#username").val(),
             password: $("#password").val(),
             ignore_cert_errors: $("#ignore_cert_errors").prop("checked"),
-            headers: headers,
+            headers: headerRecords,
         }
     }
     btnHtml = $("#sendTestModalSubmit").html()
@@ -46,7 +52,7 @@ function save(idx) {
     var profile = {
         headers: []
     }
-    $.each($("#headersTable").DataTable().rows().data(), function (i, header) {
+    headers.rows().data().toArray().forEach(function (header) {
         profile.headers.push({
             key: unescapeHtml(header[0]),
             value: unescapeHtml(header[1]),
@@ -93,7 +99,9 @@ function dismiss() {
     $("#username").val("")
     $("#password").val("")
     $("#ignore_cert_errors").prop("checked", true)
-    $("#headersTable").dataTable().DataTable().clear().draw()
+    if (headers) {
+        headers.clear().draw()
+    }
     bsModalHide("#modal")
 }
 
@@ -140,8 +148,8 @@ var deleteProfile = function (idx) {
 }
 
 function edit(idx) {
-    headers = $("#headersTable").dataTable({
-        destroy: true, // Destroy any other instantiated table - http://datatables.net/manual/tech-notes/3#destroy
+    headers = new DataTable("#headersTable", {
+        destroy: true, // Replace any previously instantiated table
         columnDefs: [{
             orderable: false,
             targets: "no-sort"
@@ -195,7 +203,7 @@ function load() {
             $("#loading").hide()
             if (profiles.length > 0) {
                 $("#profileTable").show()
-                profileTable = $("#profileTable").DataTable({
+                profileTable = new DataTable("#profileTable", {
                     destroy: true,
                     columnDefs: [{
                         orderable: false,
@@ -241,7 +249,7 @@ function addCustomHeader(header, value) {
     ];
 
     // Check table to see if header already exists.
-    var headersTable = headers.DataTable();
+    var headersTable = headers;
     var existingRowIndex = headersTable
         .column(0) // Email column has index of 2
         .data()
@@ -283,12 +291,19 @@ $(document).ready(function () {
         $("#headerKey").focus();
         return false;
     });
-    // Handle Deletion
-    $("#headersTable").on("click", "span>i.fa-trash-o", function () {
-        headers.DataTable()
-            .row($(this).parents('tr'))
-            .remove()
-            .draw();
+    // Handle Deletion. The row is resolved from the clicked icon with a native
+    // DOM lookup, because the table's row selector no longer goes through
+    // jQuery.
+    document.getElementById("headersTable").addEventListener("click", function (event) {
+        var icon = event.target.closest("span > i.fa-trash-o")
+        if (!icon || !headers) {
+            return
+        }
+        var row = icon.closest("tr")
+        if (!row) {
+            return
+        }
+        headers.row(row).remove().draw()
     });
     load()
 })

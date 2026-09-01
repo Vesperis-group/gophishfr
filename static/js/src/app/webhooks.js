@@ -49,7 +49,7 @@ const load = () => {
             webhooks = whs;
             $("#loading").hide()
             $("#webhookTable").show()
-            let webhookTable = $("#webhookTable").DataTable({
+            let webhookTable = new DataTable("#webhookTable", {
                 destroy: true,
                 columnDefs: [{
                     orderable: false,

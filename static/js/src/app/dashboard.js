@@ -177,7 +177,7 @@ $(document).ready(function () {
             if (campaigns.length > 0) {
                 $("#dashboard").show()
                 // Create the overview chart data
-                campaignTable = $("#campaignTable").DataTable({
+                campaignTable = new DataTable("#campaignTable", {
                     columnDefs: [{
                             orderable: false,
                             targets: "no-sort"

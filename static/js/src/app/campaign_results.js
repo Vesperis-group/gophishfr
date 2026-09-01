@@ -103,11 +103,15 @@ var progressListing = [
 
 var campaign = {}
 var bubbles = []
+// resultsTable holds the DataTables instance backing the campaign results.
+var resultsTable = null
 
 function dismiss() {
     $("#modal\\.flashes").empty()
     bsModalHide('#modal')
-    $("#resultsTable").dataTable().DataTable().clear().draw()
+    if (resultsTable) {
+        resultsTable.clear().draw()
+    }
 }
 
 // Deletes a campaign after prompting the user
@@ -561,27 +565,37 @@ function poll() {
             })
 
             /* Update the datatable */
-            resultsTable = $("#resultsTable").DataTable()
-            resultsTable.rows().every(function (i, tableLoop, rowLoop) {
-                var row = this.row(i)
-                var rowData = row.data()
-                var rid = rowData[0]
-                $.each(campaign.results, function (j, result) {
-                    if (result.id == rid) {
-                        rowData[8] = moment(result.send_date).format('MMMM Do YYYY, h:mm:ss a')
-                        rowData[7] = result.reported
-                        rowData[6] = result.status
-                        resultsTable.row(i).data(rowData)
-                        if (row.child.isShown()) {
-                            $(row.node()).find("#caret").removeClass("fa-caret-right")
-                            $(row.node()).find("#caret").addClass("fa-caret-down")
-                            row.child(renderTimeline(row.data()))
+            // Only the table update is skipped when the results table has
+            // not been built yet; the rest of this callback still has to
+            // run, or the refresh control stays hidden for good.
+            if (resultsTable) {
+                resultsTable.rows().every(function (i) {
+                    var row = resultsTable.row(i)
+                    var rowData = row.data()
+                    var rid = rowData[0]
+                    $.each(campaign.results, function (j, result) {
+                        if (result.id == rid) {
+                            rowData[8] = moment(result.send_date).format('MMMM Do YYYY, h:mm:ss a')
+                            rowData[7] = result.reported
+                            rowData[6] = result.status
+                            resultsTable.row(i).data(rowData)
+                            if (row.child.isShown()) {
+                                // The row node only exists while the row is
+                                // rendered, which an open child row implies.
+                                var node = row.node()
+                                var caret = node ? node.querySelector("#caret") : null
+                                if (caret) {
+                                    caret.classList.remove("fa-caret-right")
+                                    caret.classList.add("fa-caret-down")
+                                }
+                                row.child(renderTimeline(row.data()))
+                            }
+                            return false
                         }
-                        return false
-                    }
+                    })
                 })
-            })
-            resultsTable.draw(false)
+                resultsTable.draw(false)
+            }
             /* Update the map information */
             updateMap(campaign.results)
             bsInitTooltips()
@@ -622,7 +636,7 @@ function load() {
                     }
                 })
                 // Setup the results table
-                resultsTable = $("#resultsTable").DataTable({
+                resultsTable = new DataTable("#resultsTable", {
                     destroy: true,
                     "order": [
                         [2, "asc"]
@@ -689,22 +703,36 @@ function load() {
                 resultsTable.draw();
                 // Setup tooltips
                 bsInitTooltips()
-                // Setup the individual timelines
-                $('#resultsTable tbody').on('click', 'td.details-control', function () {
-                    var tr = $(this).closest('tr');
+                // Setup the individual timelines. The row is resolved from the
+                // clicked cell with native DOM lookups, because the table's row
+                // selector no longer goes through jQuery.
+                document.querySelector('#resultsTable tbody').addEventListener('click', function (event) {
+                    var cell = event.target.closest('td.details-control')
+                    if (!cell) {
+                        return
+                    }
+                    var tr = cell.closest('tr')
+                    if (!tr) {
+                        return
+                    }
                     var row = resultsTable.row(tr);
+                    var caret = cell.querySelector("i")
                     if (row.child.isShown()) {
                         // This row is already open - close it
                         row.child.hide();
-                        tr.removeClass('shown');
-                        $(this).find("i").removeClass("fa-caret-down")
-                        $(this).find("i").addClass("fa-caret-right")
+                        tr.classList.remove('shown');
+                        if (caret) {
+                            caret.classList.remove("fa-caret-down")
+                            caret.classList.add("fa-caret-right")
+                        }
                     } else {
                         // Open this row
-                        $(this).find("i").removeClass("fa-caret-right")
-                        $(this).find("i").addClass("fa-caret-down")
+                        if (caret) {
+                            caret.classList.remove("fa-caret-right")
+                            caret.classList.add("fa-caret-down")
+                        }
                         row.child(renderTimeline(row.data())).show();
-                        tr.addClass('shown');
+                        tr.classList.add('shown');
                     }
                 });
                 // Setup the graphs
