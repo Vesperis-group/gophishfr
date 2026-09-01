@@ -107,7 +107,9 @@ var bubbles = []
 var resultsTable = null
 
 function dismiss() {
-    $("#modal\\.flashes").empty()
+    document.querySelectorAll('[id="modal.flashes"]').forEach(function (container) {
+        container.replaceChildren()
+    })
     bsModalHide('#modal')
     if (resultsTable) {
         resultsTable.clear().draw()
@@ -146,8 +148,12 @@ function deleteCampaign() {
                 'success'
             );
         }
-        $('button:contains("OK")').on('click', function () {
-            location.href = '/campaigns'
+        document.querySelectorAll("button").forEach(function (button) {
+            if (button.textContent.includes("OK")) {
+                button.addEventListener('click', function () {
+                    location.href = '/campaigns'
+                })
+            }
         })
     })
 }
@@ -183,8 +189,8 @@ function completeCampaign() {
                 'This campaign has been completed!',
                 'success'
             );
-            $('#complete_button')[0].disabled = true;
-            $('#complete_button').text('Completed!')
+            document.getElementById('complete_button').disabled = true;
+            document.getElementById('complete_button').textContent = 'Completed!'
             doPoll = false;
         }
     })
@@ -192,7 +198,7 @@ function completeCampaign() {
 
 // Exports campaign results as a CSV file
 function exportAsCSV(scope) {
-    exportHTML = $("#exportButton").html()
+    exportHTML = document.getElementById("exportButton").innerHTML
     var csvScope = null
     var filename = campaign.name + ' - ' + capitalize(scope) + '.csv'
     switch (scope) {
@@ -206,7 +212,7 @@ function exportAsCSV(scope) {
     if (!csvScope) {
         return
     }
-    $("#exportButton").html('<i class="fa fa-spinner fa-spin"></i>')
+    document.getElementById("exportButton").innerHTML = '<i class="fa fa-spinner fa-spin"></i>'
     var csvString = Papa.unparse(csvScope, {
         'escapeFormulae': true
     })
@@ -224,29 +230,29 @@ function exportAsCSV(scope) {
         dlLink.click();
         document.body.removeChild(dlLink)
     }
-    $("#exportButton").html(exportHTML)
+    document.getElementById("exportButton").innerHTML = exportHTML
 }
 
 function replay(event_idx) {
     request = campaign.timeline[event_idx]
     details = JSON.parse(request.details)
     url = null
-    form = $('<form>').attr({
-        method: 'POST',
-        target: '_blank',
-    })
+    form = document.createElement('form')
+    form.method = 'POST'
+    form.target = '_blank'
     /* Create a form object and submit it */
-    $.each(Object.keys(details.payload), function (i, param) {
+    Object.keys(details.payload).forEach(function (param) {
         if (param == "rid") {
-            return true;
+            return;
         }
         if (param == "__original_url") {
             url = details.payload[param];
-            return true;
+            return;
         }
-        $('<input>').attr({
-            name: param,
-        }).val(details.payload[param]).appendTo(form);
+        var input = document.createElement('input')
+        input.name = param
+        input.value = details.payload[param] == null ? "" : details.payload[param]
+        form.appendChild(input)
     })
     /* Ensure we know where to send the user */
     // Prompt for the URL
@@ -275,10 +281,10 @@ function replay(event_idx) {
     submitForm()
 
     function submitForm() {
-        form.attr({
-            action: url
-        })
-        form.appendTo('body').submit().remove()
+        form.action = url
+        document.body.appendChild(form)
+        form.submit()
+        form.remove()
     }
 }
 
@@ -371,7 +377,7 @@ function renderTimeline(data) {
         '</h6><span class="subtitle">Email: ' + escapeHtml(record.email) +
         '<br>Result ID: ' + escapeHtml(record.id) + '</span>' +
         '<div class="timeline-graph col-sm-6">'
-    $.each(campaign.timeline, function (i, event) {
+    campaign.timeline.forEach(function (event, i) {
         if (!event.email || event.email == record.email) {
             // Add the event
             results += '<div class="timeline-entry">' +
@@ -398,9 +404,9 @@ function renderTimeline(data) {
                     results += '<div class="timeline-event-results">'
                     results += '    <table class="table table-sm table-bordered table-striped">'
                     results += '        <thead><tr><th>Parameter</th><th>Value(s)</tr></thead><tbody>'
-                    $.each(Object.keys(details.payload), function (i, param) {
+                    Object.keys(details.payload).forEach(function (param) {
                         if (param == "rid") {
-                            return true;
+                            return;
                         }
                         results += '    <tr>'
                         results += '        <td>' + escapeHtml(param) + '</td>'
@@ -460,19 +466,20 @@ var updateMap = function (results) {
         return
     }
     bubbles = []
-    $.each(campaign.results, function (i, result) {
+    campaign.results.forEach(function (result) {
         // Check that it wasn't an internal IP
         if (result.latitude == 0 && result.longitude == 0) {
-            return true;
+            return;
         }
         newIP = true
-        $.each(bubbles, function (i, bubble) {
+        for (var i = 0; i < bubbles.length; i++) {
+            var bubble = bubbles[i]
             if (bubble.ip == result.ip) {
                 bubbles[i].radius += 1
                 newIP = false
-                return false
+                break
             }
-        })
+        }
         if (newIP) {
             bubbles.push({
                 latitude: result.latitude,
@@ -516,9 +523,9 @@ function poll() {
             campaign = c
             /* Update the timeline */
             var timeline_series_data = []
-            $.each(campaign.timeline, function (i, event) {
+            campaign.timeline.forEach(function (event) {
                 if (event.message == "Campaign Created") {
-                    return true
+                    return
                 }
                 var event_date = moment.utc(event.time).local()
                 timeline_series_data.push({
@@ -536,7 +543,7 @@ function poll() {
             Object.keys(statusMapping).forEach(function (k) {
                 email_series_data[k] = 0
             });
-            $.each(campaign.results, function (i, result) {
+            campaign.results.forEach(function (result) {
                 email_series_data[result.status]++;
                 if (result.reported) {
                     email_series_data['Email Reported']++
@@ -547,10 +554,12 @@ function poll() {
                     email_series_data[progressListing[i]]++
                 }
             })
-            $.each(email_series_data, function (status, count) {
+            Object.entries(email_series_data).forEach(function (entry) {
+                var status = entry[0]
+                var count = entry[1]
                 var email_data = []
                 if (!(status in statusMapping)) {
-                    return true
+                    return
                 }
                 email_data.push({
                     name: status,
@@ -573,7 +582,8 @@ function poll() {
                     var row = resultsTable.row(i)
                     var rowData = row.data()
                     var rid = rowData[0]
-                    $.each(campaign.results, function (j, result) {
+                    for (var j = 0; j < campaign.results.length; j++) {
+                        var result = campaign.results[j]
                         if (result.id == rid) {
                             rowData[8] = moment(result.send_date).format('MMMM Do YYYY, h:mm:ss a')
                             rowData[7] = result.reported
@@ -590,17 +600,17 @@ function poll() {
                                 }
                                 row.child(renderTimeline(row.data()))
                             }
-                            return false
+                            break
                         }
-                    })
+                    }
                 })
                 resultsTable.draw(false)
             }
             /* Update the map information */
             updateMap(campaign.results)
             bsInitTooltips()
-            $("#refresh_message").hide()
-            $("#refresh_btn").show()
+            document.getElementById("refresh_message").style.display = "none"
+            document.getElementById("refresh_btn").style.display = "inline-block"
         })
 }
 
@@ -611,28 +621,46 @@ function load() {
         .done(function (c) {
             campaign = c
             if (campaign) {
-                $("title").text(c.name + " - GophishFR")
-                $("#loading").hide()
-                $("#campaignResults").show()
+                document.querySelectorAll("title").forEach(function (title) {
+                    title.textContent = c.name + " - GophishFR"
+                })
+                document.getElementById("loading").style.display = "none"
+                document.getElementById("campaignResults").style.display = ""
                 // Set the title
-                $("#page-title").text("Results for " + c.name)
+                document.getElementById("page-title").textContent = "Results for " + c.name
                 if (c.status == "Completed") {
-                    $('#complete_button')[0].disabled = true;
-                    $('#complete_button').text('Completed!');
+                    document.getElementById('complete_button').disabled = true;
+                    document.getElementById('complete_button').textContent = 'Completed!';
                     doPoll = false;
                 }
                 // Setup viewing the details of a result
-                $("#resultsTable").on("click", ".timeline-event-details", function () {
+                document.getElementById("resultsTable").addEventListener("click", function (event) {
+                    var detailsToggle = event.target instanceof Element
+                        ? event.target.closest(".timeline-event-details")
+                        : null
+                    if (!detailsToggle || !event.currentTarget.contains(detailsToggle)) {
+                        return
+                    }
                     // Show the parameters
-                    payloadResults = $(this).parent().find(".timeline-event-results")
-                    if (payloadResults.is(":visible")) {
-                        $(this).find("i").removeClass("fa-caret-down")
-                        $(this).find("i").addClass("fa-caret-right")
-                        payloadResults.hide()
+                    payloadResults = detailsToggle.parentElement.querySelectorAll(".timeline-event-results")
+                    if (Array.from(payloadResults).some(function (result) {
+                        return result.getClientRects().length > 0
+                    })) {
+                        detailsToggle.querySelectorAll("i").forEach(function (caret) {
+                            caret.classList.remove("fa-caret-down")
+                            caret.classList.add("fa-caret-right")
+                        })
+                        payloadResults.forEach(function (result) {
+                            result.style.display = "none"
+                        })
                     } else {
-                        $(this).find("i").removeClass("fa-caret-right")
-                        $(this).find("i").addClass("fa-caret-down")
-                        payloadResults.show()
+                        detailsToggle.querySelectorAll("i").forEach(function (caret) {
+                            caret.classList.remove("fa-caret-right")
+                            caret.classList.add("fa-caret-down")
+                        })
+                        payloadResults.forEach(function (result) {
+                            result.style.display = "block"
+                        })
                     }
                 })
                 // Setup the results table
@@ -678,7 +706,7 @@ function load() {
                 Object.keys(statusMapping).forEach(function (k) {
                     email_series_data[k] = 0
                 });
-                $.each(campaign.results, function (i, result) {
+                campaign.results.forEach(function (result) {
                     resultsTable.row.add([
                         result.id,
                         "<i id=\"caret\" class=\"fa fa-caret-right\"></i>",
@@ -736,9 +764,9 @@ function load() {
                     }
                 });
                 // Setup the graphs
-                $.each(campaign.timeline, function (i, event) {
+                campaign.timeline.forEach(function (event) {
                     if (event.message == "Campaign Created") {
-                        return true
+                        return
                     }
                     var event_date = moment.utc(event.time).local()
                     timeline_series_data.push({
@@ -752,10 +780,12 @@ function load() {
                 renderTimelineChart({
                     data: timeline_series_data
                 })
-                $.each(email_series_data, function (status, count) {
+                Object.entries(email_series_data).forEach(function (entry) {
+                    var status = entry[0]
+                    var count = entry[1]
                     var email_data = []
                     if (!(status in statusMapping)) {
-                        return true
+                        return
                     }
                     email_data.push({
                         name: status,
@@ -776,7 +806,7 @@ function load() {
                 })
 
                 if (use_map) {
-                    $("#resultsMapContainer").show()
+                    document.getElementById("resultsMapContainer").style.display = "block"
                     map = new Datamap({
                         element: document.getElementById("resultsMap"),
                         responsive: true,
@@ -797,7 +827,7 @@ function load() {
             }
         })
         .fail(function () {
-            $("#loading").hide()
+            document.getElementById("loading").style.display = "none"
             errorFlash(" Campaign not found!")
         })
 }
@@ -808,9 +838,9 @@ function refresh() {
     if (!doPoll) {
         return;
     }
-    $("#refresh_message").show()
+    document.getElementById("refresh_message").style.display = "inline"
     bsHideTooltip("#refresh_btn")
-    $("#refresh_btn").hide()
+    document.getElementById("refresh_btn").style.display = "none"
     poll()
     clearTimeout(setRefresh)
     setRefresh = setTimeout(refresh, 60000)
@@ -858,7 +888,7 @@ function report_mail(rid, cid) {
     })
 }
 
-$(document).ready(function () {
+document.addEventListener("DOMContentLoaded", function () {
     load();
 
     // Start the polling loop
