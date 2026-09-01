@@ -10,11 +10,11 @@ var htmlEditor
 // Save attempts to POST to /templates/
 function save(idx) {
     var page = {}
-    page.name = $("#name").val()
+    page.name = document.getElementById("name").value
     page.html = htmlEditor.getData()
-    page.capture_credentials = $("#capture_credentials_checkbox").prop("checked")
-    page.capture_passwords = $("#capture_passwords_checkbox").prop("checked")
-    page.redirect_url = $("#redirect_url_input").val()
+    page.capture_credentials = document.getElementById("capture_credentials_checkbox").checked
+    page.capture_passwords = document.getElementById("capture_passwords_checkbox").checked
+    page.redirect_url = document.getElementById("redirect_url_input").value
     if (idx != -1) {
         page.id = pages[idx].id
         api.pageId.put(page)
@@ -37,19 +37,39 @@ function save(idx) {
     }
 }
 
+// The previous selector escaped the dot in this id, which defeats jQuery's
+// getElementById fast path, so it matched every element carrying the id rather
+// than the first.
+function clearModalFlashes() {
+    document.querySelectorAll('[id="modal.flashes"]').forEach(function (container) {
+        container.replaceChildren()
+    })
+}
+
+// These two blocks are hidden by the stylesheet rather than by an inline
+// style, so revealing them needs an explicit display value: clearing the
+// inline one would leave the stylesheet rule in force. This is what jQuery's
+// show() resolved to for a div.
+function setCredentialOptionsVisible(visible) {
+    var display = visible ? "block" : "none"
+    document.getElementById("capture_passwords").style.display = display
+    document.getElementById("redirect_url").style.display = display
+}
+
 function dismiss() {
-    $("#modal\\.flashes").empty()
-    $("#name").val("")
-    $("#html_editor").val("")
+    clearModalFlashes()
+    document.getElementById("name").value = ""
+    document.getElementById("html_editor").value = ""
     if (htmlEditor) {
         htmlEditor.setData("")
         htmlEditor.showSource()
     }
-    $("#url").val("")
-    $("#redirect_url_input").val("")
-    $("#modal").find("input[type='checkbox']").prop("checked", false)
-    $("#capture_passwords").hide()
-    $("#redirect_url").hide()
+    document.getElementById("url").value = ""
+    document.getElementById("redirect_url_input").value = ""
+    document.querySelectorAll("#modal input[type='checkbox']").forEach(function (box) {
+        box.checked = false
+    })
+    setCredentialOptionsVisible(false)
     bsModalHide("#modal")
 }
 
@@ -83,14 +103,20 @@ var deletePage = function (idx) {
                 'success'
             );
         }
-        $('button:contains("OK")').on('click', function () {
-            location.reload()
+        // Every button whose label contains "OK", which is what the previous
+        // selector matched.
+        document.querySelectorAll("button").forEach(function (button) {
+            if (button.textContent.includes("OK")) {
+                button.addEventListener('click', function () {
+                    location.reload()
+                })
+            }
         })
     })
 }
 
 function importSite() {
-    url = $("#url").val()
+    url = document.getElementById("url").value
     if (!url) {
         modalError("No URL Specified!")
     } else {
@@ -110,37 +136,36 @@ function importSite() {
 }
 
 function edit(idx) {
-    $("#modalSubmit").unbind('click').click(function () {
+    bindModalSubmit(function () {
         save(idx)
     })
     htmlEditor = GophishHTMLEditor.create("html_editor")
     var page = {}
     if (idx != -1) {
-        $("#modalLabel").text("Edit Landing Page")
+        document.getElementById("modalLabel").textContent = "Edit Landing Page"
         page = pages[idx]
-        $("#name").val(page.name)
+        document.getElementById("name").value = page.name
         htmlEditor.setData(page.html)
-        $("#capture_credentials_checkbox").prop("checked", page.capture_credentials)
-        $("#capture_passwords_checkbox").prop("checked", page.capture_passwords)
-        $("#redirect_url_input").val(page.redirect_url)
+        document.getElementById("capture_credentials_checkbox").checked = page.capture_credentials
+        document.getElementById("capture_passwords_checkbox").checked = page.capture_passwords
+        document.getElementById("redirect_url_input").value = page.redirect_url
         if (page.capture_credentials) {
-            $("#capture_passwords").show()
-            $("#redirect_url").show()
+            setCredentialOptionsVisible(true)
         }
     } else {
-        $("#modalLabel").text("New Landing Page")
+        document.getElementById("modalLabel").textContent = "New Landing Page"
         htmlEditor.setData("")
     }
     htmlEditor.showSource()
 }
 
 function copy(idx) {
-    $("#modalSubmit").unbind('click').click(function () {
+    bindModalSubmit(function () {
         save(-1)
     })
     htmlEditor = GophishHTMLEditor.create("html_editor")
     var page = pages[idx]
-    $("#name").val("Copy of " + page.name)
+    document.getElementById("name").value = "Copy of " + page.name
     htmlEditor.setData(page.html)
     htmlEditor.showSource()
 }
@@ -149,15 +174,15 @@ function load() {
     /*
         load() - Loads the current pages using the API
     */
-    $("#pagesTable").hide()
-    $("#emptyMessage").hide()
-    $("#loading").show()
+    document.getElementById("pagesTable").style.display = "none"
+    document.getElementById("emptyMessage").style.display = "none"
+    document.getElementById("loading").style.display = ""
     api.pages.get()
         .done(function (ps) {
             pages = ps
-            $("#loading").hide()
+            document.getElementById("loading").style.display = "none"
             if (pages.length > 0) {
-                $("#pagesTable").show()
+                document.getElementById("pagesTable").style.display = ""
                 pagesTable = new DataTable("#pagesTable", {
                     destroy: true,
                     columnDefs: [{
@@ -167,7 +192,7 @@ function load() {
                 });
                 pagesTable.clear()
                 pageRows = []
-                $.each(pages, function (i, page) {
+                pages.forEach(function (page, i) {
                     pageRows.push([
                         escapeHtml(page.name),
                         moment(page.modified_date).format('MMMM Do YYYY, h:mm:ss a'),
@@ -185,23 +210,41 @@ function load() {
                 pagesTable.rows.add(pageRows).draw()
                 bsInitTooltips()
             } else {
-                $("#emptyMessage").show()
+                document.getElementById("emptyMessage").style.display = ""
             }
         })
         .fail(function () {
-            $("#loading").hide()
+            document.getElementById("loading").style.display = "none"
             errorFlash("Error fetching pages")
         })
 }
 
-$(document).ready(function () {
+// submitHandler holds the listener currently bound to the modal's submit
+// button, which is reused for every page.
+var submitHandler = null
+
+function bindModalSubmit(handler) {
+    // Two elements on this page carry the id "modalSubmit", one per modal. The
+    // previous selector took jQuery's getElementById fast path and so bound
+    // only the first, which is the page modal's Save button.
+    var submit = document.getElementById("modalSubmit")
+    if (submitHandler) {
+        submit.removeEventListener("click", submitHandler)
+    }
+    submitHandler = handler
+    submit.addEventListener("click", submitHandler)
+}
+
+// The application scripts are plain classic scripts at the end of <body>, so
+// the document is still parsing when they run and DOMContentLoaded has not
+// fired yet.
+document.addEventListener('DOMContentLoaded', function () {
     // Modal dismiss handler (native Bootstrap 5 event, no jQuery bridge)
     document.getElementById('modal').addEventListener('hidden.bs.modal', function (event) {
         dismiss()
     });
-    $("#capture_credentials_checkbox").change(function () {
-        $("#capture_passwords").toggle()
-        $("#redirect_url").toggle()
+    document.getElementById("capture_credentials_checkbox").addEventListener("change", function () {
+        setCredentialOptionsVisible(this.checked)
     })
     load()
 })
