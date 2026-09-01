@@ -158,7 +158,7 @@ function load() {
             $("#loading").hide()
             if (pages.length > 0) {
                 $("#pagesTable").show()
-                pagesTable = $("#pagesTable").DataTable({
+                pagesTable = new DataTable("#pagesTable", {
                     destroy: true,
                     columnDefs: [{
                         orderable: false,

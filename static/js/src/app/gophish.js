@@ -380,7 +380,21 @@ $(document).ready(function () {
             $this.addClass('active');
         }
     })
-    $.fn.dataTable.moment('MMMM Do YYYY, h:mm:ss a');
+    // Registers the date format the tables render, so their date columns are
+    // ordered chronologically rather than as text. This replaces the deprecated
+    // datetime-moment plug-in and needs no jQuery: DataTables picks up the
+    // Moment.js global loaded before it.
+    var dateFormat = 'MMMM Do YYYY, h:mm:ss a';
+    DataTable.datetime(dateFormat);
+    // Registering a date type also right-aligns the columns it matches. These
+    // tables have always shown their dates left-aligned, so the automatic class
+    // is cleared rather than silently restyling every date column.
+    DataTable.type('datetime-' + dateFormat, 'className', '');
+    // DataTables 3 cycles a column through ascending, descending and then no
+    // ordering at all. Every table here has always cycled between ascending and
+    // descending only, so the two-state sequence is kept explicitly rather than
+    // letting the upgrade change how sorting behaves.
+    DataTable.defaults.column.orderSequence = ['asc', 'desc'];
     // Setup tooltips
     bsInitTooltips()
 

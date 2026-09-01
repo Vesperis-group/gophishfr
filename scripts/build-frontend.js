@@ -75,9 +75,8 @@ const vendorScriptPaths = [
   vendoredScript("d3.min.js"),
   vendoredScript("topojson.min.js"),
   vendoredScript("datamaps.min.js"),
-  managedFile("datatables.net", "js", "jquery.dataTables.min.js"),
+  managedFile("datatables.net", "js", "dataTables.min.js"),
   managedFile("datatables.net-bs5", "js", "dataTables.bootstrap5.min.js"),
-  vendoredScript("datetime-moment.js"),
   vendoredScript("sweetalert2.min.js"),
   managedFile("tom-select", "dist", "js", "tom-select.complete.min.js"),
   vendoredScript("core.min.js"),
@@ -144,7 +143,7 @@ const managedVendorLicenses = [
     sourcePath: managedFile("@popperjs/core", "LICENSE.md"),
   },
   {
-    component: "DataTables and DataTables Bootstrap 5 integration 1.13.11",
+    component: `DataTables and DataTables Bootstrap 5 integration ${managedVersion("datatables.net")}`,
     sourcePath: managedFile("datatables.net", "License.txt"),
   },
   {

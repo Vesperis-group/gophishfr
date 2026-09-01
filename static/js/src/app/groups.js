@@ -1,10 +1,17 @@
 var groups = []
 
+// targets holds the DataTables instance backing the modal's target list. It is
+// recreated every time the modal opens, which is what the destroy option did
+// before and is what resets the table's ordering and search between edits.
+var targets = null
+
 // Save attempts to POST or PUT to /groups/
 function save(id) {
-    var targets = []
-    $.each($("#targetsTable").DataTable().rows().data(), function (i, target) {
-        targets.push({
+    // Named apart from the module-level DataTables instance, which this
+    // function needs to read the rows back out of.
+    var targetRecords = []
+    targets.rows().data().toArray().forEach(function (target) {
+        targetRecords.push({
             first_name: unescapeHtml(target[0]),
             last_name: unescapeHtml(target[1]),
             email: unescapeHtml(target[2]),
@@ -13,7 +20,7 @@ function save(id) {
     })
     var group = {
         name: $("#name").val(),
-        targets: targets
+        targets: targetRecords
     }
     // Submit the group
     if (id != -1) {
@@ -47,14 +54,16 @@ function save(id) {
 }
 
 function dismiss() {
-    $("#targetsTable").dataTable().DataTable().clear().draw()
+    if (targets) {
+        targets.clear().draw()
+    }
     $("#name").val("")
     $("#modal\\.flashes").empty()
 }
 
 function edit(id) {
-    targets = $("#targetsTable").dataTable({
-        destroy: true, // Destroy any other instantiated table - http://datatables.net/manual/tech-notes/3#destroy
+    targets = new DataTable("#targetsTable", {
+        destroy: true, // Replace any previously instantiated table
         columnDefs: [{
             orderable: false,
             targets: "no-sort"
@@ -81,7 +90,7 @@ function edit(id) {
                       '<span style="cursor:pointer;"><i class="fa fa-trash-o"></i></span>'
                   ])
                 });
-                targets.DataTable().rows.add(targetRows).draw()
+                targets.rows.add(targetRows).draw()
             })
             .fail(function () {
                 errorFlash("Error fetching group")
@@ -126,7 +135,7 @@ function addImportedTargets(records) {
             record.email,
             record.position)
     })
-    targets.DataTable().draw()
+    targets.draw()
 }
 
 function importCSVFiles(input) {
@@ -232,7 +241,7 @@ function addTarget(firstNameInput, lastNameInput, emailInput, positionInput) {
     ];
 
     // Check table to see if email already exists.
-    var targetsTable = targets.DataTable();
+    var targetsTable = targets;
     var existingRowIndex = targetsTable
         .column(2, {
             order: "index"
@@ -262,7 +271,7 @@ function load() {
                 groups = response.groups
                 $("#emptyMessage").hide()
                 $("#groupTable").show()
-                var groupTable = $("#groupTable").DataTable({
+                var groupTable = new DataTable("#groupTable", {
                     destroy: true,
                     columnDefs: [{
                         orderable: false,
@@ -310,19 +319,26 @@ $(document).ready(function () {
             $("#lastName").val(),
             $("#email").val(),
             $("#position").val());
-        targets.DataTable().draw();
+        targets.draw();
 
         // Reset user input.
         $("#targetForm>div>input").val('');
         $("#firstName").focus();
         return false;
     });
-    // Handle Deletion
-    $("#targetsTable").on("click", "span>i.fa-trash-o", function () {
-        targets.DataTable()
-            .row($(this).parents('tr'))
-            .remove()
-            .draw();
+    // Handle Deletion. The row is resolved from the clicked icon with a native
+    // DOM lookup, because the table's row selector no longer goes through
+    // jQuery.
+    document.getElementById("targetsTable").addEventListener("click", function (event) {
+        var icon = event.target.closest("span > i.fa-trash-o")
+        if (!icon || !targets) {
+            return
+        }
+        var row = icon.closest("tr")
+        if (!row) {
+            return
+        }
+        targets.row(row).remove().draw()
     });
     document.getElementById('modal').addEventListener('hide.bs.modal', function () {
         dismiss();

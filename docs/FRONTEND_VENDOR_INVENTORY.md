@@ -8,6 +8,71 @@ the normal Yarn dependency graph. Generated files under `static/js/dist` and
 scripts under `static/js/src/app` and the project-specific stylesheets
 `main.css`, `dashboard.css`, and `docs.css` are first-party sources.
 
+## Update (DataTables 3 migration, 2026-09-01)
+
+DataTables moved from 1.13.11 to `datatables.net@3.0.3` with
+`datatables.net-bs5@3.0.3`, both MIT and both exact Yarn dependencies. The
+headline of the upgrade is visible in the lockfile: DataTables 1.x declared
+`jquery "1.8 - 4"`, and 3.0.3 declares **no dependencies at all**. jQuery is
+therefore no longer required by any third-party component this project ships.
+
+All fourteen table initialisations moved from the jQuery harness
+(`$("#id").DataTable({...})` and the older `$("#id").dataTable({...})`) to the
+library's own constructor, `new DataTable("#id", {...})`. Each page now keeps
+the returned API instance instead of re-querying through jQuery. The bundled
+file changed name accordingly, from `js/jquery.dataTables.min.js` to
+`js/dataTables.min.js`.
+
+### Breaking changes that actually applied
+
+| Change | Where it applied | Handling |
+| --- | --- | --- |
+| Generated control classes renamed (`dataTables_wrapper` → `dt-container`, `dataTables_info` → `dt-info`, `dataTables_filter` → `dt-search`, `dataTables_paginate` → `dt-paging`, `sorting_asc`/`sorting_desc` → `dt-ordering-asc`/`dt-ordering-desc`) | `static/css/main.css` sort icons, mobile table overflow; browser tests | Rewritten. **This fails silently**: the selectors simply stop matching, so it is covered by tests rather than trusted |
+| Sort indicators now drawn in a `div.dt-column-order` | Custom Font Awesome sort arrows | The generated indicator is hidden and the existing icons are attached to the header cell, so the appearance is unchanged |
+| `orderSequence` default became `['asc', 'desc', '']` | Every orderable column | Overridden once to `['asc', 'desc']`. Without this, a third click on a header would clear ordering instead of returning to ascending — a user-visible change this migration deliberately does not make |
+| Hungarian notation removed | `sClass` in the three attachment tables | Renamed to `className` |
+| `datetime-moment` plug-in deprecated | Global date sorting for every table | Replaced by the built-in `DataTable.datetime('MMMM Do YYYY, h:mm:ss a')`. Moment.js is still loaded before DataTables and is picked up automatically |
+| Row selectors no longer accept jQuery objects | Four `.row($(this).parents('tr'))` delete handlers and the results child-row toggle | Rewritten with `closest()` on the clicked element |
+| `deferRender` defaults to `true` | `row.node()` in the results refresh loop | Guarded: the node is only read when a child row is open, which implies the row is rendered |
+| `deferRender` defaults to `true` | **Attachment loss**: `attach()` rebuilt the attachments table with `destroy: true` while it already held rows. `destroy()` only puts back rows that have a rendered node, so every attachment past the first page disappeared and was then saved away | The table is built once per modal open and `attach()` only adds rows. Covered by a regression test that fails with `Expected 13, Received 11` if the rebuild returns |
+| Registering a date type also sets `className: 'dt-right'` on matching columns | Every date column across seven pages would have flipped to right-aligned | The automatic class is cleared with `DataTable.type('datetime-…', 'className', '')` |
+| Header contents are wrapped in a flex `div.dt-column-header` | The custom sort icon, attached to the cell, would have dropped onto its own line under every sortable header | The icon is attached to `.dt-column-title` instead |
+
+`dom` was not used anywhere, so its deprecation did not apply. No DataTables
+extension was in use: the only add-on was the vendored date-sorting plug-in,
+which the upgrade removes. The public API this project relies on — `rows()`,
+`row()`, `columns()`, `clear()`, `draw()`, `rows.add()`, `row.child()` — is
+unchanged between 1.10+ and 3.x, which is what made a single-step upgrade
+defensible rather than a 1 → 2 → 3 split.
+
+The backend contract is untouched: every table is client-side, no table uses
+DataTables' own Ajax loading, and no route, payload or query parameter changed.
+
+### Remaining jQuery coupling
+
+DataTables was the last third-party jQuery plugin. A scan of
+`static/js/src/app` now reports **no `$.fn.*` plugin usage at all**; jQuery
+survives only in first-party application code, across 11 files and 428
+occurrences. Grouped by usage family (a single line can fall into more than
+one, so these overlap): DOM selection 371, DOM mutation 233, form values 133,
+events 58, utilities 29, Ajax 2. Removing that coupling is the subject of the
+follow-up `refactor/remove-first-party-jquery`; none of it was migrated here.
+
+A dedicated browser test, `tests/browser/datatables-no-jquery.spec.ts`, loads
+the exact shipped DataTables files into a page with no jQuery on it and drives
+initialisation, ordering, date ordering, searching and paging through the
+native API. It is the proof that the dependency is genuinely gone rather than
+merely unused.
+
+Three of the entries in the breaking-change table above — the attachment loss,
+the date-column realignment and the misplaced sort icon — were not found by the
+test suite. They were found by an independent review of the diff against the
+installed DataTables source, and each was then reproduced before being fixed.
+All three share the same shape: the table still works, nothing throws, and the
+damage is silent. That is the risk profile of this upgrade, and it is why the
+browser coverage now asserts ordering state, paging, the saved payload and the
+attachment count rather than merely that the tables render.
+
 ## Update (Select2 removal, 2026-09-01)
 
 Select2 4.0.13 was removed. Four of the five selects it decorated became plain
@@ -295,7 +360,7 @@ exists.
 | D3 | 3.5.3, embedded `version` and exact npm package hash | `static/js/src/vendor/d3.min.js` | `LEGACY_BUT_REQUIRED` by Datamaps; minified-only | [d3/d3](https://github.com/d3/d3), BSD-3-Clause | `CLEAN`, old release line; migrate with Datamaps |
 | TopoJSON | 1.6.9, embedded `version` | `static/js/src/vendor/topojson.min.js` | `LEGACY_BUT_REQUIRED` by Datamaps; minified-only | [topojson/topojson](https://github.com/topojson/topojson), BSD-3-Clause | `CLEAN`, old release line; migrate with Datamaps |
 | Datamaps | `UNKNOWN`; hash does not match official npm 0.3.6 through 0.5.10 world bundles | `static/js/src/vendor/datamaps.min.js` | `USED` by the campaign-results map; minified-only | Historical import `a78e92a`; [markmarkoh/datamaps](https://github.com/markmarkoh/datamaps), MIT | `UNKNOWN_VERSION`, archived upstream; replace with a maintained map implementation |
-| DataTables datetime-moment plug-in | `UNKNOWN`; no version marker | `static/js/src/vendor/datetime-moment.js` | `USED` for date sorting; readable source retained | [DataTables plug-in](https://datatables.net/plug-ins/sorting/datetime-moment), MIT | `UNKNOWN_VERSION`, deprecated upstream; replace with DataTables' current date renderer |
+| DataTables datetime-moment plug-in | `UNKNOWN`; no version marker — **superseded**: removed; DataTables 3 provides `DataTable.datetime()` | `static/js/src/vendor/datetime-moment.js` (deleted) | Formerly used for date sorting | [DataTables plug-in](https://datatables.net/plug-ins/sorting/datetime-moment), MIT | Resolved; see the DataTables 3 migration update |
 | jQuery UI Widget Factory | 1.11.1, later Yarn-managed 1.14.2 — **removed** | Former vendored file and package-managed `ui/widget.js` are deleted | Its only consumer was blueimp File Upload | [jquery/jquery-ui](https://github.com/jquery/jquery-ui), MIT | `REMOVED`; jQuery UI is no longer distributed |
 | blueimp jQuery File Upload | 5.42.3; iframe transport 1.8.3 — **removed** | `jquery.fileupload.js`, `jquery.iframe-transport.js` (deleted) | Formerly used only by group CSV import; replaced with first-party native browser APIs | [blueimp/jQuery-File-Upload](https://github.com/blueimp/jQuery-File-Upload), MIT | `REMOVED`; CVE-2018-9206 concerned upstream server handlers, which were never shipped |
 | SweetAlert2 | 8.17.1, exact npm package hash | `sweetalert2.min.js`, `sweetalert2.min.css` | `USED` for confirmations and status dialogs; minified-only | [sweetalert2/sweetalert2](https://github.com/sweetalert2/sweetalert2), MIT | `CLEAN`, old major; preserve pending UI-stack migration |
@@ -323,7 +388,7 @@ them in a fixed order, and emits their complete license texts in
 | Chart.js / `@kurkle/color` | 4.5.1 / 0.3.4 | Dashboard and campaign charts | MIT | `CLEAN` |
 | chartjs-plugin-zoom / Hammer.JS | 2.2.0 / 2.0.8 | Timeline pan and zoom | MIT | `CLEAN` |
 | Bootstrap / Popper | 5.3.8 / 2.11.8 | Global layout, navbar, modal, tabs, dropdown, tooltip | MIT | `CLEAN`; exact Yarn dependencies replacing the manually vendored Bootstrap 3 JS/CSS above |
-| DataTables / Bootstrap 5 integration (`datatables.net-bs5`) | 1.13.11 | Admin tables | MIT | `CLEAN`; its jQuery range resolves to the single direct `jquery@3.7.1` installation |
+| DataTables / Bootstrap 5 integration (`datatables.net-bs5`) | 3.0.3 | Admin tables | MIT | `CLEAN`; declares no dependencies at all, so it no longer pulls jQuery |
 | Moment.js | 2.30.1 | Date parsing and formatting | MIT | `CLEAN`, maintenance mode |
 | Papa Parse | 5.6.0 | CSV import and export | MIT | `CLEAN` |
 | Tom Select / `@orchidjs/sifter` / `@orchidjs/unicode-variants` | 2.6.2 / 1.1.0 / 1.1.2 | Campaign group multi-select only; framework-independent, no jQuery | Apache-2.0 | `CLEAN`; replaces Select2 4.0.13 |
@@ -331,7 +396,7 @@ them in a fixed order, and emits their complete license texts in
 | zxcvbn | 4.4.2 | Password-strength feedback | MIT | `CLEAN`, old release |
 | CodeMirror / Lezer | CodeMirror packages 6.x; Lezer packages 1.x, exact versions in `yarn.lock` | Canonical full-document HTML source editing, syntax highlighting, search, keyboard commands, and GophishFR placeholder completion | MIT | `CLEAN`; self-hosted Webpack bundle, no remote service or license key |
 
-Yarn audit reports zero advisories across 115 resolved dependencies, and
+Yarn audit reports zero advisories across 114 resolved dependencies, and
 Retire.js 5.4.3 reports zero findings against the generated bundles. A
 temporary npm resolution, created outside the worktree without retaining a
 `package-lock.json`, reports zero advisories across 108 dependencies. GitHub
@@ -343,7 +408,7 @@ reports zero open Dependabot alerts.
 | --- | --- | --- | --- | --- |
 | Moment.js | Vendored 2.10.3 | Yarn 2.30.1 | `SAFE_UPDATE`, `MOVE_TO_PACKAGE_MANAGER` | Same major API; removes browser-relevant ReDoS findings |
 | Papa Parse | Vendored 5.2.0 | Yarn 5.6.0 | `SAFE_UPDATE`, `MOVE_TO_PACKAGE_MANAGER` | Same major API; establishes lockfile provenance |
-| DataTables | Vendored 1.10.11 | Yarn 1.13.11 | `SAFE_UPDATE`, `MOVE_TO_PACKAGE_MANAGER` | Last 1.x API line; removes prototype-pollution and XSS findings |
+| DataTables | Vendored 1.10.11 | Yarn 1.13.11 — **superseded**: now 3.0.3; see the DataTables 3 migration update | `SAFE_UPDATE`, `MOVE_TO_PACKAGE_MANAGER` | Last 1.x API line; removes prototype-pollution and XSS findings |
 | Select2 | Vendored 4.0.3 | Yarn 4.0.13 — **superseded**: removed entirely; see the Select2 removal update | `SAFE_UPDATE`, `MOVE_TO_PACKAGE_MANAGER` | Narrow 4.0 update; removes CVE-2016-10744 without 4.1 behavior changes |
 | UAParser.js | Vendored 0.7.18 | Yarn 0.7.41 | `SAFE_UPDATE`, `MOVE_TO_PACKAGE_MANAGER` | Same 0.7 API; removes three ReDoS findings on recipient-controlled input |
 | Chartist | Vendored JS 0.9.2, CSS, and dead first-party selectors | Removed | `SAFE_REMOVE` | No runtime reference; Chart.js had already replaced the chart stack |
@@ -384,9 +449,9 @@ calls replaced with `.done()`/`.fail()`/`.always()`. Vendored DateTimePicker
 before `.show()` so jQuery 3 could override Bootstrap's hidden dropdown state,
 until that picker was replaced by native controls.
 Vendored blueimp File Upload `.pipe()` was temporarily replaced with `.then()`
-before the plugin was removed. DataTables 1.13.11 remains
+before the plugin was removed. DataTables 1.13.11 remained
 confirmed compatible under jQuery 3.7.1, as did Select2 4.0.13 and
-DateTimePicker 4.17.37 until both were replaced.
+DateTimePicker 4.17.37, until each was replaced.
 
 jQuery Migrate 3.6.0 was evaluated as a temporary diagnostic option but was
 not added or loaded: the static audit identified the removed APIs directly,
@@ -395,14 +460,16 @@ exception or console error. No Migrate code is present in the runtime,
 manifest, lockfile, or test dependencies.
 
 **JQUERY4_BLOCKED reasons** (preliminary):
-- DataTables 1.x: uses `$.camelCase` and other internals removed in 4.x
 - first-party application scripts still use jQuery for Ajax, DOM, and events
-- Resolution: remain on 3.7.1 until plugin majors are upgraded or replaced
+- Resolution: no third-party plugin blocks jQuery 4 any more; the remaining
+  question is whether first-party code keeps jQuery at all
 
 The DateTimePicker blocker was removed with the picker itself: campaign
 scheduling no longer runs any jQuery plugin. The Select2 blocker
-(`$.expr[':']`, removed in jQuery 4.x) was removed with Select2 itself:
-DataTables is now the only remaining jQuery plugin.
+(`$.expr[':']`, removed in jQuery 4.x) was removed with Select2 itself, and
+the DataTables blocker (`$.camelCase` and other internals) disappeared with the
+DataTables 3 upgrade, which dropped jQuery entirely. No third-party jQuery
+plugin remains.
 
 ### Bootstrap JS 3.0.2
 
@@ -430,23 +497,23 @@ CVE-2024-6485. The durable remediation is a supported Bootstrap migration.
 
 ## Reproducibility
 
-The post-Select2 frontend build contains 19 generated files and
-2,860,106 bytes, 3,466 bytes larger than the previous build of 2,856,640
-bytes. That growth is entirely license text: `vendor.min.js.LICENSE.txt` grew
-from 13,682 to 35,477 bytes (+21,795) because Tom Select and its two
-`@orchidjs` dependencies are Apache-2.0 and the full license text is
-reproduced. The executed code shrank by 18,329 bytes: the vendor bundle
-decreased from 1,045,486 to 1,026,331 bytes (-19,155, Tom Select being smaller
-than Select2) and `users.min.js` from 5,383 to 5,036 bytes (-347), against
-`campaigns.min.js` growing from 8,612 to 9,049 bytes (+437) for the native
-select helpers and the stylesheet from 330,625 to 331,361 bytes (+736).
-Two independent immutable
-installations and clean builds produced the
+The post-DataTables-3 frontend build contains 19 generated files and
+2,903,186 bytes, 43,080 bytes larger than the previous build of 2,860,106
+bytes. The growth is concentrated in the upgraded library: the vendor bundle
+went from 1,026,331 to 1,060,307 bytes (+33,976) and the stylesheet from
+331,361 to 340,499 bytes (+9,138), because DataTables 3 carries its own DOM and
+event layer instead of borrowing jQuery's. Application bundles net -30 across
+the eleven of them, `templates.min.js` shrinking most as three copies of the
+attachment table's configuration became one. That growth is the cost of the
+dependency this upgrade removes, and it is a cost this project accepts
+knowingly.
+
+Two independent immutable installations and clean builds produced the
 same per-file hashes, left `yarn.lock` unchanged, and produced this aggregate
 SHA-256 manifest:
 
 ```text
-742ffe360924756f13a378b7867f4795c94faf79ec1b2f7726b1d389029ea162
+6c1a0022e6172955bbe1d3801731ba262668257d4667c4afc2ce16e91e43d409
 ```
 
 Webpack reports performance-budget warnings for the approximately 532 KiB

@@ -1,4 +1,4 @@
-import { expect, test, type Page, type Request } from "@playwright/test";
+import { expect, test, type Locator, type Page, type Request } from "@playwright/test";
 
 const baseURL = requiredEnvironmentVariable("GOPHISHFR_BROWSER_BASE_URL");
 const username = requiredEnvironmentVariable("GOPHISHFR_BROWSER_USERNAME");
@@ -181,6 +181,79 @@ async function selectedLabels(page: Page, selectId: string): Promise<string[]> {
   }, selectId);
 }
 
+// DataTables renames the classes of the controls it generates between major
+// versions. These helpers are the single place that knows those names, so the
+// table assertions below describe behaviour rather than a specific DataTables
+// DOM, and a version migration touches only this block.
+//
+// DataTables 3 names: container ".dt-container", search ".dt-search input",
+// info ".dt-info", paging ".dt-paging".
+function tableWrapper(page: Page, tableId: string): Locator {
+  return page.locator(`#${tableId}_wrapper`);
+}
+
+function tableSearchInput(page: Page, tableId: string): Locator {
+  return tableWrapper(page, tableId).locator(".dt-search input");
+}
+
+function tableInfo(page: Page, tableId: string): Locator {
+  return tableWrapper(page, tableId).locator(".dt-info");
+}
+
+function tablePagingButton(page: Page, tableId: string, label: string): Locator {
+  return tableWrapper(page, tableId)
+    .locator(".dt-paging")
+    .getByText(label, { exact: true });
+}
+
+// Reads the rendered text of one column across every row on the current page.
+// The placeholder row a table shows when nothing matches spans all columns, so
+// it is skipped: it is a message, not data, and its markup differs between
+// DataTables versions.
+async function tableColumnText(
+  page: Page,
+  tableId: string,
+  columnIndex: number,
+): Promise<string[]> {
+  return page.evaluate(
+    ({ id, index }) => {
+      const rows = Array.from(
+        document.querySelectorAll(`#${id} tbody tr`),
+      ) as HTMLTableRowElement[];
+      return rows
+        .filter((row) => {
+          const cells = row.querySelectorAll("td");
+          if (cells.length <= index) {
+            return false;
+          }
+          return !Array.from(cells).some((cell) => cell.colSpan > 1);
+        })
+        .map((row) => (row.querySelectorAll("td")[index].textContent ?? "").trim());
+    },
+    { id: tableId, index: columnIndex },
+  );
+}
+
+// Clicks a sortable header and waits for the table body to actually change
+// order, which avoids asserting against the pre-sort rendering.
+async function sortByHeader(
+  page: Page,
+  tableId: string,
+  headerText: string,
+): Promise<void> {
+  const before = (await tableColumnText(page, tableId, 0)).join("\u0000");
+  await page
+    .locator(`#${tableId} thead th`)
+    .filter({ hasText: headerText })
+    .first()
+    .click();
+  await expect
+    .poll(async () => (await tableColumnText(page, tableId, 0)).join("\u0000"), {
+      message: `sorting #${tableId} by "${headerText}" did not reorder the rows`,
+    })
+    .not.toBe(before);
+}
+
 // openGroupDropdown opens the Tom Select control backing the groups field
 // through its own public instance, which is stable regardless of where the
 // campaign modal is in its rebuild cycle.
@@ -316,7 +389,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       await page.evaluate(
         () =>
           typeof window.jQuery === "function" &&
-          typeof window.jQuery.fn.DataTable === "function",
+          typeof (window as Window & { DataTable?: unknown }).DataTable === "function",
       ),
     ).toBe(true);
     // Bootstrap jQuery bridge must be absent (data-bs-no-jquery disables it)
@@ -339,13 +412,15 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     ).toBe(true);
     expect(
       await page.evaluate(() => ({
-        dataTables: window.jQuery.fn.dataTable.version,
+        // Read from the global the library now exposes, not through jQuery.
+        dataTables: (window as Window & { DataTable: { version: string } }).DataTable
+          .version,
         moment: window.moment.version,
         parsedCsv: window.Papa.parse("name\nBrowser Fixture").data[1][0],
         uaParser: window.UAParser.VERSION,
       })),
     ).toEqual({
-      dataTables: "1.13.11",
+      dataTables: "3.0.3",
       moment: "2.30.1",
       parsedCsv: "Browser Fixture",
       uaParser: "0.7.41",
@@ -632,9 +707,9 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await waitForSelectOption(page, "users", "Browser Fixture Group");
     await openGroupDropdown(page);
     await page.keyboard.type("Browser Fixture Group");
-    await expect(page.locator(".ts-dropdown .option")).toContainText(
-      "Browser Fixture Group",
-    );
+    await expect(
+      page.locator(".ts-dropdown .option").filter({ hasText: "Browser Fixture Group" }),
+    ).toHaveCount(1);
 
     // The dropdown renders inside the modal without overflowing it. Measured
     // while it still lists options, because selecting the only fixture group
@@ -677,26 +752,39 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.getByRole("heading", { name: "Users & Groups" })).toBeVisible();
     await expect(page.locator("#groupTable")).toBeVisible();
     await expect(page.locator("#groupTable")).toContainText("Browser Fixture Group");
-    // DataTables BS5 wrapper classes
-    await expect(page.locator("#groupTable_wrapper")).toBeVisible();
-    await expect(page.locator("#groupTable_filter input")).toHaveClass(/form-control/);
-    const paginationClasses = await page.locator("#groupTable_wrapper .pagination").getAttribute("class");
-    expect(paginationClasses).toContain("pagination");
+    // DataTables generates its own controls around the table.
+    await expect(tableWrapper(page, "groupTable")).toBeVisible();
+    await expect(tableSearchInput(page, "groupTable")).toHaveClass(/form-control/);
+    await expect(
+      tableWrapper(page, "groupTable").locator(".pagination"),
+    ).toBeVisible();
 
     // Exercise search filtering
-    await page.locator("#groupTable_filter input").fill("Browser Fixture");
+    await tableSearchInput(page, "groupTable").fill("Browser Fixture");
     await expect(page.locator("#groupTable")).toContainText("Browser Fixture Group");
-    await page.locator("#groupTable_filter input").fill("XYZNONEXISTENT999");
+    await tableSearchInput(page, "groupTable").fill("XYZNONEXISTENT999");
     await expect(page.locator("#groupTable")).not.toContainText("Browser Fixture Group");
-    await page.locator("#groupTable_filter input").fill("");
+    await tableSearchInput(page, "groupTable").fill("");
     await expect(page.locator("#groupTable")).toContainText("Browser Fixture Group");
 
-    // Exercise sortable header
+    // Exercise sortable header. The ordering state is read from the table's own
+    // API rather than from the header's classes, which are applied on redraw and
+    // are therefore not a reliable thing to sample at an exact instant.
+    const groupOrder = () =>
+      page.evaluate(() => {
+        const dt = window as Window & {
+          DataTable: { Api: new (selector: string) => { order: () => unknown } };
+        };
+        return new dt.DataTable.Api("#groupTable").order();
+      });
     const nameHeader = page.locator("#groupTable thead th").first();
-    const initialClass = await nameHeader.getAttribute("class");
+    await expect.poll(groupOrder).toEqual([[0, "asc"]]);
     await nameHeader.click();
-    const afterClass = await nameHeader.getAttribute("class");
-    expect(afterClass).not.toBe(initialClass);
+    await expect.poll(groupOrder).toEqual([[0, "desc"]]);
+    // A third click returns to ascending. DataTables 3 would otherwise cycle to
+    // "no ordering" here, which is not how this application has ever sorted.
+    await nameHeader.click();
+    await expect.poll(groupOrder).toEqual([[0, "asc"]]);
 
     await openApplicationModal(page, "New Group");
     await page.locator("#firstName").fill("Synthetic");
@@ -707,7 +795,227 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator("#targetsTable")).toContainText(
       "second-fixture@localhost.invalid",
     );
+
+    // A second target, so removing one leaves something behind to assert on.
+    await page.locator("#firstName").fill("Removable");
+    await page.locator("#lastName").fill("Row");
+    await page.locator("#email").fill("removable-fixture@localhost.invalid");
+    await page.locator("#position").fill("Test fixture");
+    await page.locator("#targetForm").getByRole("button", { name: "Add" }).click();
+    await expect(page.locator("#targetsTable")).toContainText(
+      "removable-fixture@localhost.invalid",
+    );
+    // The table applies its own ordering, so the set is compared, not the
+    // insertion order.
+    expect((await tableColumnText(page, "targetsTable", 2)).sort()).toEqual([
+      "removable-fixture@localhost.invalid",
+      "second-fixture@localhost.invalid",
+    ]);
+
+    // The per-row delete control resolves the clicked icon back to its row and
+    // removes exactly that row, leaving the rest of the table intact.
+    await page
+      .locator("#targetsTable tbody tr")
+      .filter({ hasText: "removable-fixture@localhost.invalid" })
+      .locator("span > i.fa-trash-o")
+      .click();
+    await expect
+      .poll(() => tableColumnText(page, "targetsTable", 2))
+      .toEqual(["second-fixture@localhost.invalid"]);
+
     await closeApplicationModal(page);
+  });
+
+  await test.step("group targets are read back out of the table when saved", async () => {
+    const groupPayloads: string[] = [];
+    const captureGroup = (request: Request) => {
+      if (
+        request.method() === "POST" &&
+        new URL(request.url()).pathname === "/api/groups/"
+      ) {
+        groupPayloads.push(request.postData() ?? "");
+      }
+    };
+    page.on("request", captureGroup);
+
+    await openApplicationModal(page, "New Group");
+    // Deliberately not named after any term other steps search for, so saving a
+    // second group cannot widen their result sets.
+    const groupName = `TableSaveGroup_${Date.now()}`;
+    await page.locator("#name").fill(groupName);
+    for (const target of [
+      { email: "row-one@localhost.invalid", first: "Row", last: "One" },
+      { email: "row-two@localhost.invalid", first: "Row", last: "Two" },
+    ]) {
+      await page.locator("#firstName").fill(target.first);
+      await page.locator("#lastName").fill(target.last);
+      await page.locator("#email").fill(target.email);
+      await page.locator("#position").fill("Test fixture");
+      await page.locator("#targetForm").getByRole("button", { name: "Add" }).click();
+      await expect(page.locator("#targetsTable")).toContainText(target.email);
+    }
+
+    await page.locator("#modalSubmit").click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+
+    // The payload is built by reading the rows back out of the table, so it must
+    // carry every row and their column values in the right fields.
+    await expect.poll(() => groupPayloads.length).toBe(1);
+    const payload = JSON.parse(groupPayloads[0]) as {
+      name: string;
+      targets: Array<{
+        email: string;
+        first_name: string;
+        last_name: string;
+        position: string;
+      }>;
+    };
+    expect(payload.name).toBe(groupName);
+    expect([...payload.targets].sort((a, b) => a.email.localeCompare(b.email))).toEqual([
+      {
+        email: "row-one@localhost.invalid",
+        first_name: "Row",
+        last_name: "One",
+        position: "Test fixture",
+      },
+      {
+        email: "row-two@localhost.invalid",
+        first_name: "Row",
+        last_name: "Two",
+        position: "Test fixture",
+      },
+    ]);
+    page.off("request", captureGroup);
+  });
+
+  await test.step("attaching a file keeps every existing attachment", async () => {
+    // Regression guard. The attachment table holds more rows than it renders at
+    // once, and rebuilding it drops the rows that have no rendered node. If the
+    // attach path ever rebuilds the table again, every attachment past the
+    // first page disappears from the saved template without any error.
+    const templatePayloads: string[] = [];
+    const captureTemplate = (request: Request) => {
+      if (
+        request.method() === "PUT" &&
+        /^\/api\/templates\/\d+\/?$/.test(new URL(request.url()).pathname)
+      ) {
+        templatePayloads.push(request.postData() ?? "");
+      }
+    };
+    page.on("request", captureTemplate);
+
+    await page.getByRole("link", { name: "Email Templates" }).click();
+    await expect(page).toHaveURL(/\/templates$/);
+    await expect(page.locator("#templateTable")).toContainText(
+      "Browser Attachment Fixture",
+    );
+    await page
+      .locator("#templateTable tbody tr")
+      .filter({ hasText: "Browser Attachment Fixture" })
+      .locator('button[onclick^="edit("]')
+      .click();
+    await expect(page.locator("#modal")).toBeVisible();
+
+    const attachmentCount = () =>
+      page.evaluate(() => {
+        const dt = window as Window & {
+          DataTable: {
+            Api: new (selector: string) => { rows: () => { count: () => number } };
+          };
+        };
+        return new dt.DataTable.Api("#attachmentsTable").rows().count();
+      });
+    await expect.poll(attachmentCount).toBe(12);
+
+    await page.locator("#attachmentUpload").setInputFiles({
+      name: "added-by-browser-test.txt",
+      mimeType: "text/plain",
+      buffer: Buffer.from("browser fixture attachment"),
+    });
+    await expect.poll(attachmentCount).toBe(13);
+
+    await page.locator("#modal #modalSubmit").click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+
+    await expect.poll(() => templatePayloads.length).toBe(1);
+    const payload = JSON.parse(templatePayloads[0]) as {
+      attachments: Array<{ name: string }>;
+    };
+    const names = payload.attachments.map((a) => a.name).sort();
+    expect(names).toHaveLength(13);
+    expect(names).toContain("added-by-browser-test.txt");
+    expect(names).toContain("attachment-01.txt");
+    expect(names).toContain("attachment-12.txt");
+    page.off("request", captureTemplate);
+  });
+
+  await test.step("landing page table sorts, searches and pages through its data", async () => {
+    await page.getByRole("link", { name: "Landing Pages" }).click();
+    await expect(page).toHaveURL(/\/landing_pages$/);
+    await expect(page.locator("#pagesTable")).toBeVisible();
+
+    // The fixtures seed 12 pages whose names sort in the exact reverse of their
+    // modification dates, so ordering by date cannot be satisfied by accident.
+    // "Paginated" appears in no other fixture name, which matters because the
+    // table's search matches words in any order.
+    const fixtureCount = 12;
+    await tableSearchInput(page, "pagesTable").fill("Paginated");
+
+    // Searching narrows the set and the info line reports the filtered total.
+    await expect(tableInfo(page, "pagesTable")).toContainText(`of ${fixtureCount}`);
+    await expect(page.locator("#pagesTable")).not.toContainText(
+      "Browser Fixture Landing Page",
+    );
+
+    // Default page length keeps the filtered set on two pages.
+    const firstPageNames = await tableColumnText(page, "pagesTable", 0);
+    expect(firstPageNames.length).toBe(10);
+    expect(firstPageNames[0]).toBe("Paginated Fixture 01");
+
+    await tablePagingButton(page, "pagesTable", "2").click();
+    await expect
+      .poll(() => tableColumnText(page, "pagesTable", 0))
+      .toEqual(["Paginated Fixture 11", "Paginated Fixture 12"]);
+    await tablePagingButton(page, "pagesTable", "1").click();
+    await expect
+      .poll(() => tableColumnText(page, "pagesTable", 0).then((names) => names[0]))
+      .toBe("Paginated Fixture 01");
+
+    // Ordering by name descending reverses the set.
+    await sortByHeader(page, "pagesTable", "Name");
+    expect((await tableColumnText(page, "pagesTable", 0))[0]).toBe(
+      "Paginated Fixture 12",
+    );
+    await sortByHeader(page, "pagesTable", "Name");
+    expect((await tableColumnText(page, "pagesTable", 0))[0]).toBe(
+      "Paginated Fixture 01",
+    );
+
+    // Ordering by the date column must order chronologically, not
+    // lexicographically: "March 14th 2031" precedes "March 3rd 2031" as text but
+    // follows it as a date. This is what proves the table parses the column as a
+    // date rather than as a string.
+    await sortByHeader(page, "pagesTable", "Last Modified Date");
+    const byDate = await tableColumnText(page, "pagesTable", 0);
+    expect(byDate[0]).toBe(`Paginated Fixture ${fixtureCount}`);
+    const renderedDates = await tableColumnText(page, "pagesTable", 1);
+    const parsed = renderedDates.map((value) => Date.parse(value.replace(/(\d+)(st|nd|rd|th)/, "$1")));
+    expect(parsed.every((value) => Number.isFinite(value))).toBe(true);
+    const ascending = [...parsed].sort((a, b) => a - b);
+    expect(parsed).toEqual(ascending);
+    expect(new Set(parsed).size).toBe(parsed.length);
+
+    // Clearing the search restores the unfiltered set.
+    await tableSearchInput(page, "pagesTable").fill("");
+    await expect(page.locator("#pagesTable")).toContainText("Browser Fixture Landing Page");
+
+    // A search matching nothing shows the table's empty state.
+    await tableSearchInput(page, "pagesTable").fill("XYZNONEXISTENT999");
+    await expect
+      .poll(() => tableColumnText(page, "pagesTable", 0).then((names) => names.length))
+      .toBe(0);
+    await expect(page.locator("#pagesTable tbody")).toContainText("No matching records");
+    await tableSearchInput(page, "pagesTable").fill("");
   });
 
   await test.step("template editor round-trips full-document source HTML", async () => {
@@ -719,7 +1027,11 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       "Browser Fixture Template",
     );
 
-    await page.locator('#templateTable button[onclick^="edit("]').click();
+    await page
+      .locator("#templateTable tbody tr")
+      .filter({ hasText: "Browser Fixture Template" })
+      .locator('button[onclick^="edit("]')
+      .click();
     await expect(page.locator("#modal")).toBeVisible();
     await expect
       .poll(() =>
@@ -834,7 +1146,11 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       templates.find(({ name }) => name === "Browser Fixture Template")?.html,
     ).toBe(editedEmailHTML);
 
-    await page.locator('#templateTable button[onclick^="edit("]').click();
+    await page
+      .locator("#templateTable tbody tr")
+      .filter({ hasText: "Browser Fixture Template" })
+      .locator('button[onclick^="edit("]')
+      .click();
     await expect(page.locator("#modal")).toBeVisible();
     await expect
       .poll(() =>
@@ -858,7 +1174,13 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       "Browser Fixture Landing Page",
     );
 
-    await page.locator('#pagesTable button[onclick^="edit("]').click();
+    // The table also holds the paging fixtures, so the row is selected by name
+    // rather than by position.
+    await page
+      .locator("#pagesTable tbody tr")
+      .filter({ hasText: "Browser Fixture Landing Page" })
+      .locator('button[onclick^="edit("]')
+      .click();
     await expect(page.locator("#modal")).toBeVisible();
     await expect
       .poll(() =>
@@ -940,7 +1262,11 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(landingPage?.html).not.toContain('name="password"');
     expect(landingPage?.html).toContain(".browser-form{max-width:26rem}");
 
-    await page.locator('#pagesTable button[onclick^="edit("]').click();
+    await page
+      .locator("#pagesTable tbody tr")
+      .filter({ hasText: "Browser Fixture Landing Page" })
+      .locator('button[onclick^="edit("]')
+      .click();
     await expect(page.locator("#modal")).toBeVisible();
     await expect
       .poll(() =>
@@ -1087,7 +1413,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     for (const route of routes) {
       await mobilePage2.goto(route);
       const layout = await mobilePage2.evaluate(() => {
-        const dataTablesWrapper = document.querySelector(".dataTables_wrapper") as HTMLElement | null;
+        const dataTablesWrapper = document.querySelector(".dt-container") as HTMLElement | null;
         return {
           bodyScrollWidth: document.body.scrollWidth,
           viewportWidth: window.innerWidth,
@@ -1482,15 +1808,15 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(controlBox?.height ?? 0).toBeGreaterThan(0);
     await groupControl.click();
     await expect(page.locator(".ts-dropdown")).toBeVisible();
-    await page.keyboard.type("Browser");
-    await expect(page.locator(".ts-dropdown .option")).toContainText(
-      "Browser Fixture Group",
-    );
+    // The full name is typed so the search narrows to a single option, which is
+    // what makes pressing Enter deterministic once more than one group exists.
+    await page.keyboard.type("Browser Fixture Group");
+    const fixtureGroupOption = page
+      .locator(".ts-dropdown .option")
+      .filter({ hasText: "Browser Fixture Group" });
+    await expect(fixtureGroupOption).toHaveCount(1);
     // The target-count tooltip the removed widget put on each option survives.
-    await expect(page.locator(".ts-dropdown .option").first()).toHaveAttribute(
-      "title",
-      /^\d+ targets$/,
-    );
+    await expect(fixtureGroupOption).toHaveAttribute("title", /^\d+ targets$/);
     await page.keyboard.press("Enter");
     await expect(page.locator(".ts-control .item")).toContainText("Browser Fixture Group");
     expect(await selectedLabels(page, "users")).toEqual(["Browser Fixture Group"]);
@@ -1509,7 +1835,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     // Tom Select drives the real <select>, so the submitted values stay the
     // option values the backend already received.
     await openGroupDropdown(page);
-    await page.keyboard.type("Browser");
+    await page.keyboard.type("Browser Fixture Group");
     await page.keyboard.press("Enter");
     const groupSelection = await page.evaluate(() => {
       const select = document.querySelector("#users") as HTMLSelectElement;

@@ -4,6 +4,7 @@ package controllers
 
 import (
 	"context"
+	"fmt"
 	"net/http/httptest"
 	"os"
 	"os/exec"
@@ -204,5 +205,65 @@ func seedBrowserFixtures(t *testing.T, userID int64) {
 	}
 	if err := campaign.UpdateStatus(models.CampaignInProgress); err != nil {
 		t.Fatalf("activate browser test campaign: %v", err)
+	}
+
+	seedBrowserTableFixtures(t, userID)
+}
+
+// browserTableFixtureCount is the number of extra landing pages seeded so the
+// landing-page table exceeds one page at the default length. It gives the
+// browser suite a table it can sort, search and page through deterministically.
+const browserTableFixtureCount = 12
+
+// browserAttachmentFixtureCount is the number of attachments on the fixture
+// template. It is deliberately larger than the attachment table's default page
+// length, so a rendering strategy that only keeps the visible rows would lose
+// the rest and the browser suite would notice.
+const browserAttachmentFixtureCount = 12
+
+// seedBrowserTableFixtures creates landing pages whose names sort in the exact
+// reverse of their modification dates. A table ordered by name therefore cannot
+// accidentally satisfy an assertion about ordering by date, which is what makes
+// the date column a real test of the table's date type detection. It also
+// creates the many-attachment template described above.
+func seedBrowserTableFixtures(t *testing.T, userID int64) {
+	t.Helper()
+
+	base := time.Date(2031, time.March, 15, 9, 0, 0, 0, time.UTC)
+	for i := 1; i <= browserTableFixtureCount; i++ {
+		page := models.Page{
+			// The name carries a token that appears in no other fixture, so a
+			// table search for it selects exactly this set. DataTables' default
+			// search matches words in any order, so a token shared with another
+			// fixture name would silently widen the result.
+			Name:         fmt.Sprintf("Paginated Fixture %02d", i),
+			HTML:         fmt.Sprintf("<html><body>Paginated fixture %02d</body></html>", i),
+			UserId:       userID,
+			ModifiedDate: base.AddDate(0, 0, -i),
+		}
+		if err := models.PostPage(&page); err != nil {
+			t.Fatalf("create browser table fixture page %02d: %v", i, err)
+		}
+	}
+
+	attachments := make([]models.Attachment, 0, browserAttachmentFixtureCount)
+	for i := 1; i <= browserAttachmentFixtureCount; i++ {
+		attachments = append(attachments, models.Attachment{
+			Name: fmt.Sprintf("attachment-%02d.txt", i),
+			Type: "text/plain",
+			// "fixture" base64-encoded; the content only has to survive intact.
+			Content: "Zml4dHVyZQ==",
+		})
+	}
+	attachmentTemplate := models.Template{
+		Name:        "Browser Attachment Fixture",
+		Subject:     "Synthetic attachment fixture",
+		Text:        "Synthetic attachment fixture",
+		HTML:        "<html><body>Attachment fixture</body></html>",
+		UserId:      userID,
+		Attachments: attachments,
+	}
+	if err := models.PostTemplate(&attachmentTemplate); err != nil {
+		t.Fatalf("create browser attachment fixture template: %v", err)
 	}
 }
