@@ -45,8 +45,9 @@ The suite verifies:
 - dashboard chart rendering, values, labels, and campaign navigation;
 - campaign-result doughnut and timeline rendering, tooltip data, horizontal
   zoom, and zoom reset;
-- campaign navigation, Bootstrap tabs and modals, Select2, and the datetime
-  picker;
+- campaign navigation, Bootstrap tabs and modals, the native `<select>`
+  controls, the Tom Select group picker, the native datetime controls, and the
+  campaign launch payload contract;
 - group DataTables rendering and client-side target entry;
 - template DataTables rendering, CKEditor initialization, and Bootstrap tabs;
 - User Management rendering and the bundled zxcvbn password-strength behavior;

@@ -146,21 +146,56 @@ async function waitForSelectOption(
   selectId: string,
   optionText: string,
 ): Promise<void> {
-  // The campaign modal fills its selects from the API after it opens, so wait
-  // for the option to exist before driving the Select2 widget built on top.
+  // The campaign modal fills its selects from the API after it opens. A native
+  // select exposes its options directly; a Tom Select control keeps the
+  // available options in its own store and only mirrors the selected ones into
+  // the underlying element, so both are checked here.
   await expect
     .poll(
       () =>
         page.evaluate(
-          ({ id, text }) =>
-            Array.from(document.querySelectorAll(`select#${id} option`)).some(
+          ({ id, text }) => {
+            const select = document.querySelector(`#${id}`) as HTMLSelectElement & {
+              tomselect?: { options: Record<string, { text?: string }> };
+            };
+            if (select.tomselect) {
+              return Object.values(select.tomselect.options).some(
+                (option) => (option.text ?? "").trim() === text,
+              );
+            }
+            return Array.from(select.options).some(
               (option) => (option.textContent ?? "").trim() === text,
-            ),
+            );
+          },
           { id: selectId, text: optionText },
         ),
       { message: `option "${optionText}" never appeared in #${selectId}` },
     )
     .toBe(true);
+}
+
+async function selectedLabels(page: Page, selectId: string): Promise<string[]> {
+  return page.evaluate((id) => {
+    const select = document.querySelector(`#${id}`) as HTMLSelectElement;
+    return Array.from(select.selectedOptions).map((option) => option.text);
+  }, selectId);
+}
+
+// openGroupDropdown opens the Tom Select control backing the groups field
+// through its own public instance, which is stable regardless of where the
+// campaign modal is in its rebuild cycle.
+async function openGroupDropdown(page: Page): Promise<void> {
+  await page.evaluate(() => {
+    const select = document.querySelector("#users") as HTMLSelectElement & {
+      tomselect?: { open: () => void; refreshOptions: (trigger: boolean) => void };
+    };
+    if (!select.tomselect) {
+      throw new Error("groups Tom Select was not initialized");
+    }
+    select.tomselect.open();
+    select.tomselect.refreshOptions(false);
+  });
+  await expect(page.locator(".ts-dropdown")).toBeVisible();
 }
 
 test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
@@ -577,29 +612,41 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await page.getByRole("button", { name: "New Campaign" }).click();
     await expect(page.locator("#modal")).toHaveClass(/show/);
     await expect(page.locator("#modal")).toBeVisible();
-    await expect(page.locator(".select2-container")).toHaveCount(4);
-    // Select2: open and select a known fixture for a single-select (sending profile)
-    const profileContainer = page.locator('select#profile + .select2-container, select#profile ~ .select2-container').first();
-    await profileContainer.click();
-    await expect(page.locator('.select2-dropdown')).toBeVisible();
-    await page.locator('.select2-results__option').filter({ hasText: 'Browser Fixture Sending Profile' }).click();
-    await expect(profileContainer.locator('.select2-selection__rendered')).toContainText('Browser Fixture Sending Profile');
 
-    // Select2: open and select for a multi-select (groups)
-    const groupContainer = page.locator('select#users + .select2-container, select#users ~ .select2-container').first();
-    await groupContainer.click();
-    await expect(page.locator('.select2-dropdown')).toBeVisible();
-    await page.locator('.select2-results__option').filter({ hasText: 'Browser Fixture Group' }).click();
+    // The single-choice campaign fields are native selects: choosing an option
+    // needs no widget at all.
+    await waitForSelectOption(page, "profile", "Browser Fixture Sending Profile");
+    await page
+      .locator("#profile")
+      .selectOption({ label: "Browser Fixture Sending Profile" });
+    expect(await selectedLabels(page, "profile")).toEqual([
+      "Browser Fixture Sending Profile",
+    ]);
 
-    // Verify dropdown renders inside/above modal without overflow
-    const modalRect = await page.locator('#modal .modal-content').boundingBox();
-    const dropdownVisible = await page.locator('.select2-dropdown').isVisible().catch(() => false);
-    if (dropdownVisible) {
-      const dropdownRect = await page.locator('.select2-dropdown').boundingBox();
-      if (modalRect && dropdownRect) {
-        expect(dropdownRect.x).toBeGreaterThanOrEqual(modalRect.x - 5);
-      }
+    // Groups keep an enriched control: Tom Select renders a dropdown and tags.
+    await waitForSelectOption(page, "users", "Browser Fixture Group");
+    await openGroupDropdown(page);
+    await page.keyboard.type("Browser Fixture Group");
+    await expect(page.locator(".ts-dropdown .option")).toContainText(
+      "Browser Fixture Group",
+    );
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".ts-control .item")).toContainText(
+      "Browser Fixture Group",
+    );
+
+    // The dropdown renders inside the modal without overflowing it.
+    const modalRect = await page.locator("#modal .modal-content").boundingBox();
+    await openGroupDropdown(page);
+    const dropdownRect = await page.locator(".ts-dropdown").boundingBox();
+    if (modalRect && dropdownRect) {
+      expect(dropdownRect.x).toBeGreaterThanOrEqual(modalRect.x - 5);
+      expect(dropdownRect.x + dropdownRect.width).toBeLessThanOrEqual(
+        modalRect.x + modalRect.width + 5,
+      );
     }
+    await page.keyboard.press("Escape");
+
     const urlHelp = page.locator('label[for="url"] [data-bs-toggle="tooltip"]');
     await urlHelp.hover();
     await expect(page.locator(".tooltip.show")).toContainText(
@@ -608,8 +655,9 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(
       await page.evaluate(
         () =>
-          typeof window.jQuery.fn.select2 === "function" &&
-          typeof window.jQuery.fn.datetimepicker === "undefined" &&
+          window.jQuery.fn.select2 === undefined &&
+          window.jQuery.fn.datetimepicker === undefined &&
+          typeof (window as unknown as { TomSelect?: unknown }).TomSelect === "function" &&
           document.querySelector("#launch_date")?.getAttribute("type") === "datetime-local",
       ),
     ).toBe(true);
@@ -1300,38 +1348,202 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     );
   });
 
-  await test.step("Select2 keyboard search and multi-select behavior", async () => {
+  await test.step("native selects and Tom Select preserve selection behaviour", async () => {
     await page.getByRole("link", { name: "Campaigns", exact: true }).click();
     await expect(page).toHaveURL(/\/campaigns$/);
     await openApplicationModal(page, "New Campaign");
 
-    // Select2 keyboard search on the sending profile single-select
-    const profileContainer = page.locator('select#profile + .select2-container, select#profile ~ .select2-container').first();
-    await profileContainer.click();
-    const profileDropdown = page.locator('.select2-dropdown:visible');
-    await expect(profileDropdown).toBeVisible();
-    // Type a search query
-    await profileDropdown.locator('.select2-search__field').fill("Browser Fixture");
-    await expect(profileDropdown.locator('.select2-results__option')).toContainText("Browser Fixture Sending Profile");
-    // Select via Enter key
-    await page.keyboard.press("Enter");
-    await expect(profileContainer.locator('.select2-selection__rendered')).toContainText('Browser Fixture Sending Profile');
+    // The single-choice fields are native selects: no widget wraps them, they
+    // expose their options directly, and they are keyboard-operable.
+    expect(await page.locator(".select2-container").count()).toBe(0);
+    const singleSelects: Array<[string, string]> = [
+      ["template", "Browser Fixture Template"],
+      ["page", "Browser Fixture Landing Page"],
+      ["profile", "Browser Fixture Sending Profile"],
+    ];
+    for (const [id, label] of singleSelects) {
+      await waitForSelectOption(page, id, label);
+      const select = page.locator(`#${id}`);
+      await expect(select).toBeVisible();
+      await expect(select).toHaveJSProperty("tagName", "SELECT");
+      await expect(page.locator(`label[for="${id}"]`)).toBeVisible();
+      // The first entry stays a disabled placeholder, as the old widget showed.
+      const placeholder = await page.evaluate((selectId) => {
+        const element = document.querySelector(`#${selectId}`) as HTMLSelectElement;
+        const first = element.options[0];
+        return {
+          disabled: first.disabled,
+          optionCount: element.options.length,
+          selectedIndex: element.selectedIndex,
+          text: first.text,
+          value: first.value,
+        };
+      }, id);
+      expect(placeholder.disabled).toBe(true);
+      expect(placeholder.text).toMatch(/^Select a /);
+      // The contract that matters: the placeholder carries an empty value, so
+      // an untouched control submits an empty name and never the placeholder
+      // wording. The removed widget mapped this same blank option to an empty
+      // label. A collection holding exactly one entry is preselected instead,
+      // which is the one case the previous code also preselected.
+      expect(placeholder.value).toBe("");
+      if (placeholder.optionCount === 2) {
+        expect(placeholder.selectedIndex).toBe(1);
+      } else {
+        expect(placeholder.selectedIndex).toBe(0);
+        expect(await select.inputValue()).toBe("");
+      }
+    }
 
-    // Multi-select keyboard behavior on groups
-    const groupContainer = page.locator('select#users + .select2-container, select#users ~ .select2-container').first();
-    await groupContainer.click();
-    const groupDropdown = page.locator('.select2-dropdown:visible');
-    await expect(groupDropdown).toBeVisible();
+    // The fixtures hold a single template, page and profile, so the branch that
+    // leaves the placeholder selected is exercised directly against the real
+    // helper the payload is built from. An untouched control must yield an
+    // empty name, never the placeholder wording, which is what the removed
+    // widget did with its blank option.
+    const placeholderContract = await page.evaluate(() => {
+      const campaignHelpers = window as Window & {
+        fillSelectOptions: (
+          select: HTMLSelectElement,
+          items: Array<{ id: number; name: string }>,
+          placeholder: string,
+        ) => void;
+        selectedOptionText: (select: HTMLSelectElement) => string;
+        setSelectPlaceholder: (select: HTMLSelectElement, placeholder: string) => void;
+      };
+      const build = () => {
+        const select = document.createElement("select");
+        campaignHelpers.fillSelectOptions(
+          select,
+          [
+            { id: 7, name: "zeta fixture" },
+            { id: 3, name: "Alpha fixture" },
+          ],
+          "Select a Template",
+        );
+        return select;
+      };
+      const untouched = build();
+      const chosen = build();
+      chosen.value = "7";
+      const renamed = build();
+      campaignHelpers.setSelectPlaceholder(renamed, "Deleted Template");
+      return {
+        chosenName: campaignHelpers.selectedOptionText(chosen),
+        order: Array.from(untouched.options).map((option) => option.text),
+        renamedName: campaignHelpers.selectedOptionText(renamed),
+        renamedText: renamed.options[0].text,
+        untouchedName: campaignHelpers.selectedOptionText(untouched),
+      };
+    });
+    expect(placeholderContract.untouchedName).toBe("");
+    expect(placeholderContract.chosenName).toBe("zeta fixture");
+    // A copied campaign whose template was deleted shows the missing name but
+    // still submits an empty one, exactly as before.
+    expect(placeholderContract.renamedText).toBe("Deleted Template");
+    expect(placeholderContract.renamedName).toBe("");
+    expect(placeholderContract.order).toEqual([
+      "Select a Template",
+      "Alpha fixture",
+      "zeta fixture",
+    ]);
+
+    // Options are sorted case-insensitively by label, as the removed sorter did.
+    const templateLabels = await page.evaluate(() =>
+      Array.from((document.querySelector("#template") as HTMLSelectElement).options)
+        .slice(1)
+        .map((option) => option.text),
+    );
+    expect(templateLabels).toEqual(
+      [...templateLabels].sort((a, b) => a.toLowerCase().localeCompare(b.toLowerCase())),
+    );
+
+    await page.locator("#profile").selectOption({ label: "Browser Fixture Sending Profile" });
+    expect(await selectedLabels(page, "profile")).toEqual([
+      "Browser Fixture Sending Profile",
+    ]);
+    await page.locator("#profile").focus();
+    expect(await page.evaluate(() => document.activeElement?.id)).toBe("profile");
+
+    // Groups keep filtering search and removable tags through Tom Select.
+    await waitForSelectOption(page, "users", "Browser Fixture Group");
+    // Opened by a real pointer gesture rather than the widget API, so a control
+    // that ended up zero-height, clipped by the modal, or covered would fail
+    // here instead of passing on internal state alone.
+    const groupControl = page.locator("#users + .ts-wrapper .ts-control");
+    await expect(groupControl).toBeVisible();
+    const controlBox = await groupControl.boundingBox();
+    expect(controlBox?.height ?? 0).toBeGreaterThan(0);
+    await groupControl.click();
+    await expect(page.locator(".ts-dropdown")).toBeVisible();
     await page.keyboard.type("Browser");
-    await expect(groupDropdown.locator('.select2-results__option')).toContainText("Browser Fixture Group");
+    await expect(page.locator(".ts-dropdown .option")).toContainText(
+      "Browser Fixture Group",
+    );
+    // The target-count tooltip the removed widget put on each option survives.
+    await expect(page.locator(".ts-dropdown .option").first()).toHaveAttribute(
+      "title",
+      /^\d+ targets$/,
+    );
     await page.keyboard.press("Enter");
-    // Verify the selection appears as a tag in multi-select
-    await expect(groupContainer.locator('.select2-selection__choice')).toContainText("Browser Fixture Group");
+    await expect(page.locator(".ts-control .item")).toContainText("Browser Fixture Group");
+    expect(await selectedLabels(page, "users")).toEqual(["Browser Fixture Group"]);
+
+    // A search that matches nothing selects nothing.
+    await openGroupDropdown(page);
+    await page.keyboard.type("no-such-group-fixture");
+    await expect(page.locator(".ts-dropdown")).toContainText("No results found");
+    await page.keyboard.press("Escape");
+
+    // The tag is removable, and removing it clears the underlying select.
+    await page.locator(".ts-control .item .remove").first().click();
+    expect(await selectedLabels(page, "users")).toEqual([]);
+    await expect(page.locator(".ts-control .item")).toHaveCount(0);
+
+    // Tom Select drives the real <select>, so the submitted values stay the
+    // option values the backend already received.
+    await openGroupDropdown(page);
+    await page.keyboard.type("Browser");
+    await page.keyboard.press("Enter");
+    const groupSelection = await page.evaluate(() => {
+      const select = document.querySelector("#users") as HTMLSelectElement;
+      return Array.from(select.selectedOptions).map((option) => ({
+        text: option.text,
+        value: option.value,
+      }));
+    });
+    expect(groupSelection).toHaveLength(1);
+    expect(groupSelection[0].text).toBe("Browser Fixture Group");
+    expect(groupSelection[0].value).toMatch(/^\d+$/);
 
     await closeApplicationModal(page);
   });
 
+  await test.step("user role select works without a jQuery widget", async () => {
+    await page.getByRole("link", { name: "User Management" }).click();
+    await expect(page).toHaveURL(/\/users$/);
+    await openApplicationModal(page, "New User");
+
+    const role = page.locator("#role");
+    await expect(role).toBeVisible();
+    await expect(page.locator('label[for="role"]')).toContainText("Role");
+    expect(await page.locator(".select2-container").count()).toBe(0);
+    // The role field is a plain select: the widget was removed entirely.
+    expect(await page.locator("#role-select .ts-wrapper").count()).toBe(0);
+    expect(await selectedLabels(page, "role")).toEqual(["User"]);
+
+    await role.selectOption("admin");
+    expect(await selectedLabels(page, "role")).toEqual(["Admin"]);
+    expect(await role.inputValue()).toBe("admin");
+    await role.selectOption("user");
+    expect(await role.inputValue()).toBe("user");
+
+    await page.locator('#modal [data-bs-dismiss="modal"]').first().click();
+    await expect(page.locator("#modal")).not.toBeVisible();
+  });
+
   await test.step("native datetime controls preserve the campaign launch contract", async () => {
+    await page.getByRole("link", { name: "Campaigns", exact: true }).click();
+    await expect(page).toHaveURL(/\/campaigns$/);
     await openApplicationModal(page, "New Campaign");
 
     const launchDate = page.locator("#launch_date");
@@ -1430,51 +1642,47 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await page.locator("#launch_date").fill(localLaunch);
     await page.locator("#send_by_date").fill(localSendBy);
 
-    // setupOptions() re-creates each Select2 widget as its own API response
-    // arrives. Selecting through the underlying controls, exactly as copy()
-    // does in campaigns.js, keeps this step focused on the date contract; the
-    // Select2 interaction itself is covered by the dedicated step above.
+    // The single-choice fields are native selects; the groups field is driven
+    // through its Tom Select instance so the widget and the underlying select
+    // stay in sync, exactly as a real user interaction would leave them.
     await waitForSelectOption(page, "template", "Browser Fixture Template");
     await waitForSelectOption(page, "page", "Browser Fixture Landing Page");
     await waitForSelectOption(page, "profile", "Browser Fixture Sending Profile");
     await waitForSelectOption(page, "users", "Browser Fixture Group");
 
-    await page.evaluate(
-      (selections) => {
-        for (const [id, text] of Object.entries(selections)) {
-          const select = document.querySelector(`#${id}`) as HTMLSelectElement;
-          const option = Array.from(select.options).find(
-            (candidate) => (candidate.textContent ?? "").trim() === text,
-          );
-          if (!option) {
-            throw new Error(`option "${text}" missing from #${id}`);
-          }
-          option.selected = true;
-          if (!select.multiple) {
-            select.value = option.value;
-          }
-          window.jQuery(select).trigger("change.select2");
-        }
-      },
-      {
-        page: "Browser Fixture Landing Page",
-        profile: "Browser Fixture Sending Profile",
-        template: "Browser Fixture Template",
-        users: "Browser Fixture Group",
-      },
-    );
+    await page.locator("#template").selectOption({ label: "Browser Fixture Template" });
+    await page.locator("#page").selectOption({ label: "Browser Fixture Landing Page" });
+    await page
+      .locator("#profile")
+      .selectOption({ label: "Browser Fixture Sending Profile" });
+
+    await openGroupDropdown(page);
+    await page.keyboard.type("Browser Fixture Group");
+    await page.keyboard.press("Enter");
+    await expect(page.locator(".ts-control .item")).toContainText("Browser Fixture Group");
 
     await page.locator("#launchButton").click();
     await page.locator(".swal2-confirm").click();
     await expect(page.locator(".swal2-popup")).toContainText("Campaign Scheduled!");
 
-    // picker -> submit: the payload carries the UTC instant matching the local
-    // value, computed independently of the page.
+    // The payload still names the fixtures by their labels, which is the
+    // contract the API has always received.
     await expect.poll(() => campaignPayloads.length).toBe(1);
     const payload = JSON.parse(campaignPayloads[0]) as {
+      groups: Array<{ name: string }>;
       launch_date: string;
+      page: { name: string };
       send_by_date: string | null;
+      smtp: { name: string };
+      template: { name: string };
     };
+    expect(payload.template.name).toBe("Browser Fixture Template");
+    expect(payload.page.name).toBe("Browser Fixture Landing Page");
+    expect(payload.smtp.name).toBe("Browser Fixture Sending Profile");
+    expect(payload.groups).toEqual([{ name: "Browser Fixture Group" }]);
+
+    // picker -> submit: the payload carries the UTC instant matching the local
+    // value, computed independently of the page.
     const expectedLaunch = new Date(localLaunch).toISOString().replace(".000", "");
     const expectedSendBy = new Date(localSendBy).toISOString().replace(".000", "");
     expect(payload.launch_date).toBe(expectedLaunch);

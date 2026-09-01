@@ -60,7 +60,6 @@ const edit = (id) => {
     $("#modalSubmit").unbind('click').click(() => {
         save(id)
     })
-    $("#role").select2()
     if (id == -1) {
         $("#userModalLabel").text("New User")
         $("#role").val("user")
@@ -236,21 +235,6 @@ $(document).ready(function () {
     document.getElementById('modal').addEventListener('hide.bs.modal', function () {
         dismiss();
     });
-    // Select2 Defaults
-    $.fn.select2.defaults.set("width", "100%");
-    $.fn.select2.defaults.set("dropdownParent", $("#role-select"));
-    $.fn.select2.defaults.set("theme", "default");
-    $.fn.select2.defaults.set("sorter", function (data) {
-        return data.sort(function (a, b) {
-            if (a.text.toLowerCase() > b.text.toLowerCase()) {
-                return 1;
-            }
-            if (a.text.toLowerCase() < b.text.toLowerCase()) {
-                return -1;
-            }
-            return 0;
-        });
-    })
     $("#new_button").on("click", function () {
         edit(-1)
     })

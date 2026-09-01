@@ -158,15 +158,15 @@ a:focus {
   color: var(--gophishfr-ink);
 }
 
-/* Select2 (default theme) focus accent, replacing the removed Bootstrap 3 theme */
-.select2-container--default.select2-container--focus .select2-selection--single,
-.select2-container--default .select2-selection--single:focus,
-.select2-container--default.select2-container--open .select2-selection--single {
+/* Tom Select (Bootstrap 5 theme) accents, matching the rest of the admin UI.
+   The theme ships with the package; only these accents are first-party. */
+.ts-wrapper.focus .ts-control {
   border-color: var(--gophishfr-accent);
 }
 
-.select2-container--default .select2-results__option--highlighted[aria-selected] {
+.ts-dropdown .active {
   background-color: var(--gophishfr-accent);
+  color: #fff;
 }
 
 /* Alerts: soften the default Bootstrap borders to match prior spacing */
