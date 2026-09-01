@@ -51,6 +51,8 @@ The suite verifies:
 - group DataTables rendering and client-side target entry;
 - template DataTables rendering, CKEditor initialization, and Bootstrap tabs;
 - User Management rendering and the bundled zxcvbn password-strength behavior;
+- legacy jqXHR and native fetch transport contracts, including handled HTTP,
+  parsing, and network failures without jQuery on the native path;
 - successful loading of critical CSS, JavaScript, image, and font assets;
 - absence of unexpected JavaScript exceptions, console errors, failed local
   requests, and HTTP error responses.

@@ -1968,7 +1968,18 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
 
     // The ping result is stubbed so the assertion is about the button the
     // handler received, not about reaching an unroutable host.
+    let pingOutcome: "success" | "failure" = "success";
+    const pingConsoleErrorsBefore = consoleErrors.length;
+    const pingFailedResponsesBefore = failedLocalResponses.length;
     await page.route("**/api/webhooks/*/validate", async (route) => {
+      if (pingOutcome === "failure") {
+        await route.fulfill({
+          status: 400,
+          contentType: "application/json",
+          body: JSON.stringify({ message: "synthetic ping failure" }),
+        });
+        return;
+      }
       await route.fulfill({
         status: 200,
         contentType: "application/json",
@@ -1989,6 +2000,23 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       ),
     ).toBeUndefined();
     await expect(row.locator("button.ping_button")).toBeEnabled();
+
+    pingOutcome = "failure";
+    await row.locator("button.ping_button").click();
+    await expect(page.locator('[id="flashes"]').first()).toContainText(
+      `Ping of "${webhookName}" webhook failed: "synthetic ping failure"`,
+    );
+    await expect(row.locator("button.ping_button")).toBeEnabled();
+    expect(
+      consoleErrors
+        .slice(pingConsoleErrorsBefore)
+        .filter((entry) => !entry.includes("status of 400 (Bad Request)")),
+    ).toEqual([]);
+    consoleErrors.length = pingConsoleErrorsBefore;
+    expect(failedLocalResponses.slice(pingFailedResponsesBefore)).toEqual([
+      expect.stringMatching(/^400 \/api\/webhooks\/\d+\/validate$/),
+    ]);
+    failedLocalResponses.length = pingFailedResponsesBefore;
 
     // Editing through the delegated control loads that row's values.
     await row.locator("button.edit_button").click();
@@ -2924,6 +2952,57 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator("#password-strength-description")).not.toBeEmpty();
     await page.locator('#modal [data-bs-dismiss="modal"]').first().click();
     await expect(page.locator("#modal")).not.toBeVisible();
+
+    const userConsoleErrorsBefore = consoleErrors.length;
+    const userFailedResponsesBefore = failedLocalResponses.length;
+    await page.route("**/api/users/*", (route) =>
+      route.fulfill({
+        status: 404,
+        contentType: "application/json",
+        body: JSON.stringify({ message: "synthetic user lookup failure" }),
+      }),
+    );
+    await page
+      .locator("#userTable tbody tr")
+      .filter({ hasText: username })
+      .locator("button.edit_button")
+      .click();
+    await expect(page.locator("#modal")).toBeVisible();
+    await expect(page.locator('[id="flashes"]').first()).toContainText(
+      "Error fetching user",
+    );
+    await closeApplicationModal(page);
+    await page.unroute("**/api/users/*");
+
+    await page.route("**/api/users/**", (route) =>
+      route.fulfill({
+        status: 500,
+        contentType: "application/json",
+        body: JSON.stringify({ message: "synthetic users failure" }),
+      }),
+    );
+    await page.reload();
+    await expect(page.getByRole("heading", { name: "User Management" })).toBeVisible();
+    await expect(page.locator('[id="flashes"]').first()).toContainText(
+      "Error fetching users",
+    );
+    await page.unroute("**/api/users/**");
+
+    expect(
+      consoleErrors
+        .slice(userConsoleErrorsBefore)
+        .filter(
+          (entry) =>
+            !entry.includes("status of 404 (Not Found)") &&
+            !entry.includes("status of 500 (Internal Server Error)"),
+        ),
+    ).toEqual([]);
+    consoleErrors.length = userConsoleErrorsBefore;
+    expect(failedLocalResponses.slice(userFailedResponsesBefore)).toEqual([
+      expect.stringMatching(/^404 \/api\/users\/\d+$/),
+      "500 /api/users/",
+    ]);
+    failedLocalResponses.length = userFailedResponsesBefore;
   });
 
   await test.step("native CSV upload preserves validation and multipart behavior", async () => {

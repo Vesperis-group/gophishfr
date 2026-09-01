@@ -60,12 +60,11 @@ function sendTestEmail() {
     document.getElementById("sendTestModalSubmit").innerHTML = '<i class="fa fa-spinner fa-spin"></i> Sending'
     // Send the test email
     api.send_test_email(test_email_request)
-        .done(function (data) {
+        .then(function () {
             showTestEmailFlash("alert-success", "fa-check-circle", "Email Sent!")
             document.getElementById("sendTestModalSubmit").innerHTML = btnHtml
-        })
-        .fail(function (data) {
-            showTestEmailFlash("alert-danger", "fa-exclamation-circle", data.responseJSON.message)
+        }, function (error) {
+            showTestEmailFlash("alert-danger", "fa-exclamation-circle", requestErrorMessage(error))
             document.getElementById("sendTestModalSubmit").innerHTML = btnHtml
         })
 }

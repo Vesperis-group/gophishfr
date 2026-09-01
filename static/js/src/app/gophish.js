@@ -140,6 +140,96 @@ function modalError(message) {
     })
 }
 
+class APIRequestError extends Error {
+    constructor(message, options) {
+        super(message)
+        this.name = "APIRequestError"
+        this.status = options.status
+        this.statusText = options.statusText
+        this.data = options.data
+        this.responseText = options.responseText
+        this.cause = options.cause
+    }
+}
+
+function requestJSON(endpoint, method, data) {
+    var serializedData = JSON.stringify(data)
+    var requestMethod = method.toUpperCase()
+    var url = "/api" + endpoint
+    var options = {
+        method: requestMethod,
+        credentials: "same-origin",
+        headers: {
+            "Accept": "application/json, text/javascript, */*; q=0.01",
+            "Authorization": "Bearer " + user.api_key,
+            "Content-Type": "application/json"
+        }
+    }
+
+    if (requestMethod == "GET" || requestMethod == "HEAD") {
+        if (serializedData !== undefined) {
+            url += (url.includes("?") ? "&" : "?") + serializedData
+        }
+    } else if (serializedData !== undefined) {
+        options.body = serializedData
+    }
+
+    return fetch(url, options)
+        .then(function (response) {
+            return response.text()
+                .then(function (responseText) {
+                    var responseData
+                    if (responseText) {
+                        try {
+                            responseData = JSON.parse(responseText)
+                        } catch (cause) {
+                            throw new APIRequestError("Invalid JSON response", {
+                                status: response.status,
+                                statusText: "parsererror",
+                                responseText: responseText,
+                                cause: cause
+                            })
+                        }
+                    } else if (response.status != 204) {
+                        throw new APIRequestError("Invalid JSON response", {
+                            status: response.status,
+                            statusText: "parsererror",
+                            responseText: responseText
+                        })
+                    }
+
+                    if (!response.ok) {
+                        throw new APIRequestError(response.statusText || "HTTP request failed", {
+                            status: response.status,
+                            statusText: response.statusText,
+                            data: responseData,
+                            responseText: responseText
+                        })
+                    }
+                    return responseData
+                })
+        })
+        .catch(function (error) {
+            if (error instanceof APIRequestError) {
+                throw error
+            }
+            throw new APIRequestError("Network request failed", {
+                status: 0,
+                statusText: "error",
+                responseText: "",
+                cause: error
+            })
+        })
+}
+window.requestJSON = requestJSON
+
+function requestErrorMessage(error) {
+    if (error && error.data && typeof error.data.message == "string") {
+        return error.data.message
+    }
+    return "Request failed"
+}
+
 function query(endpoint, method, data, async) {
     return $.ajax({
         url: "/api" + endpoint,
@@ -348,7 +438,7 @@ var api = {
     users: {
         // get() - Queries the API for GET /users
         get: function () {
-            return query("/users/", "GET", {}, true)
+            return requestJSON("/users/", "GET", {})
         },
         // post() - Posts a user to POST /users
         post: function (user) {
@@ -359,7 +449,7 @@ var api = {
     userId: {
         // get() - Queries the API for GET /users/:id
         get: function (id) {
-            return query("/users/" + id, "GET", {}, true)
+            return requestJSON("/users/" + id, "GET", {})
         },
         // put() - Puts a user to PUT /users/:id
         put: function (user) {
@@ -389,7 +479,7 @@ var api = {
             return query("/webhooks/" + id, "DELETE", {}, false)
         },
         ping: function(id) {
-            return query("/webhooks/" + id + "/validate", "POST", {}, true)
+            return requestJSON("/webhooks/" + id + "/validate", "POST", {})
         },
     },
     // import handles all of the "import" functions in the api
@@ -402,7 +492,7 @@ var api = {
     },
     // send_test_email sends an email to the specified email address
     send_test_email: function (req) {
-        return query("/util/send_test_email", "POST", req, true)
+        return requestJSON("/util/send_test_email", "POST", req)
     },
     reset: function () {
         return query("/reset", "POST", {}, true)
