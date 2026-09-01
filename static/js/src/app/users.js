@@ -20,27 +20,25 @@ const save = (id) => {
         // we need to PUT /user/:id
         user.id = id
         api.userId.put(user)
-            .done((data) => {
+            .then((data) => {
                 successFlash("User " + escapeHtml(user.username) + " updated successfully!")
                 load()
                 dismiss()
                 bsModalHide("#modal")
-            })
-            .fail((data) => {
-                modalError(data.responseJSON.message)
+            }, (error) => {
+                modalError(requestErrorMessage(error))
             })
     } else {
         // Else, if this is a new user, POST it
         // to /user
         api.users.post(user)
-            .done((data) => {
+            .then((data) => {
                 successFlash("User " + escapeHtml(user.username) + " registered successfully!")
                 load()
                 dismiss()
                 bsModalHide("#modal")
-            })
-            .fail((data) => {
-                modalError(data.responseJSON.message)
+            }, (error) => {
+                modalError(requestErrorMessage(error))
             })
     }
 }
@@ -126,14 +124,9 @@ const deleteUser = (id) => {
         reverseButtons: true,
         allowOutsideClick: false,
         preConfirm: function () {
-            return new Promise((resolve, reject) => {
-                api.userId.delete(id)
-                    .done((msg) => {
-                        resolve()
-                    })
-                    .fail((data) => {
-                        reject(data.responseJSON.message)
-                    })
+            return api.userId.delete(id).then(function () {
+            }, function (error) {
+                throw requestErrorMessage(error)
             })
             .catch(error => {
                 Swal.showValidationMessage(error)

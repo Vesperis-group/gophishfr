@@ -32,13 +32,12 @@ document.addEventListener('DOMContentLoaded', function () {
         e.preventDefault()
         e.stopPropagation()
         api.reset()
-            .done(function (response) {
+            .then(function (response) {
                 user.api_key = response.data
                 successFlash(response.message)
                 document.getElementById("api_key").value = user.api_key
-            })
-            .fail(function (data) {
-                errorFlash(data.message)
+            }, function (error) {
+                errorFlash(requestErrorMessage(error))
             })
     })
     document.getElementById("settingsForm").addEventListener("submit", function (e) {
@@ -153,7 +152,7 @@ document.addEventListener('DOMContentLoaded', function () {
         setIMAPControlsDisabled(true);
         document.getElementById("validateimap").innerHTML = "<i class='fa fa-circle-o-notch fa-spin'></i> Testing...";
 
-        api.IMAP.validate(server).done(function(data) {
+        api.IMAP.validate(server).then(function(data) {
             if (data.success == true) {
                 Swal.fire({
                     title: "Success",
@@ -180,15 +179,14 @@ document.addEventListener('DOMContentLoaded', function () {
                   })
             }
 
-          })
-          .fail(function() {
+          }, function() {
             Swal.fire({
                 title: "Failed!",
                 text: "An unecpected error occured.",
                 type: "error",
             })
           })
-          .always(function() {
+          .finally(function() {
             //Re-enable inputs and change button text
             setIMAPControlsDisabled(false);
             document.getElementById("validateimap").innerHTML = oldHTML;

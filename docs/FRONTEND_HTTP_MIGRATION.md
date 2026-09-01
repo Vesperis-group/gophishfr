@@ -10,18 +10,34 @@ legacy helper or any synchronous caller.
 
 ## Current scope
 
-Four wrappers whose complete consumer set already handles both success and
-failure now use `requestJSON()`:
+Fourteen wrappers whose complete consumer set has a measured native-Promise
+contract now use `requestJSON()`:
 
 - `api.users.get`
 - `api.userId.get`
 - `api.webhookId.ping`
 - `api.send_test_email`
+- `api.campaignId.get`
+- `api.campaignId.results`
+- `api.campaignId.complete`
+- `api.groups.summary`
+- `api.IMAP.validate`
+- `api.users.post`
+- `api.userId.put`
+- `api.userId.delete`
+- `api.webhookId.put`
+- `api.reset`
 
 Their callers use the two-handler form of `Promise.then()`. This keeps every
-rejection handled without adding a jqXHR compatibility shim. The remaining 43
-wrappers still use `query()`: all 32 synchronous wrappers and 11 asynchronous
-wrappers.
+rejection handled without adding a jqXHR compatibility shim. IMAP validation
+uses `finally()` for its unconditional control cleanup. The remaining 33
+wrappers still use `query()`: all 32 synchronous wrappers and the unused
+asynchronous `campaignId.summary` wrapper.
+
+This increment migrated 10 of the 11 asynchronous wrappers that remained after
+the first native-transport change. `campaignId.summary` has no first-party
+consumer, so changing its externally observable jqXHR return is not justified
+without usage evidence.
 
 No endpoint, method, payload, authentication rule, or backend handler changed.
 The direct form-encoded `$.post()` in `settings.js` is separate from `query()`
@@ -44,14 +60,14 @@ for now:
 | `campaigns.get` | `GET /campaigns/` | sync | retained | unused/unknown |
 | `campaigns.post` | `POST /campaigns/` | sync | retained | likely accidental |
 | `campaigns.summary` | `GET /campaigns/summary` | sync | retained | likely accidental |
-| `campaignId.get` | `GET /campaigns/:id` | async | deferred | shared caller without rejection handling |
+| `campaignId.get` | `GET /campaigns/:id` | async | migrated | copy and report flows handle rejection |
 | `campaignId.delete` | `DELETE /campaigns/:id` | sync | retained | likely accidental |
-| `campaignId.results` | `GET /campaigns/:id/results` | async | deferred | shared caller without rejection handling |
-| `campaignId.complete` | `GET /campaigns/:id/complete` | async | deferred | caller has no rejection handler |
-| `campaignId.summary` | `GET /campaigns/:id/summary` | async | deferred | caller has no rejection handler |
+| `campaignId.results` | `GET /campaigns/:id/results` | async | migrated | load and poll failures are handled; refresh UI is restored |
+| `campaignId.complete` | `GET /campaigns/:id/complete` | async | migrated | SweetAlert consumes the native Promise directly |
+| `campaignId.summary` | `GET /campaigns/:id/summary` | async | retained | unused/unknown; jqXHR return may be externally consumed |
 | `groups.get` | `GET /groups/` | sync | retained | unused/unknown |
 | `groups.post` | `POST /groups/` | sync | retained | likely accidental |
-| `groups.summary` | `GET /groups/summary` | async | deferred | shared callers lack rejection handling |
+| `groups.summary` | `GET /groups/summary` | async | migrated | group list and campaign setup both handle rejection |
 | `groupId.get` | `GET /groups/:id` | sync | retained | likely accidental |
 | `groupId.put` | `PUT /groups/:id` | sync | retained | likely accidental |
 | `groupId.delete` | `DELETE /groups/:id` | sync | retained | likely accidental |
@@ -72,31 +88,54 @@ for now:
 | `SMTPId.delete` | `DELETE /smtp/:id` | sync | retained | likely accidental |
 | `IMAP.get` | `GET /imap/` | sync | retained | likely accidental |
 | `IMAP.post` | `POST /imap/` | sync | retained | likely accidental |
-| `IMAP.validate` | `POST /imap/validate` | async | deferred | validation and `always()` lifecycle |
+| `IMAP.validate` | `POST /imap/validate` | async | migrated | `finally()` preserves unconditional control cleanup |
 | `users.get` | `GET /users/` | async | migrated | all callers handle rejection |
-| `users.post` | `POST /users/` | async | deferred | submit family |
+| `users.post` | `POST /users/` | async | migrated | submit success and rejection are covered |
 | `userId.get` | `GET /users/:id` | async | migrated | all callers handle rejection |
-| `userId.put` | `PUT /users/:id` | async | deferred | submit family |
-| `userId.delete` | `DELETE /users/:id` | async | deferred | destructive-action family |
+| `userId.put` | `PUT /users/:id` | async | migrated | submit success and rejection are covered |
+| `userId.delete` | `DELETE /users/:id` | async | migrated | SweetAlert consumes the native Promise directly |
 | `webhooks.get` | `GET /webhooks/` | sync | retained | likely accidental |
 | `webhooks.post` | `POST /webhooks/` | sync | retained | likely accidental |
 | `webhookId.get` | `GET /webhooks/:id` | sync | retained | likely accidental |
-| `webhookId.put` | `PUT /webhooks/:id` | async | deferred | submit family |
+| `webhookId.put` | `PUT /webhooks/:id` | async | migrated | submit success and rejection are covered |
 | `webhookId.delete` | `DELETE /webhooks/:id` | sync | retained | likely accidental |
 | `webhookId.ping` | `POST /webhooks/:id/validate` | async | migrated | all callers handle rejection |
 | `import_email` | `POST /import/email` | sync | retained | likely accidental |
 | `clone_site` | `POST /import/site` | sync | retained | likely accidental |
 | `send_test_email` | `POST /util/send_test_email` | async | migrated | all callers handle rejection |
-| `reset` | `POST /reset` | async | deferred | settings/authentication control |
+| `reset` | `POST /reset` | async | migrated | API key update and server error paths are covered |
 
 The synchronous classification totals 3 required, 24 likely accidental, and 5
 unused/unknown wrappers. Those labels are migration inputs, not permission to
 change them in bulk.
 
+### Synchronous families
+
+The 32 retained synchronous wrappers divide into bounded workflow families:
+
+| Family | Wrappers | Count | Main migration risk |
+| --- | --- | ---: | --- |
+| Campaign flow | `campaigns.get`, `campaigns.post`, `campaigns.summary`, `campaignId.delete` | 4 | launch and destructive-action timing |
+| Group CRUD | `groups.get`, `groups.post`, `groupId.get`, `groupId.put`, `groupId.delete` | 5 | modal and DataTable refresh ordering |
+| Template/import | `templates.get`, `templates.post`, `templateId.get`, `templateId.put`, `templateId.delete`, `import_email` | 6 | untrusted HTML and import sequencing |
+| Landing page/clone | `pages.get`, `pages.post`, `pageId.get`, `pageId.put`, `pageId.delete`, `clone_site` | 6 | untrusted HTML and remote clone flow |
+| Sending profile | `SMTP.get`, `SMTP.post`, `SMTPId.get`, `SMTPId.put`, `SMTPId.delete` | 5 | credential-bearing forms and campaign option ordering |
+| IMAP settings | `IMAP.get`, `IMAP.post` | 2 | credential-bearing form and chained lifecycle callbacks |
+| Webhook CRUD | `webhooks.get`, `webhooks.post`, `webhookId.get`, `webhookId.delete` | 4 | list refresh and destructive-action timing |
+
+The first recommended synchronous follow-up is the read-only pair
+`webhooks.get` and `webhookId.get`. Their consumers are callback-driven, browser
+coverage already exists, and they do not participate in the campaign option
+ordering that currently requires `templates.get`, `pages.get`, and `SMTP.get`
+to complete synchronously.
+
 ## Measured legacy contract
 
 `tests/browser/http-transport.spec.ts` records the behavior of `query()` before
-comparing the native transport:
+comparing the native transport. `tests/browser/async-api-wrappers.spec.ts`
+additionally records every one of the 11 formerly deferred wrappers before the
+consumer migration, then applies the same method, path, body, success, and
+failure assertions afterward:
 
 | Case | Legacy jqXHR behavior |
 | --- | --- |
@@ -135,19 +174,24 @@ HTTP failures, and an aborted network request. It also temporarily removes
 `window.$` and `window.jQuery` before calling the native helper, proving that
 the migrated path has no jQuery runtime dependency.
 
-The frontend smoke suite covers the four migrated consumer families, including
-failed user loads, failed webhook pings, button restoration, and both test-email
-error surfaces. Tests never send email or contact a non-loopback host.
+The frontend smoke suite covers all migrated consumer families, including
+campaign refresh cleanup, report lookup failure, group option failure,
+completion, user update and deletion, webhook update, API-key reset, IMAP
+success/failure cleanup, failed user loads, failed webhook pings, and both
+test-email error surfaces. The wrapper suite also removes `window.$` and
+`window.jQuery` while invoking the 10 wrappers migrated in this increment.
+Tests never send email or contact a non-loopback host.
 
 ## Follow-up families
 
 Future changes should remain incremental:
 
-1. Migrate the 11 deferred asynchronous wrappers by consumer family, first
-   adding complete rejection and lifecycle handling.
-2. Remove accidental synchronous XHR one workflow at a time, with ordering and
-   UI-state regression coverage.
-3. Delete or justify unused wrappers after checking external extension
+1. Establish whether `campaignId.summary` has an external runtime consumer
+   before changing or removing its jqXHR contract.
+2. Migrate the synchronous webhook reads as a separately tested workflow.
+3. Remove other accidental synchronous XHR one workflow at a time, with
+   ordering and UI-state regression coverage.
+4. Delete or justify unused wrappers after checking external extension
    compatibility.
-4. Remove `query()` and jQuery Ajax only after no caller depends on jqXHR or
+5. Remove `query()` and jQuery Ajax only after no caller depends on jqXHR or
    synchronous completion.

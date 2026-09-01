@@ -311,7 +311,7 @@ function deleteCampaign(idx) {
 
 function setupOptions() {
     api.groups.summary()
-        .done(function (summaries) {
+        .then(function (summaries) {
             groups = summaries.groups
             if (groups.length == 0) {
                 modalError("No groups found!")
@@ -327,6 +327,8 @@ function setupOptions() {
                     value: String(group.id),
                 }
             }))
+        }, function (error) {
+            modalError(requestErrorMessage(error))
         });
     api.templates.get()
         .done(function (templates) {
@@ -377,7 +379,7 @@ function copy(idx) {
     setupOptions();
     // Set our initial values
     api.campaignId.get(campaigns[idx].id)
-        .done(function (campaign) {
+        .then(function (campaign) {
             document.getElementById("name").value = "Copy of " + campaign.name
             var template_select = document.getElementById("template")
             if (!campaign.template.id) {
@@ -398,13 +400,12 @@ function copy(idx) {
                 profile_select.value = campaign.smtp.id.toString()
             }
             document.getElementById("url").value = campaign.url
-        })
-        .fail(function (data) {
+        }, function (error) {
             showCampaignFlash(
                 "modal.flashes",
                 "alert-danger",
                 "fa-exclamation-circle",
-                data.responseJSON.message)
+                requestErrorMessage(error))
         })
 }
 

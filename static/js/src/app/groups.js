@@ -280,7 +280,7 @@ function load() {
     document.getElementById("emptyMessage").style.display = "none"
     document.getElementById("loading").style.display = ""
     api.groups.summary()
-        .done(function (response) {
+        .then(function (response) {
             document.getElementById("loading").style.display = "none"
             if (response.total > 0) {
                 groups = response.groups
@@ -312,8 +312,7 @@ function load() {
             } else {
                 document.getElementById("emptyMessage").style.display = ""
             }
-        })
-        .fail(function () {
+        }, function () {
             errorFlash("Error fetching groups")
         })
 }

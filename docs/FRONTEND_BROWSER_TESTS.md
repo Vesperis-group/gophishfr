@@ -53,6 +53,11 @@ The suite verifies:
 - User Management rendering and the bundled zxcvbn password-strength behavior;
 - legacy jqXHR and native fetch transport contracts, including handled HTTP,
   parsing, and network failures without jQuery on the native path;
+- request and settlement parity for the 11 audited asynchronous wrappers, plus
+  jQuery-free execution for the 10 migrated wrappers;
+- success, failure, and cleanup behavior for campaign results and reporting,
+  campaign group setup, user and webhook writes, API-key reset, and IMAP
+  validation;
 - successful loading of critical CSS, JavaScript, image, and font assets;
 - absence of unexpected JavaScript exceptions, console errors, failed local
   requests, and HTTP error responses.
