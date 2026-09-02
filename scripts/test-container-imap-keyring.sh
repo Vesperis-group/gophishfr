@@ -36,6 +36,29 @@ chmod 0777 "${workdir}"
 touch "${workdir}/gophish.db"
 chmod 0666 "${workdir}/gophish.db"
 
+# Linux bind mounts preserve numeric ownership. GitHub-hosted runners use a
+# different UID from the image's non-root app user, so a runner-owned 0400
+# fixture is unreadable in the container even though the mount itself is
+# correct. Align only this temporary fixture with the image's app identity
+# before mounting it read-only; do not broaden the keyring's permissions.
+docker run --rm \
+    --user 0:0 \
+    --mount "type=bind,src=${workdir}/keyring.json,dst=/keyring.json" \
+    --entrypoint /usr/bin/chown \
+    "${image}" \
+    app:app \
+    /keyring.json
+
+app_uid="$(docker run --rm --entrypoint /usr/bin/id "${image}" -u app)"
+app_gid="$(docker run --rm --entrypoint /usr/bin/id "${image}" -g app)"
+keyring_owner="$(stat --format '%u:%g' "${workdir}/keyring.json")"
+keyring_mode="$(stat --format '%a' "${workdir}/keyring.json")"
+if [ "${keyring_owner}" != "${app_uid}:${app_gid}" ] ||
+   [ "${keyring_mode}" != "400" ]; then
+    echo "container keyring fixture is not app-owned with mode 0400" >&2
+    exit 1
+fi
+
 docker run --rm \
     --mount "type=bind,src=${workdir}/keyring.json,dst=/run/secrets/gophishfr-credential-keyring,readonly" \
     --mount "type=bind,src=${workdir},dst=/data" \

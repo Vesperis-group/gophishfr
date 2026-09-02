@@ -136,6 +136,20 @@ docker run --rm \
   ghcr.io/vesperis-group/gophishfr:<pinned-version>
 ```
 
+On Linux, bind mounts preserve the source file's numeric owner and permission
+bits. The image runs as the non-root `app` user (UID/GID 1000), so a `0400`
+keyring owned by another host UID will correctly be unreadable. Prepare the
+operator-managed source for that identity while retaining owner-only access:
+
+```sh
+sudo chown 1000:1000 /secure/credential-keyring.json
+sudo chmod 0400 /secure/credential-keyring.json
+```
+
+Do not make the keyring writable by its group or by other users. Keep the
+container mount `readonly`; the application validates the mounted file and
+fails closed if it cannot be read or has unsafe write permissions.
+
 The same mount, environment variable, and database mount are required for the
 offline actions. Because an argument replaces the image's default Docker
 command, invoke the entrypoint script explicitly:
