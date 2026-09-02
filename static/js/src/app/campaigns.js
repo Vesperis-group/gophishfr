@@ -61,6 +61,7 @@ function setSelectPlaceholder(select, placeholder) {
 // control, the only field that still needs search and removable tags.
 var groupSelect = null
 var launchRequest = null
+var latestCampaignOptionRequest = 0
 
 function setupGroupSelect() {
     if (groupSelect) {
@@ -95,12 +96,15 @@ function selectedGroupNames() {
     })
 }
 
-function setCampaignLaunchDisabled(disabled) {
+function setCampaignFormDisabled(disabled) {
     ["name", "template", "url", "page", "profile", "launch_date", "send_by_date",
         "users", "launchButton"]
         .forEach(function (id) {
             document.getElementById(id).disabled = disabled
         })
+    document.querySelector(
+        '#modal button[onclick^="bsModalShow(\'#sendTestEmailModal\'"]'
+    ).disabled = disabled
     if (groupSelect) {
         if (disabled) {
             groupSelect.lock()
@@ -208,15 +212,15 @@ function launch() {
                 send_by_date: send_by_date || null,
                 groups: groups,
             }
-            setCampaignLaunchDisabled(true)
+            setCampaignFormDisabled(true)
             launchRequest = api.campaigns.post(campaign)
                 .then(function (data) {
                     launchRequest = null
-                    setCampaignLaunchDisabled(false)
+                    setCampaignFormDisabled(false)
                     campaign = data
                 }, function (error) {
                     launchRequest = null
-                    setCampaignLaunchDisabled(false)
+                    setCampaignFormDisabled(false)
                     showCampaignFlash(
                         "modal.flashes",
                         "alert-danger",
@@ -282,6 +286,7 @@ function sendTestEmail() {
 }
 
 function dismiss() {
+    latestCampaignOptionRequest += 1
     clearCampaignFlashes("modal.flashes");
     document.getElementById("name").value = "";
     document.getElementById("template").value = "";
@@ -334,8 +339,14 @@ function deleteCampaign(idx) {
 }
 
 function setupOptions() {
-    api.groups.summary()
+    var optionRequest = ++latestCampaignOptionRequest
+    setupGroupSelect()
+    setCampaignFormDisabled(true)
+    var groupsRequest = api.groups.summary()
         .then(function (summaries) {
+            if (optionRequest != latestCampaignOptionRequest) {
+                return
+            }
             groups = summaries.groups
             if (groups.length == 0) {
                 modalError("No groups found!")
@@ -352,10 +363,15 @@ function setupOptions() {
                 }
             }))
         }, function (error) {
-            modalError(requestErrorMessage(error))
-        });
-    api.templates.get()
-        .done(function (templates) {
+            if (optionRequest == latestCampaignOptionRequest) {
+                modalError(requestErrorMessage(error))
+            }
+        })
+    return api.templates.get()
+        .then(function (templates) {
+            if (optionRequest != latestCampaignOptionRequest) {
+                return
+            }
             if (templates.length == 0) {
                 modalError("No templates found!")
                 return false
@@ -365,9 +381,17 @@ function setupOptions() {
             if (templates.length === 1) {
                 template_select.value = templates[0].id
             }
-        });
-    api.pages.get()
-        .done(function (pages) {
+        })
+        .then(function () {
+            if (optionRequest != latestCampaignOptionRequest) {
+                return
+            }
+            return api.pages.get()
+        })
+        .then(function (pages) {
+            if (optionRequest != latestCampaignOptionRequest) {
+                return
+            }
             if (pages.length == 0) {
                 modalError("No pages found!")
                 return false
@@ -377,9 +401,17 @@ function setupOptions() {
             if (pages.length === 1) {
                 page_select.value = pages[0].id
             }
-        });
-    api.SMTP.get()
-        .done(function (profiles) {
+        })
+        .then(function () {
+            if (optionRequest != latestCampaignOptionRequest) {
+                return
+            }
+            return api.SMTP.get()
+        })
+        .then(function (profiles) {
+            if (optionRequest != latestCampaignOptionRequest) {
+                return
+            }
             if (profiles.length == 0) {
                 modalError("No profiles found!")
                 return false
@@ -392,18 +424,44 @@ function setupOptions() {
             if (profiles.length === 1) {
                 profile_select.value = profiles[0].id
             }
-        });
+        })
+        .then(function () {
+            return groupsRequest
+        })
+        .then(function () {
+            return optionRequest
+        })
 }
 
 function edit(campaign) {
-    setupOptions();
+    var optionsRequest = setupOptions()
+    var optionRequest = latestCampaignOptionRequest
+    optionsRequest.then(function () {
+        if (optionRequest == latestCampaignOptionRequest) {
+            setCampaignFormDisabled(false)
+        }
+    }, function (error) {
+        if (optionRequest == latestCampaignOptionRequest) {
+            modalError(requestErrorMessage(error))
+        }
+    })
 }
 
 function copy(idx) {
-    setupOptions();
-    // Set our initial values
-    api.campaignId.get(campaigns[idx].id)
+    var campaignId = campaigns[idx].id
+    var optionsRequest = setupOptions()
+    var optionRequest = latestCampaignOptionRequest
+    optionsRequest
+        .then(function () {
+            if (optionRequest != latestCampaignOptionRequest) {
+                return
+            }
+            return api.campaignId.get(campaignId)
+        })
         .then(function (campaign) {
+            if (!campaign || optionRequest != latestCampaignOptionRequest) {
+                return
+            }
             document.getElementById("name").value = "Copy of " + campaign.name
             var template_select = document.getElementById("template")
             if (!campaign.template.id) {
@@ -424,12 +482,15 @@ function copy(idx) {
                 profile_select.value = campaign.smtp.id.toString()
             }
             document.getElementById("url").value = campaign.url
+            setCampaignFormDisabled(false)
         }, function (error) {
-            showCampaignFlash(
-                "modal.flashes",
-                "alert-danger",
-                "fa-exclamation-circle",
-                requestErrorMessage(error))
+            if (optionRequest == latestCampaignOptionRequest) {
+                showCampaignFlash(
+                    "modal.flashes",
+                    "alert-danger",
+                    "fa-exclamation-circle",
+                    requestErrorMessage(error))
+            }
         })
 }
 

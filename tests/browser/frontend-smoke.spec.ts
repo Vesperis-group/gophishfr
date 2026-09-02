@@ -8,6 +8,7 @@ import {
   type Response,
 } from "@playwright/test";
 import { assertCampaignFlowContract } from "./campaign-flow-contract";
+import { assertHardOptionLoadersContract } from "./hard-option-loaders-contract";
 import { assertIMAPSettingsContract } from "./imap-settings-contract";
 import { assertSettingsFormContract } from "./settings-form-contract";
 
@@ -159,11 +160,18 @@ async function waitForSelectOption(
         page.evaluate(
           ({ id, text }) => {
             const select = document.querySelector(`#${id}`) as HTMLSelectElement & {
-              tomselect?: { options: Record<string, { text?: string }> };
+              tomselect?: {
+                isLocked: boolean;
+                options: Record<string, { text?: string }>;
+              };
             };
             if (select.tomselect) {
-              return Object.values(select.tomselect.options).some(
-                (option) => (option.text ?? "").trim() === text,
+              return (
+                !select.disabled &&
+                !select.tomselect.isLocked &&
+                Object.values(select.tomselect.options).some(
+                  (option) => (option.text ?? "").trim() === text,
+                )
               );
             }
             return Array.from(select.options).some(
@@ -268,19 +276,25 @@ async function sortByHeader(
 async function openGroupDropdown(page: Page): Promise<void> {
   await page.evaluate(() => {
     const select = document.querySelector("#users") as HTMLSelectElement & {
-      tomselect?: { open: () => void; refreshOptions: (trigger: boolean) => void };
+      tomselect?: {
+        focus: () => void;
+        open: () => void;
+        refreshOptions: (trigger: boolean) => void;
+      };
     };
     if (!select.tomselect) {
       throw new Error("groups Tom Select was not initialized");
     }
+    select.tomselect.focus();
     select.tomselect.open();
     select.tomselect.refreshOptions(true);
   });
   await expect(page.locator(".ts-dropdown")).toBeVisible();
+  await page.locator("#users + .ts-wrapper .ts-control input").focus();
 }
 
 test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
-  test.setTimeout(90_000);
+  test.setTimeout(180_000);
 
   const sandboxServiceWorkerError =
     "Failed to read the 'serviceWorker' property from 'Navigator': Service worker is disabled because the context is sandboxed and lacks the 'allow-same-origin' flag.";
@@ -1580,6 +1594,14 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(campaignRequests).toEqual([]);
     page.off("request", captureCampaign);
     await closeApplicationModal(page);
+  });
+
+  await test.step("hard option loaders preserve their legacy contracts", async () => {
+    await assertHardOptionLoadersContract(
+      page,
+      { consoleErrors, failedLocalResponses, pageErrors },
+      true,
+    );
   });
 
   await test.step("campaign test email keeps its payload and flash contracts", async () => {
