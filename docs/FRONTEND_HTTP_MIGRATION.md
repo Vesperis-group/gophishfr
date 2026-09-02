@@ -10,7 +10,7 @@ legacy helper or any synchronous caller.
 
 ## Current scope
 
-Thirty wrappers whose complete consumer set has a measured native-Promise
+Thirty-three wrappers whose complete consumer set has a measured native-Promise
 contract now use `requestJSON()`:
 
 - `api.users.get`
@@ -43,11 +43,14 @@ contract now use `requestJSON()`:
 - `api.pageId.put`
 - `api.pageId.delete`
 - `api.clone_site`
+- `api.SMTP.post`
+- `api.SMTPId.put`
+- `api.SMTPId.delete`
 
 Their callers use the two-handler form of `Promise.then()`. This keeps every
 rejection handled without adding a jqXHR compatibility shim. IMAP validation
-uses `finally()` for its unconditional control cleanup. The remaining 17
-wrappers still use `query()`: 16 synchronous wrappers and the unused
+uses `finally()` for its unconditional control cleanup. The remaining 14
+wrappers still use `query()`: 13 synchronous wrappers and the unused
 asynchronous `campaignId.summary` wrapper.
 
 This increment migrated 10 of the 11 asynchronous wrappers that remained after
@@ -95,6 +98,15 @@ delete actions capture stable page IDs instead of mutable table indexes. Exact
 CodeMirror source remains the save and clone destination, and cloned untrusted
 HTML reaches rendered DOM only through the existing sanitized, sandboxed preview.
 
+The sending profile mutation increment migrated `SMTP.post`, `SMTPId.put`, and
+`SMTPId.delete`. The required `SMTP.get` and unused/unknown `SMTPId.get`
+wrappers remain synchronous and untouched. Create and update payloads preserve
+explicit empty credentials, false booleans, and complete header replacement.
+Duplicate writes are suppressed, stale settlements cannot overwrite a newer
+modal, and destructive actions capture stable profile IDs. An omitted
+credential in the canonical response is rendered as an empty form field rather
+than the literal string `"undefined"`.
+
 No endpoint, method, payload, authentication rule, or backend handler changed.
 The direct form-encoded `$.post()` in `settings.js` is separate from `query()`
 and is deliberately outside this migration.
@@ -138,10 +150,10 @@ for now:
 | `pageId.put` | `PUT /pages/:id` | sync | migrated | stable page ID and modal context reject stale settlements |
 | `pageId.delete` | `DELETE /pages/:id` | sync | migrated | SweetAlert consumes one native Promise per confirmation attempt |
 | `SMTP.get` | `GET /smtp/` | sync | retained | required by campaign option ordering |
-| `SMTP.post` | `POST /smtp/` | sync | retained | likely accidental |
+| `SMTP.post` | `POST /smtp/` | sync | migrated | explicit credential and header payloads remain stable across native settlement |
 | `SMTPId.get` | `GET /smtp/:id` | sync | retained | unused/unknown |
-| `SMTPId.put` | `PUT /smtp/:id` | sync | retained | likely accidental |
-| `SMTPId.delete` | `DELETE /smtp/:id` | sync | retained | likely accidental |
+| `SMTPId.put` | `PUT /smtp/:id` | sync | migrated | stable profile ID and modal context reject stale settlements |
+| `SMTPId.delete` | `DELETE /smtp/:id` | sync | migrated | SweetAlert consumes one native deletion Promise per confirmation attempt |
 | `IMAP.get` | `GET /imap/` | sync | retained | likely accidental |
 | `IMAP.post` | `POST /imap/` | sync | retained | likely accidental |
 | `IMAP.validate` | `POST /imap/validate` | async | migrated | `finally()` preserves unconditional control cleanup |
@@ -161,13 +173,13 @@ for now:
 | `send_test_email` | `POST /util/send_test_email` | async | migrated | all callers handle rejection |
 | `reset` | `POST /reset` | async | migrated | API key update and server error paths are covered |
 
-The synchronous classification totals 3 required, 8 likely accidental, and 5
+The synchronous classification totals 3 required, 5 likely accidental, and 5
 unused/unknown wrappers. Those labels are migration inputs, not permission to
 change them in bulk.
 
 ### Synchronous families
 
-The 16 retained synchronous wrappers divide into bounded workflow families:
+The 13 retained synchronous wrappers divide into bounded workflow families:
 
 | Family | Wrappers | Count | Main migration risk |
 | --- | --- | ---: | --- |
@@ -175,13 +187,12 @@ The 16 retained synchronous wrappers divide into bounded workflow families:
 | Group compatibility | `groups.get` | 1 | unused/unknown `window.api` consumer compatibility |
 | Template compatibility | `templates.get`, `templateId.get` | 2 | campaign option ordering and unknown consumers |
 | Landing page compatibility | `pages.get`, `pageId.get` | 2 | campaign option ordering and unknown consumers |
-| Sending profile | `SMTP.get`, `SMTP.post`, `SMTPId.get`, `SMTPId.put`, `SMTPId.delete` | 5 | credential-bearing forms and campaign option ordering |
+| Sending profile compatibility | `SMTP.get`, `SMTPId.get` | 2 | campaign option ordering and unknown consumers |
 | IMAP settings | `IMAP.get`, `IMAP.post` | 2 | credential-bearing form and chained lifecycle callbacks |
 
-The next recommended synchronous follow-up is sending profile mutations:
-`SMTP.post`, `SMTPId.put`, and `SMTPId.delete`. The required `SMTP.get` and
-unused/unknown `SMTPId.get` wrappers remain separate ordering and compatibility
-decisions.
+The next bounded synchronous workflow is IMAP settings. The required `SMTP.get`
+and unused/unknown `SMTPId.get` wrappers remain separate ordering and
+compatibility decisions.
 
 ## Measured legacy contract
 
@@ -246,6 +257,11 @@ stale-modal, stable-ID, and DELETE assertions to create/update/delete and site
 clone. It additionally proves exact CodeMirror request/response strings and that
 cloned scripts, event handlers, forms, links, and external resources remain
 confined by the sanitized sandboxed preview without contacting a remote host.
+Sending profile mutation coverage records exact create/update/delete transport
+and payloads, including filled, unchanged, and empty credentials, empty and
+populated headers, and a false certificate-error flag. It proves failure retry,
+duplicate suppression, stable IDs, stale-modal isolation, canonical same-profile
+refresh, and operation without `window.$` or `window.jQuery`.
 Tests never send email or contact a non-loopback host.
 
 ## Follow-up families
@@ -254,10 +270,9 @@ Future changes should remain incremental:
 
 1. Establish whether `campaignId.summary` has an external runtime consumer
    before changing or removing its jqXHR contract.
-2. Migrate sending profile mutations as a separately tested workflow.
-3. Remove other accidental synchronous XHR one workflow at a time, with
+2. Remove other accidental synchronous XHR one workflow at a time, with
    ordering and UI-state regression coverage.
-4. Delete or justify unused wrappers after checking external extension
+3. Delete or justify unused wrappers after checking external extension
    compatibility.
-5. Remove `query()` and jQuery Ajax only after no caller depends on jqXHR or
+4. Remove `query()` and jQuery Ajax only after no caller depends on jqXHR or
    synchronous completion.
