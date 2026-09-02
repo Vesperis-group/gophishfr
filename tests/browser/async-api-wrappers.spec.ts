@@ -41,12 +41,6 @@ const invocations: WrapperInvocation[] = [
   {
     body: null,
     method: "GET",
-    name: "campaignId.summary",
-    pathname: "/api/campaigns/104/summary",
-  },
-  {
-    body: null,
-    method: "GET",
     name: "groups.summary",
     pathname: "/api/groups/summary",
   },
@@ -327,16 +321,43 @@ test("migrated API wrappers execute without jQuery", async ({ page }) => {
   });
 
   expect(results).toEqual(
-    invocations
-      .filter(({ name }) => name !== "campaignId.summary")
-      .map(({ name }) => ({
-        data: { name },
-        hasAlways: false,
-        hasDone: false,
-        hasFail: false,
-        name,
-      })),
+    invocations.map(({ name }) => ({
+      data: { name },
+      hasAlways: false,
+      hasDone: false,
+      hasFail: false,
+      name,
+    })),
   );
+});
+
+test("unused legacy API wrappers are absent from frontend internals", async ({ page }) => {
+  await login(page);
+
+  const shape = await page.evaluate(() => {
+    const api = (window as unknown as {
+      api: Record<string, Record<string, unknown>>;
+    }).api;
+    return {
+      apiType: typeof api,
+      campaignGet: typeof api.campaigns.get,
+      campaignSummary: typeof api.campaignId.summary,
+      groupGet: typeof api.groups.get,
+      pageGet: typeof api.pageId.get,
+      profileGet: typeof api.SMTPId.get,
+      templateGet: typeof api.templateId.get,
+    };
+  });
+
+  expect(shape).toEqual({
+    apiType: "object",
+    campaignGet: "undefined",
+    campaignSummary: "undefined",
+    groupGet: "undefined",
+    pageGet: "undefined",
+    profileGet: "undefined",
+    templateGet: "undefined",
+  });
 });
 
 async function runInvocations(page: Page): Promise<unknown[]> {
@@ -358,7 +379,6 @@ async function runInvocations(page: Page): Promise<unknown[]> {
         complete: (id: number) => RequestLike;
         get: (id: number) => RequestLike;
         results: (id: number) => RequestLike;
-        summary: (id: number) => RequestLike;
       };
       groups: { summary: () => RequestLike };
       reset: () => RequestLike;
@@ -375,7 +395,6 @@ async function runInvocations(page: Page): Promise<unknown[]> {
       ["campaignId.get", api.campaignId.get(101)],
       ["campaignId.results", api.campaignId.results(102)],
       ["campaignId.complete", api.campaignId.complete(103)],
-      ["campaignId.summary", api.campaignId.summary(104)],
       ["groups.summary", api.groups.summary()],
       [
         "IMAP.validate",
