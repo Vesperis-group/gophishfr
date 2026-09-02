@@ -249,16 +249,6 @@ var deleteTemplate = function (idx) {
     })
 }
 
-function deleteTemplate(idx) {
-    if (confirm("Delete " + templates[idx].name + "?")) {
-        api.templateId.delete(templates[idx].id)
-            .done(function (data) {
-                successFlash(data.message)
-                load()
-            })
-    }
-}
-
 // The attachment table's configuration is shared by every entry point that
 // opens the modal, so the three paths cannot drift apart.
 var attachmentsTableOptions = {

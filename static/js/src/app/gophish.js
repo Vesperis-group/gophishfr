@@ -230,20 +230,6 @@ function requestErrorMessage(error) {
     return "Request failed"
 }
 
-function query(endpoint, method, data, async) {
-    return $.ajax({
-        url: "/api" + endpoint,
-        async: async,
-        method: method,
-        data: JSON.stringify(data),
-        dataType: "json",
-        contentType: "application/json",
-        beforeSend: function (xhr) {
-            xhr.setRequestHeader('Authorization', 'Bearer ' + user.api_key);
-        }
-    })
-}
-
 function escapeHtml(text) {
     var element = document.createElement("div")
     element.textContent = text

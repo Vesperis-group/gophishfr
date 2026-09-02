@@ -6,8 +6,8 @@ The frontend historically exposes API wrappers from
 `static/js/src/app/gophish.js`. All 47 wrappers returned a jQuery jqXHR through
 `query()`, including 32 wrappers that explicitly set `async: false`. This
 migration introduced a native Promise/fetch transport and incrementally moved
-every retained wrapper to it. The legacy helper remains present for a separate
-removal change, but has no runtime caller.
+every retained wrapper to it. The unused legacy helper and jQuery runtime have
+now been removed.
 
 `window.api` and its `api.*` properties are internal frontend implementation
 details, not a public API or supported extension point. This does not change the
@@ -62,8 +62,8 @@ contracts:
 
 Their callers use native Promise settlement handlers without a jqXHR
 compatibility shim. IMAP validation uses `finally()` for its unconditional
-control cleanup. `query()` and its jQuery Ajax implementation remain unchanged,
-but no retained wrapper calls them.
+control cleanup. No retained wrapper or first-party runtime code depends on
+jQuery.
 
 Six unused internal wrappers were removed rather than migrated:
 `campaigns.get`, `campaignId.summary`, `groups.get`, `templateId.get`,
@@ -159,9 +159,10 @@ errors retain their independent historical behavior. The same wrappers also
 drive their three list pages through native Promise handlers that ignore
 superseded responses.
 
-This removes the last runtime caller of `query()` and the last executable
-first-party jQuery use outside its retained implementation. Removing `query()`
-itself remains intentionally out of scope for this increment.
+This removed the last runtime caller of `query()` and the last executable
+first-party jQuery use outside its retained implementation. The follow-up
+cleanup removed the unused helper, its legacy jqXHR test, and the jQuery runtime
+without changing `requestJSON()`.
 
 ## Wrapper inventory
 
@@ -229,15 +230,16 @@ The synchronous classification now totals zero retained wrappers.
 
 ### Synchronous families
 
-No retained wrapper uses synchronous XHR. The legacy `query()` implementation
-remains available but has no runtime caller.
+No retained wrapper uses synchronous XHR, and the legacy `query()`
+implementation is absent.
 
 ## Measured legacy contract
 
-`tests/browser/http-transport.spec.ts` records the behavior of `query()` before
-comparing the native transport. `tests/browser/async-api-wrappers.spec.ts`
-records the request and settlement contracts of the native wrappers that
-retained production consumers:
+The table below records the measured historical behavior that guided the
+migration. `tests/browser/http-transport.spec.ts` now covers the retained native
+transport only. `tests/browser/async-api-wrappers.spec.ts` records the request
+and settlement contracts of the native wrappers that retained production
+consumers:
 
 | Case | Legacy jqXHR behavior |
 | --- | --- |
@@ -270,11 +272,10 @@ credentials, or authorization values.
 
 ## Test boundary
 
-The browser contract suite verifies the legacy and native transports against
-local synthetic responses, including success, 204, empty and invalid JSON,
-HTTP failures, and an aborted network request. It also temporarily removes
-`window.$` and `window.jQuery` before calling the native helper, proving that
-the migrated path has no jQuery runtime dependency.
+The browser contract suite verifies the native transport against local
+synthetic responses, including success, 204, empty and invalid JSON, HTTP
+failures, and an aborted network request. The full browser suite asserts that
+`window.$` and `window.jQuery` remain undefined across representative pages.
 
 The frontend smoke suite covers all migrated consumer families, including
 campaign refresh cleanup, report lookup failure, group option failure,
@@ -316,8 +317,9 @@ empty-field behavior, HTTP 400/403/500 handling, retry, duplicate submissions,
 redirect handling, and operation with both jQuery globals removed.
 Tests never send email or contact a non-loopback host.
 
-## Follow-up families
+## Completion
 
-Future changes should remain incremental. Remove the now-unused `query()` and
-jQuery Ajax implementation only in a dedicated follow-up that also audits the
-intentionally retained legacy/dead-code boundaries.
+The application HTTP transport is fully native. The dedicated cleanup removed
+the unused `query()` helper, the overwritten jqXHR-based `deleteTemplate`
+declaration, the direct package dependency, and the distributed jQuery code.
+`requestJSON()` and all HTTP payload contracts remain unchanged.

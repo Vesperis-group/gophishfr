@@ -187,24 +187,17 @@ async function assertTransportContracts(
     if (usesNativePromises) {
       expect(
         await page.evaluate(async (campaign) => {
-          const originalAjax = window.jQuery.ajax;
-          let ajaxCalls = 0;
-          window.jQuery.ajax = () => {
-            ajaxCalls += 1;
-            throw new Error("campaign wrappers must not use jQuery.ajax");
+          await Promise.all([
+            api.campaigns.post(campaign),
+            api.campaigns.summary(),
+            api.campaignId.delete(208),
+          ]);
+          return {
+            dollar: typeof window.$,
+            jquery: typeof window.jQuery,
           };
-          try {
-            await Promise.all([
-              api.campaigns.post(campaign),
-              api.campaigns.summary(),
-              api.campaignId.delete(208),
-            ]);
-          } finally {
-            window.jQuery.ajax = originalAjax;
-          }
-          return ajaxCalls;
         }, transportCampaign),
-      ).toBe(0);
+      ).toEqual({ dollar: "undefined", jquery: "undefined" });
     }
     await page.unroute("**/api/campaigns/**");
   });

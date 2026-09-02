@@ -108,7 +108,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 errorFlash(requestErrorMessage(error))
             })
     })
-    //$("#imapForm").submit(function (e) {
     document.getElementById("savesettings").addEventListener("click", function() {
         if (imapSaveRequest) {
             return false

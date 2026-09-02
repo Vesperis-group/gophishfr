@@ -48,15 +48,15 @@ defensible rather than a 1 → 2 → 3 split.
 The backend contract is untouched: every table is client-side, no table uses
 DataTables' own Ajax loading, and no route, payload or query parameter changed.
 
-### Remaining jQuery coupling
+### jQuery runtime removal
 
 DataTables was the last third-party jQuery plugin. A scan of
-`static/js/src/app` now reports **no `$.fn.*` plugin usage at all**; jQuery
-survives only in first-party application code, across 11 files and 428
-occurrences. Grouped by usage family (a single line can fall into more than
-one, so these overlap): DOM selection 371, DOM mutation 233, form values 133,
-events 58, utilities 29, Ajax 2. Removing that coupling is the subject of the
-follow-up `refactor/remove-first-party-jquery`; none of it was migrated here.
+`static/js/src/app` reports no executable jQuery usage. The final unused
+`query()` helper and overwritten jqXHR-based `deleteTemplate` declaration were
+removed after all active first-party consumers had already migrated to native
+browser APIs. The direct `jquery@3.7.1` package, build input, generated license
+notice, and distributed runtime code were removed with them. No third-party
+component requires jQuery.
 
 A dedicated browser test, `tests/browser/datatables-no-jquery.spec.ts`, loads
 the exact shipped DataTables files into a page with no jQuery on it and drives
@@ -315,10 +315,9 @@ vendored/inventoried components to exact Yarn dependencies as part of
 - `static/css/flat-ui.css` was deleted from the repository. Its historical
   attribution is preserved in NOTICE. `static/css/gophishfr-theme.css` is the
   new first-party Bootstrap 5 theme (system font stack, no external CDN).
-- Bootstrap does NOT use its optional jQuery bridge (`data-bs-no-jquery` is set
-  on `<body>`). All Bootstrap lifecycle events are handled via native
-  `addEventListener`. jQuery remains for DataTables, Select2,
-  and first-party application code.
+- Bootstrap does not use its optional jQuery bridge. All Bootstrap lifecycle
+  events are handled via native `addEventListener`, and no jQuery runtime is
+  distributed.
 - Bootstrap DateTimePicker's vendored source (`bootstrap-datetime.js`) was
   locally modified to: (1) replace Collapse jQuery calls with native
   `bootstrap.Collapse.getOrCreateInstance()` API, and (2) change default icon
@@ -384,7 +383,6 @@ them in a fixed order, and emits their complete license texts in
 
 | Component | Version | Usage | License | Audit status |
 | --- | --- | --- | --- | --- |
-| jQuery | 3.7.1 | Single global runtime instance for DataTables and first-party code; the exact direct dependency naturally satisfies all transitive ranges | MIT | `CLEAN`; remediates CVE-2015-9251, CVE-2019-11358, CVE-2020-11022, CVE-2020-11023 from 1.10.2 |
 | Chart.js / `@kurkle/color` | 4.5.1 / 0.3.4 | Dashboard and campaign charts | MIT | `CLEAN` |
 | chartjs-plugin-zoom / Hammer.JS | 2.2.0 / 2.0.8 | Timeline pan and zoom | MIT | `CLEAN` |
 | Bootstrap / Popper | 5.3.8 / 2.11.8 | Global layout, navbar, modal, tabs, dropdown, tooltip | MIT | `CLEAN`; exact Yarn dependencies replacing the manually vendored Bootstrap 3 JS/CSS above |
