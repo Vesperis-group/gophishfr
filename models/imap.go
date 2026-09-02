@@ -116,6 +116,18 @@ func GetIMAP(uid int64) ([]IMAP, error) {
 
 // PostIMAP updates IMAP settings for a user in the database.
 func PostIMAP(im *IMAP, uid int64) error {
+	im.UserId = uid
+	// Empty updates preserve only the secret owned by the supplied user ID.
+	if im.Password == "" {
+		existing, err := GetIMAP(uid)
+		if err != nil {
+			return err
+		}
+		if len(existing) > 0 {
+			im.Password = existing[0].Password
+		}
+	}
+
 	err := im.Validate()
 	if err != nil {
 		log.Error(err)

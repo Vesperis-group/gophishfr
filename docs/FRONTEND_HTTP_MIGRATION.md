@@ -129,9 +129,14 @@ are suppressed until the current request settles. The exact credential-bearing
 payload, success-feedback/reload order, retry behavior, and unconditional scroll
 cleanup remain covered with synthetic fixtures.
 
-No endpoint, method, payload, authentication rule, or backend handler changed.
-The direct form-encoded `$.post()` in `settings.js` is separate from `query()`
-and is deliberately outside this migration.
+That migration did not change an endpoint, method, payload, authentication rule,
+or backend handler. A later security hardening made the stored IMAP password
+write-only: `GET /api/imap/` omits the `password` property and every accepted
+frontend load clears the password input. `POST /api/imap/` still accepts a
+non-empty password to create or rotate the secret; an empty or omitted password
+preserves the authenticated user's existing secret, but cannot create a new
+configuration, and JSON `null` is rejected. The direct form-encoded `$.post()`
+in `settings.js` is separate from `query()` and remains outside this migration.
 
 ## Wrapper inventory
 
@@ -176,8 +181,8 @@ for now:
 | `SMTPId.get` | `GET /smtp/:id` | sync | removed | unused internal wrapper; REST endpoint unchanged |
 | `SMTPId.put` | `PUT /smtp/:id` | sync | migrated | stable profile ID and modal context reject stale settlements |
 | `SMTPId.delete` | `DELETE /smtp/:id` | sync | migrated | SweetAlert consumes one native deletion Promise per confirmation attempt |
-| `IMAP.get` | `GET /imap/` | sync | migrated | settings form ignores superseded native responses |
-| `IMAP.post` | `POST /imap/` | sync | migrated | exact credential payload and ordered lifecycle callbacks are preserved |
+| `IMAP.get` | `GET /imap/` | sync | migrated | settings form ignores superseded native responses; stored password is omitted |
+| `IMAP.post` | `POST /imap/` | sync | migrated | empty/omitted password preserves an existing authenticated-user secret |
 | `IMAP.validate` | `POST /imap/validate` | async | migrated | `finally()` preserves unconditional control cleanup |
 | `users.get` | `GET /users/` | async | migrated | all callers handle rejection |
 | `users.post` | `POST /users/` | async | migrated | submit success and rejection are covered |
@@ -290,4 +295,3 @@ Future changes should remain incremental:
 2. Migrate the separate settings `$.post()` and form serialization path.
 3. Remove `query()` and jQuery Ajax only after no caller depends on jqXHR or
    synchronous completion.
-4. Track IMAP password response hardening as a separate security change.
