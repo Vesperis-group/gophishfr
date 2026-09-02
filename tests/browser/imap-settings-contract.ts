@@ -270,8 +270,13 @@ async function assertTransportContracts(
   });
 }
 
-async function assertStoredSecretContract(page: Page): Promise<void> {
+async function assertStoredSecretContract(
+  page: Page,
+  telemetry: BrowserTelemetry,
+): Promise<void> {
   await test.step("stored IMAP password remains write-only", async () => {
+    const consoleErrorsBefore = telemetry.consoleErrors.length;
+    const failedResponsesBefore = telemetry.failedLocalResponses.length;
     const contract = await page.evaluate(async (settings) => {
       const apiKey = (
         window as Window & {
@@ -287,6 +292,13 @@ async function assertStoredSecretContract(page: Page): Promise<void> {
         enabled: false,
         host: "localhost",
       };
+      const missingPassword = { ...storedSettings } as Record<string, unknown>;
+      delete missingPassword.password;
+      const missingCreateResponse = await fetch("/api/imap/", {
+        body: JSON.stringify(missingPassword),
+        headers,
+        method: "POST",
+      });
       const createResponse = await fetch("/api/imap/", {
         body: JSON.stringify(storedSettings),
         headers,
@@ -294,6 +306,14 @@ async function assertStoredSecretContract(page: Page): Promise<void> {
       });
       const readResponse = await fetch("/api/imap/", { headers });
       const readBody = await readResponse.text();
+      const replacementPassword = `${settings.password}-rotated`;
+      const replacementResponse = await fetch("/api/imap/", {
+        body: JSON.stringify({ ...storedSettings, password: replacementPassword }),
+        headers,
+        method: "POST",
+      });
+      const replacementReadResponse = await fetch("/api/imap/", { headers });
+      const replacementReadBody = await replacementReadResponse.text();
       const updateResponse = await fetch("/api/imap/", {
         body: JSON.stringify({ ...storedSettings, password: "" }),
         headers,
@@ -301,7 +321,11 @@ async function assertStoredSecretContract(page: Page): Promise<void> {
       });
       return {
         createStatus: createResponse.status,
+        missingCreateStatus: missingCreateResponse.status,
         password: settings.password,
+        replacementPassword,
+        replacementReadBody,
+        replacementStatus: replacementResponse.status,
         readBody,
         readSettings: JSON.parse(readBody) as Array<Record<string, unknown>>,
         readStatus: readResponse.status,
@@ -310,9 +334,21 @@ async function assertStoredSecretContract(page: Page): Promise<void> {
     }, syntheticSettings);
 
     expect(contract.createStatus).toBe(201);
+    expect(contract.missingCreateStatus).toBe(500);
     expect(contract.readStatus).toBe(200);
+    expect(contract.replacementStatus).toBe(201);
     expect(contract.updateStatus).toBe(201);
     expect(contract.readBody).not.toContain(contract.password);
+    expect(contract.replacementReadBody).not.toContain(contract.password);
+    expect(contract.replacementReadBody).not.toContain(contract.replacementPassword);
+    for (const forbidden of [
+      "password_ciphertext",
+      "gophishfr-cred:",
+      "browser-test-key",
+    ]) {
+      expect(contract.readBody).not.toContain(forbidden);
+      expect(contract.replacementReadBody).not.toContain(forbidden);
+    }
     expect(contract.readSettings).toHaveLength(1);
     expect(contract.readSettings[0]).not.toHaveProperty("password");
 
@@ -320,18 +356,32 @@ async function assertStoredSecretContract(page: Page): Promise<void> {
     await expect(page.locator("#imaphost")).toHaveValue("localhost");
     await expect(page.locator("#imappassword")).toHaveValue("");
 
-    const exposed = await page.evaluate((password) => {
+    const exposed = await page.evaluate((passwordValues) => {
       const storageValues = [localStorage, sessionStorage].flatMap((storage) =>
         Array.from({ length: storage.length }, (_, index) => storage.key(index))
           .filter((key): key is string => key !== null)
           .map((key) => storage.getItem(key) ?? ""),
       );
       return {
-        dom: document.documentElement.outerHTML.includes(password),
-        storage: storageValues.some((value) => value.includes(password)),
+        dom: passwordValues.some((value) =>
+          document.documentElement.outerHTML.includes(value),
+        ),
+        storage: storageValues.some((storedValue) =>
+          passwordValues.some((value) => storedValue.includes(value)),
+        ),
       };
-    }, contract.password);
+    }, [contract.password, contract.replacementPassword, "gophishfr-cred:", "browser-test-key"]);
     expect(exposed).toEqual({ dom: false, storage: false });
+    expect(
+      telemetry.consoleErrors
+        .slice(consoleErrorsBefore)
+        .filter((entry) => !entry.includes("status of 500 (Internal Server Error)")),
+    ).toEqual([]);
+    telemetry.consoleErrors.length = consoleErrorsBefore;
+    expect(telemetry.failedLocalResponses.slice(failedResponsesBefore)).toEqual([
+      "500 /api/imap/",
+    ]);
+    telemetry.failedLocalResponses.length = failedResponsesBefore;
   });
 }
 
@@ -792,7 +842,7 @@ export async function assertIMAPSettingsContract(
       api.IMAP.post.toString().includes("requestJSON"),
   );
 
-  await assertStoredSecretContract(page);
+  await assertStoredSecretContract(page, telemetry);
   await assertTransportContracts(page, telemetry, usesNativePromises);
   await assertLoadConsumer(page, usesNativePromises);
   await assertSaveConsumer(page, usesNativePromises);

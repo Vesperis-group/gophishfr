@@ -3,6 +3,7 @@
 package controllers
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net/http/httptest"
@@ -14,6 +15,7 @@ import (
 	"time"
 
 	"github.com/Vesperis-group/gophishfr/config"
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	"github.com/Vesperis-group/gophishfr/models"
 )
 
@@ -62,7 +64,21 @@ func TestBrowserSmoke(t *testing.T) {
 
 	seedBrowserFixtures(t, user.Id)
 
-	adminServer := NewAdminServer(config.AdminServer{})
+	keyring, err := credentials.NewKeyring(
+		"browser-test-key",
+		map[string][]byte{"browser-test-key": bytes.Repeat([]byte{0x58}, 32)},
+	)
+	if err != nil {
+		t.Fatalf("create browser credential keyring: %v", err)
+	}
+	credentialCipher, err := credentials.New(keyring)
+	if err != nil {
+		t.Fatalf("create browser credential cipher: %v", err)
+	}
+	adminServer := NewAdminServer(
+		config.AdminServer{},
+		WithCredentialCipher(credentialCipher),
+	)
 	server := httptest.NewServer(adminServer.server.Handler)
 	t.Cleanup(server.Close)
 

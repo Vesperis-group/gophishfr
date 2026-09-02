@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	log "github.com/Vesperis-group/gophishfr/logger"
 	"github.com/jordan-wright/email"
 
@@ -28,7 +29,8 @@ var goPhishRegex = regexp.MustCompile(`((\?|%3F)rid(=|%3D)(3D)?([A-Za-z0-9]{7}))
 
 // Monitor is a worker that monitors IMAP servers for reported campaign emails
 type Monitor struct {
-	cancel func()
+	cancel           func()
+	credentialCipher *credentials.Cipher
 }
 
 // Monitor.start() checks for campaign emails
@@ -51,7 +53,7 @@ func (im *Monitor) start(ctx context.Context) {
 				if _, ok := usermap[dbuser.Id]; !ok { // If we don't currently have a running Go routine for this user, start one.
 					log.Info("Starting new IMAP monitor for user ", dbuser.Username)
 					usermap[dbuser.Id] = 1
-					go monitor(dbuser.Id, ctx)
+					go im.monitor(dbuser.Id, ctx)
 				}
 			}
 			time.Sleep(10 * time.Second) // Every ten seconds we check if a new user has been created
@@ -61,7 +63,7 @@ func (im *Monitor) start(ctx context.Context) {
 
 // monitor will continuously login to the IMAP settings associated to the supplied user id (if the user account has IMAP settings, and they're enabled.)
 // It also verifies the user account exists, and returns if not (for the case of a user being deleted).
-func monitor(uid int64, ctx context.Context) {
+func (monitor *Monitor) monitor(uid int64, ctx context.Context) {
 	for {
 		select {
 		case <-ctx.Done():
@@ -80,12 +82,15 @@ func monitor(uid int64, ctx context.Context) {
 				break
 			}
 			if len(imapSettings) > 0 {
-				im := imapSettings[0]
+				settings := imapSettings[0]
 				// 3. Check if IMAP is enabled
-				if im.Enabled {
-					log.Debug("Checking IMAP for user ", uid, ": ", im.Username, " -> ", im.Host)
-					checkForNewEmails(im)
-					time.Sleep((time.Duration(im.IMAPFreq) - 10) * time.Second) // Subtract 10 to compensate for the default sleep of 10 at the bottom
+				if settings.Enabled {
+					log.Debug("Checking IMAP for user ", uid, ": ", settings.Username, " -> ", settings.Host)
+					if err := checkForNewEmails(settings, monitor.credentialCipher); err != nil {
+						log.Errorf("IMAP credential is unavailable for user %d", uid)
+					} else {
+						time.Sleep((time.Duration(settings.IMAPFreq) - 10) * time.Second) // Subtract 10 to compensate for the default sleep of 10 at the bottom
+					}
 				}
 			}
 		}
@@ -94,8 +99,8 @@ func monitor(uid int64, ctx context.Context) {
 }
 
 // NewMonitor returns a new instance of imap.Monitor
-func NewMonitor() *Monitor {
-	im := &Monitor{}
+func NewMonitor(credentialCipher *credentials.Cipher) *Monitor {
+	im := &Monitor{credentialCipher: credentialCipher}
 	return im
 }
 
@@ -117,21 +122,25 @@ func (im *Monitor) Shutdown() error {
 
 // checkForNewEmails logs into an IMAP account and checks unread emails for the
 // rid campaign identifier.
-func checkForNewEmails(im models.IMAP) {
+func checkForNewEmails(im models.IMAP, credentialCipher *credentials.Cipher) error {
+	password, err := models.DecryptIMAPPassword(im, credentialCipher)
+	if err != nil {
+		return err
+	}
 	im.Host = im.Host + ":" + strconv.Itoa(int(im.Port)) // Append port
 	mailServer := Mailbox{
 		Host:             im.Host,
 		TLS:              im.TLS,
 		IgnoreCertErrors: im.IgnoreCertErrors,
 		User:             im.Username,
-		Pwd:              im.Password,
+		Pwd:              password,
 		Folder:           im.Folder,
 	}
 
 	msgs, err := mailServer.GetUnread(true, false)
 	if err != nil {
 		log.Error(err)
-		return
+		return nil
 	}
 	// Update last_succesful_login here via im.Host
 	if err = models.SuccessfulLogin(&im); err != nil {
@@ -203,6 +212,7 @@ func checkForNewEmails(im models.IMAP) {
 	} else {
 		log.Debug("No new emails for ", im.Username)
 	}
+	return nil
 }
 
 func checkRIDs(em *email.Email, rids map[string]bool) {

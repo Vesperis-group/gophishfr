@@ -56,7 +56,7 @@ func performIMAPRequest(t *testing.T, testCtx *testContext, method string, body 
 	return response
 }
 
-func storeIMAPSettings(t *testing.T, userID int64, username, password string) {
+func storeIMAPSettings(t *testing.T, testCtx *testContext, userID int64, username, password string) {
 	t.Helper()
 	settings := models.IMAP{
 		UserId:                      userID,
@@ -72,12 +72,12 @@ func storeIMAPSettings(t *testing.T, userID int64, username, password string) {
 		DeleteReportedCampaignEmail: true,
 		IMAPFreq:                    60,
 	}
-	if err := models.PostIMAP(&settings, userID); err != nil {
+	if err := models.PostIMAP(&settings, userID, testCtx.credentialCipher); err != nil {
 		t.Fatalf("error saving IMAP settings: %v", err)
 	}
 }
 
-func assertStoredIMAPPassword(t *testing.T, userID int64, expected string) {
+func loadStoredIMAPSettings(t *testing.T, userID int64) models.IMAP {
 	t.Helper()
 	settings, err := models.GetIMAP(userID)
 	if err != nil {
@@ -86,14 +86,34 @@ func assertStoredIMAPPassword(t *testing.T, userID int64, expected string) {
 	if len(settings) != 1 {
 		t.Fatalf("unexpected IMAP settings count: got %d want 1", len(settings))
 	}
-	if settings[0].Password != expected {
-		t.Fatal("stored IMAP password did not match the expected value")
+	return settings[0]
+}
+
+func assertStoredIMAPPassword(t *testing.T, testCtx *testContext, userID int64, expected string) {
+	t.Helper()
+	settings := loadStoredIMAPSettings(t, userID)
+	if settings.Password != "" {
+		t.Fatal("legacy IMAP password column contains plaintext")
+	}
+	if settings.PasswordCiphertext == "" {
+		t.Fatal("IMAP password ciphertext was not stored")
+	}
+	if bytes.Contains([]byte(settings.PasswordCiphertext), []byte(expected)) {
+		t.Fatal("IMAP ciphertext contains readable plaintext")
+	}
+	plaintext, err := models.DecryptIMAPPassword(settings, testCtx.credentialCipher)
+	if err != nil {
+		t.Fatalf("decrypt stored IMAP password: %v", err)
+	}
+	if plaintext != expected {
+		t.Fatal("decrypted IMAP password did not match the expected value")
 	}
 }
 
 func TestIMAPGetOmitsStoredPassword(t *testing.T) {
 	testCtx := setupTest(t)
-	storeIMAPSettings(t, testCtx.admin.Id, "imap-user", storedIMAPPassword)
+	storeIMAPSettings(t, testCtx, testCtx.admin.Id, "imap-user", storedIMAPPassword)
+	stored := loadStoredIMAPSettings(t, testCtx.admin.Id)
 	response := performIMAPRequest(t, testCtx, http.MethodGet, nil, testCtx.apiKey)
 
 	if response.Code != http.StatusOK {
@@ -102,6 +122,16 @@ func TestIMAPGetOmitsStoredPassword(t *testing.T) {
 	responseBody := response.Body.Bytes()
 	if bytes.Contains(responseBody, []byte(storedIMAPPassword)) {
 		t.Fatal("GET /api/imap/ response body exposed the stored password")
+	}
+	for _, forbidden := range []string{
+		stored.PasswordCiphertext,
+		"password_ciphertext",
+		"gophishfr-cred:",
+		"api-test-active-key",
+	} {
+		if bytes.Contains(responseBody, []byte(forbidden)) {
+			t.Fatalf("GET /api/imap/ response body exposed credential metadata %q", forbidden)
+		}
 	}
 
 	var settings []map[string]interface{}
@@ -131,7 +161,7 @@ func TestIMAPGetOmitsStoredPassword(t *testing.T) {
 			t.Fatalf("GET /api/imap/ changed or omitted the %q field", field)
 		}
 	}
-	assertStoredIMAPPassword(t, testCtx.admin.Id, storedIMAPPassword)
+	assertStoredIMAPPassword(t, testCtx, testCtx.admin.Id, storedIMAPPassword)
 }
 
 func TestIMAPGetRequiresAuthentication(t *testing.T) {
@@ -145,8 +175,8 @@ func TestIMAPGetRequiresAuthentication(t *testing.T) {
 func TestIMAPGetIsScopedToAuthenticatedUser(t *testing.T) {
 	testCtx := setupTest(t)
 	otherUser := createUnpriviledgedUser(t, models.RoleUser)
-	storeIMAPSettings(t, testCtx.admin.Id, "admin-imap-user", storedIMAPPassword)
-	storeIMAPSettings(t, otherUser.Id, "other-imap-user", replacementIMAPPassword)
+	storeIMAPSettings(t, testCtx, testCtx.admin.Id, "admin-imap-user", storedIMAPPassword)
+	storeIMAPSettings(t, testCtx, otherUser.Id, "other-imap-user", replacementIMAPPassword)
 
 	response := performIMAPRequest(t, testCtx, http.MethodGet, nil, testCtx.apiKey)
 	if response.Code != http.StatusOK {
@@ -210,7 +240,11 @@ func TestIMAPPostPasswordSemantics(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			testCtx := setupTest(t)
 			if test.existingPassword != "" {
-				storeIMAPSettings(t, testCtx.admin.Id, "imap-user", test.existingPassword)
+				storeIMAPSettings(t, testCtx, testCtx.admin.Id, "imap-user", test.existingPassword)
+			}
+			var previousCiphertext string
+			if test.existingPassword != "" {
+				previousCiphertext = loadStoredIMAPSettings(t, testCtx.admin.Id).PasswordCiphertext
 			}
 			body := marshalIMAPSettings(t, validIMAPSettings(test.requestPassword))
 			response := performIMAPRequest(t, testCtx, http.MethodPost, body, testCtx.apiKey)
@@ -228,14 +262,26 @@ func TestIMAPPostPasswordSemantics(t *testing.T) {
 				}
 				return
 			}
-			assertStoredIMAPPassword(t, testCtx.admin.Id, test.expectedPassword)
+			assertStoredIMAPPassword(t, testCtx, testCtx.admin.Id, test.expectedPassword)
+			stored := loadStoredIMAPSettings(t, testCtx.admin.Id)
+			if test.existingPassword != "" && (test.requestPassword == nil || *test.requestPassword == "") {
+				if stored.PasswordCiphertext != previousCiphertext {
+					t.Fatal("empty update did not preserve ciphertext byte-for-byte")
+				}
+			}
+			if test.existingPassword != "" && test.requestPassword != nil && *test.requestPassword != "" {
+				if stored.PasswordCiphertext == previousCiphertext {
+					t.Fatal("non-empty update did not replace ciphertext")
+				}
+			}
 		})
 	}
 }
 
 func TestIMAPPostRejectsNullPassword(t *testing.T) {
 	testCtx := setupTest(t)
-	storeIMAPSettings(t, testCtx.admin.Id, "imap-user", storedIMAPPassword)
+	storeIMAPSettings(t, testCtx, testCtx.admin.Id, "imap-user", storedIMAPPassword)
+	previousCiphertext := loadStoredIMAPSettings(t, testCtx.admin.Id).PasswordCiphertext
 	settings := validIMAPSettings(nil)
 	settings["password"] = nil
 
@@ -249,13 +295,16 @@ func TestIMAPPostRejectsNullPassword(t *testing.T) {
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("unexpected status code: got %d want %d", response.Code, http.StatusBadRequest)
 	}
-	assertStoredIMAPPassword(t, testCtx.admin.Id, storedIMAPPassword)
+	assertStoredIMAPPassword(t, testCtx, testCtx.admin.Id, storedIMAPPassword)
+	if loadStoredIMAPSettings(t, testCtx.admin.Id).PasswordCiphertext != previousCiphertext {
+		t.Fatal("null password changed stored ciphertext")
+	}
 }
 
 func TestIMAPPostIgnoresClientUserID(t *testing.T) {
 	testCtx := setupTest(t)
 	otherUser := createUnpriviledgedUser(t, models.RoleUser)
-	storeIMAPSettings(t, otherUser.Id, "other-imap-user", storedIMAPPassword)
+	storeIMAPSettings(t, testCtx, otherUser.Id, "other-imap-user", storedIMAPPassword)
 
 	settings := validIMAPSettings(stringPointer(replacementIMAPPassword))
 	settings["user_id"] = otherUser.Id
@@ -269,8 +318,8 @@ func TestIMAPPostIgnoresClientUserID(t *testing.T) {
 	if response.Code != http.StatusCreated {
 		t.Fatalf("unexpected status code: got %d want %d", response.Code, http.StatusCreated)
 	}
-	assertStoredIMAPPassword(t, testCtx.admin.Id, replacementIMAPPassword)
-	assertStoredIMAPPassword(t, otherUser.Id, storedIMAPPassword)
+	assertStoredIMAPPassword(t, testCtx, testCtx.admin.Id, replacementIMAPPassword)
+	assertStoredIMAPPassword(t, testCtx, otherUser.Id, storedIMAPPassword)
 }
 
 func stringPointer(value string) *string {

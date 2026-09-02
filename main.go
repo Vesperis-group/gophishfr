@@ -39,6 +39,7 @@ import (
 	"github.com/Vesperis-group/gophishfr/controllers"
 	"github.com/Vesperis-group/gophishfr/dialer"
 	"github.com/Vesperis-group/gophishfr/imap"
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	log "github.com/Vesperis-group/gophishfr/logger"
 	"github.com/Vesperis-group/gophishfr/middleware"
 	"github.com/Vesperis-group/gophishfr/models"
@@ -52,10 +53,18 @@ const (
 )
 
 var (
-	configPath    = kingpin.Flag("config", "Location of config.json.").Default("./config.json").String()
-	disableMailer = kingpin.Flag("disable-mailer", "Disable the mailer (for use with multi-system deployments)").Bool()
-	mode          = kingpin.Flag("mode", fmt.Sprintf("Run the binary in one of the modes (%s, %s or %s)", modeAll, modeAdmin, modePhish)).
-			Default("all").Enum(modeAll, modeAdmin, modePhish)
+	configPath             = kingpin.Flag("config", "Location of config.json.").Default("./config.json").String()
+	disableMailer          = kingpin.Flag("disable-mailer", "Disable the mailer (for use with multi-system deployments)").Bool()
+	migrateIMAPCredentials = kingpin.Flag(
+		"migrate-imap-credentials",
+		"Offline: encrypt legacy IMAP passwords after stopping all application writers.",
+	).Bool()
+	rollbackIMAPCredentials = kingpin.Flag(
+		"rollback-imap-credentials",
+		"Offline: decrypt IMAP passwords before downgrading the schema or binary.",
+	).Bool()
+	mode = kingpin.Flag("mode", fmt.Sprintf("Run the binary in one of the modes (%s, %s or %s)", modeAll, modeAdmin, modePhish)).
+		Default("all").Enum(modeAll, modeAdmin, modePhish)
 )
 
 func main() {
@@ -82,6 +91,14 @@ func main() {
 		log.Warnf("Please consider adding a contact_address entry in your config.json")
 	}
 	config.Version = string(version)
+	if *migrateIMAPCredentials && *rollbackIMAPCredentials {
+		log.Fatal("--migrate-imap-credentials and --rollback-imap-credentials are mutually exclusive")
+	}
+	if *migrateIMAPCredentials || *rollbackIMAPCredentials {
+		if err := models.ValidateIMAPCredentialBackend(conf.DBName); err != nil {
+			log.Fatal(err)
+		}
+	}
 
 	// Configure our various upstream clients to make sure that we restrict
 	// outbound connections as needed.
@@ -101,11 +118,31 @@ func main() {
 		log.Fatal(err)
 	}
 
+	credentialCipher, err := loadCredentialCipher()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if (*migrateIMAPCredentials || *rollbackIMAPCredentials) && credentialCipher == nil {
+		log.Fatal(models.ErrIMAPCredentialKeyringRequired)
+	}
+
 	// Provide the option to disable the built-in mailer
 	// Setup the global variables and settings
 	err = models.Setup(conf)
 	if err != nil {
 		log.Fatal(err)
+	}
+	if *migrateIMAPCredentials || *rollbackIMAPCredentials {
+		result, err := runIMAPCredentialAction(credentialCipher, *rollbackIMAPCredentials)
+		if err != nil {
+			log.Fatal(err)
+		}
+		action := "migration"
+		if *rollbackIMAPCredentials {
+			action = "rollback"
+		}
+		log.Infof("IMAP credential %s complete: %d rows updated, %d rows unchanged", action, result.Updated, result.Unchanged)
+		return
 	}
 
 	// Unlock any maillogs that may have been locked for processing
@@ -117,6 +154,7 @@ func main() {
 
 	// Create our servers
 	adminOptions := []controllers.AdminServerOption{}
+	adminOptions = append(adminOptions, controllers.WithCredentialCipher(credentialCipher))
 	if *disableMailer {
 		adminOptions = append(adminOptions, controllers.WithWorker(nil))
 	}
@@ -127,7 +165,7 @@ func main() {
 	phishConfig := conf.PhishConf
 	phishServer := controllers.NewPhishingServer(phishConfig)
 
-	imapMonitor := imap.NewMonitor()
+	imapMonitor := imap.NewMonitor(credentialCipher)
 	if *mode == "admin" || *mode == "all" {
 		go adminServer.Start()
 		if err := imapMonitor.Start(); err != nil {
@@ -157,4 +195,30 @@ func main() {
 		}
 	}
 
+}
+
+func loadCredentialCipher() (*credentials.Cipher, error) {
+	path := os.Getenv(models.IMAPCredentialKeyringEnvironment)
+	if path == "" {
+		return nil, nil
+	}
+	keyring, err := credentials.LoadKeyringFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("load IMAP credential keyring: %w", err)
+	}
+	credentialCipher, err := credentials.New(keyring)
+	if err != nil {
+		return nil, fmt.Errorf("initialize IMAP credential cipher: %w", err)
+	}
+	return credentialCipher, nil
+}
+
+func runIMAPCredentialAction(
+	credentialCipher *credentials.Cipher,
+	rollback bool,
+) (models.IMAPCredentialMigrationResult, error) {
+	if rollback {
+		return models.RollbackIMAPCredentials(credentialCipher)
+	}
+	return models.MigrateIMAPCredentials(credentialCipher)
 }

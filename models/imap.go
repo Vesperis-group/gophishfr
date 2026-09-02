@@ -5,6 +5,7 @@ import (
 	"net"
 	"time"
 
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	log "github.com/Vesperis-group/gophishfr/logger"
 )
 
@@ -20,6 +21,7 @@ type IMAP struct {
 	Port                        uint16    `json:"port,string,omitempty"`
 	Username                    string    `json:"username"`
 	Password                    string    `json:"password"`
+	PasswordCiphertext          string    `json:"-" gorm:"column:password_ciphertext"`
 	TLS                         bool      `json:"tls"`
 	IgnoreCertErrors            bool      `json:"ignore_cert_errors"`
 	Folder                      string    `json:"folder"`
@@ -63,6 +65,10 @@ func (im IMAP) TableName() string {
 
 // Validate ensures that IMAP configs/connections are valid
 func (im *IMAP) Validate() error {
+	return im.validate(true)
+}
+
+func (im *IMAP) validate(requirePassword bool) error {
 	switch {
 	case im.Host == "":
 		return ErrIMAPHostNotSpecified
@@ -70,7 +76,7 @@ func (im *IMAP) Validate() error {
 		return ErrIMAPPortNotSpecified
 	case im.Username == "":
 		return ErrIMAPUsernameNotSpecified
-	case im.Password == "":
+	case requirePassword && im.Password == "":
 		return ErrIMAPPasswordNotSpecified
 	}
 
@@ -115,38 +121,65 @@ func GetIMAP(uid int64) ([]IMAP, error) {
 }
 
 // PostIMAP updates IMAP settings for a user in the database.
-func PostIMAP(im *IMAP, uid int64) error {
+func PostIMAP(im *IMAP, uid int64, credentialCipher *credentials.Cipher) error {
 	im.UserId = uid
-	// Empty updates preserve only the secret owned by the supplied user ID.
+	transaction := db.Begin()
+	if transaction.Error != nil {
+		return transaction.Error
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			transaction.Rollback()
+		}
+	}()
+
+	existing := []IMAP{}
+	if err := transaction.Where("user_id = ?", uid).Find(&existing).Error; err != nil {
+		return err
+	}
+	if len(existing) > 1 {
+		return ErrDuplicateIMAPUser
+	}
+
 	if im.Password == "" {
-		existing, err := GetIMAP(uid)
+		if len(existing) == 0 {
+			return ErrIMAPPasswordNotSpecified
+		}
+		if credentialCipher == nil {
+			return ErrIMAPCredentialKeyringRequired
+		}
+		if err := validateEncryptedIMAPCredential(existing[0]); err != nil {
+			return err
+		}
+		im.PasswordCiphertext = existing[0].PasswordCiphertext
+	} else {
+		if credentialCipher == nil {
+			return ErrIMAPCredentialKeyringRequired
+		}
+		ciphertext, err := encryptIMAPPassword(credentialCipher, uid, im.Password)
 		if err != nil {
 			return err
 		}
-		if len(existing) > 0 {
-			im.Password = existing[0].Password
-		}
+		im.PasswordCiphertext = ciphertext
 	}
+	im.Password = ""
 
-	err := im.Validate()
-	if err != nil {
-		log.Error(err)
+	if err := im.validate(false); err != nil {
 		return err
 	}
 
-	// Delete old entry. TODO: Save settings and if fails to Save below replace with original
-	err = DeleteIMAP(uid)
-	if err != nil {
-		log.Error(err)
+	if err := transaction.Where("user_id = ?", uid).Delete(&IMAP{}).Error; err != nil {
 		return err
 	}
-
-	// Insert new settings into the DB
-	err = db.Save(im).Error
-	if err != nil {
-		log.Error("Unable to save to database: ", err.Error())
+	if err := transaction.Create(im).Error; err != nil {
+		return err
 	}
-	return err
+	if err := transaction.Commit().Error; err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 // DeleteIMAP deletes the existing IMAP in the database.

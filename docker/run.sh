@@ -1,5 +1,14 @@
 #!/bin/bash
 
+# The credential keyring is consumed directly by the binary from an external
+# read-only secret mount. It is optional for installations without encrypted
+# IMAP credentials, but a configured path must be readable by the app user.
+if [ -n "${GOPHISHFR_CREDENTIAL_KEYRING_FILE:-}" ] &&
+   [ ! -r "${GOPHISHFR_CREDENTIAL_KEYRING_FILE}" ]; then
+    echo "GOPHISHFR_CREDENTIAL_KEYRING_FILE is not readable" >&2
+    exit 1
+fi
+
 # set config for admin_server
 if [ -n "${ADMIN_LISTEN_URL+set}" ] ; then
     jq -r \
@@ -85,4 +94,4 @@ echo "Runtime configuration: "
 cat config.json
 
 # start GophishFR
-./gophishfr
+exec ./gophishfr "$@"
