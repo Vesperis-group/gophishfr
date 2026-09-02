@@ -2,7 +2,6 @@ package credentials
 
 import (
 	"bytes"
-	"encoding/base64"
 	"encoding/json"
 	"fmt"
 )
@@ -48,16 +47,34 @@ type Keyring struct {
 }
 
 // String deliberately does not expose key material, only the shape of the
-// keyring. It is safe to log or print a *Keyring.
-func (k *Keyring) String() string {
-	if k == nil {
-		return "credentials.Keyring(nil)"
-	}
+// keyring. It is safe to log or print a *Keyring or a dereferenced Keyring
+// value.
+//
+// This is defined with a value receiver, not a pointer receiver, and that is
+// deliberate: fmt only consults the method set of the value actually handed
+// to it, and a value obtained from an interface is never addressable, so a
+// pointer-receiver-only method here would be silently skipped whenever a
+// caller formats a plain Keyring (for example fmt.Sprintf("%v", *kr)) —
+// falling back to fmt's default struct dump, which would print the keys
+// map's raw key bytes, exactly the leak this method exists to prevent. A
+// value receiver makes both Keyring and *Keyring implement fmt.Stringer.
+//
+// A nil *Keyring still formats safely: calling a value-receiver method
+// through a nil pointer dereferences the pointer to obtain the receiver,
+// which panics, but fmt's own Stringer/GoStringer dispatch recovers exactly
+// that panic and substitutes "<nil>" — this is fmt's documented, intentional
+// handling for "a nil pointer for a value receiver", not behavior this
+// package has to (or safely can, given Go disallows declaring both a value-
+// and a pointer-receiver method of the same name on one type) reimplement
+// itself. So every one of %v, %+v, %#v, and %s on a nil *Keyring prints
+// "<nil>" without panicking and without exposing anything.
+func (k Keyring) String() string {
 	return fmt.Sprintf("credentials.Keyring{version:%d active_key_id:%q keys:%d}", k.version, k.activeKeyID, len(k.keys))
 }
 
-// GoString mirrors String so that %#v is equally safe to print.
-func (k *Keyring) GoString() string {
+// GoString mirrors String so that %#v is equally safe on a Keyring value or
+// a *Keyring; see String for why both are a value-receiver method.
+func (k Keyring) GoString() string {
 	return k.String()
 }
 
@@ -173,7 +190,7 @@ func ParseKeyringJSON(data []byte) (*Keyring, error) {
 			return nil, fmt.Errorf("%w: duplicate key id", ErrInvalidKeyring)
 		}
 
-		raw, err := base64.StdEncoding.Strict().DecodeString(entry.Key)
+		raw, err := decodeCanonicalBase64(entry.Key)
 		if err != nil {
 			return nil, fmt.Errorf("%w: invalid key encoding", ErrInvalidKeyring)
 		}

@@ -1,6 +1,7 @@
 package credentials
 
 import (
+	"encoding/base64"
 	"errors"
 	"strings"
 	"testing"
@@ -79,6 +80,42 @@ func TestEncryptEntropyFailureDoesNotLeakKeyMaterial(t *testing.T) {
 		if strings.Contains(msg, string(key[i:i+4])) {
 			t.Fatalf("error message appears to contain key material: %v", err)
 		}
+	}
+}
+
+// TestDecodeCanonicalBase64RejectsNonCanonicalForms exercises
+// decodeCanonicalBase64 directly. base64.StdEncoding.Strict() alone accepts
+// an embedded or trailing CR/LF (its own documentation says exactly that:
+// "the input is still malleable, as new line characters (CR and LF) are
+// still ignored"), which would let two textually different envelope/keyring
+// strings decode to the same bytes. decodeCanonicalBase64 must reject every
+// such non-canonical representation and accept only the one true canonical
+// encoding of any given byte string.
+func TestDecodeCanonicalBase64RejectsNonCanonicalForms(t *testing.T) {
+	canonical := base64.StdEncoding.EncodeToString([]byte("a canonical base64 payload"))
+	if _, err := decodeCanonicalBase64(canonical); err != nil {
+		t.Fatalf("canonical input unexpectedly rejected: %v", err)
+	}
+
+	cases := map[string]string{
+		"trailing LF":       canonical + "\n",
+		"trailing CR":       canonical + "\r",
+		"trailing CRLF":     canonical + "\r\n",
+		"leading LF":        "\n" + canonical,
+		"leading CR":        "\r" + canonical,
+		"embedded LF":       canonical[:4] + "\n" + canonical[4:],
+		"embedded CR":       canonical[:4] + "\r" + canonical[4:],
+		"embedded CRLF":     canonical[:4] + "\r\n" + canonical[4:],
+		"doubled CRLF":      canonical[:4] + "\r\n\r\n" + canonical[4:],
+		"CR before padding": canonical[:len(canonical)-1] + "\r" + canonical[len(canonical)-1:],
+	}
+	for name, input := range cases {
+		t.Run(name, func(t *testing.T) {
+			decoded, err := decodeCanonicalBase64(input)
+			if err == nil {
+				t.Fatalf("expected rejection of non-canonical base64 (%s): %q decoded to %x", name, input, decoded)
+			}
+		})
 	}
 }
 

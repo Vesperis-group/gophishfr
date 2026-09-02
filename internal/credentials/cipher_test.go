@@ -369,6 +369,62 @@ func TestDecryptMalformedUnsupportedEnvelopes(t *testing.T) {
 	}
 }
 
+// TestDecryptRejectsNonCanonicalBase64Envelopes confirms that an envelope
+// whose nonce or ciphertext field decodes successfully under
+// base64.StdEncoding.Strict() (because Strict only rejects non-zero padding
+// bits, not embedded/trailing CR or LF bytes) but is not itself the unique
+// canonical encoding of those bytes is still rejected. Without this check, a
+// stored/logged/compared Envelope string would not be a reliable proxy for
+// its decoded bytes: two textually different envelopes could decode (and
+// therefore decrypt) identically.
+func TestDecryptRejectsNonCanonicalBase64Envelopes(t *testing.T) {
+	kr := testKeyring(t, "active", nil)
+	c, err := credentials.New(kr)
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	ctx := testContext()
+
+	valid, err := c.Encrypt(ctx, []byte("payload"))
+	if err != nil {
+		t.Fatalf("Encrypt: %v", err)
+	}
+	fields := strings.Split(string(valid), ":")
+	magic, version, keyID, nonceB64, ciphertextB64 := fields[0], fields[1], fields[2], fields[3], fields[4]
+
+	rebuild := func(nonce, ciphertext string) credentials.Envelope {
+		return credentials.Envelope(strings.Join([]string{magic, version, keyID, nonce, ciphertext}, ":"))
+	}
+
+	cases := map[string]credentials.Envelope{
+		"nonce trailing LF":          rebuild(nonceB64+"\n", ciphertextB64),
+		"nonce trailing CR":          rebuild(nonceB64+"\r", ciphertextB64),
+		"nonce trailing CRLF":        rebuild(nonceB64+"\r\n", ciphertextB64),
+		"nonce embedded LF":          rebuild(nonceB64[:2]+"\n"+nonceB64[2:], ciphertextB64),
+		"nonce embedded CRLF":        rebuild(nonceB64[:2]+"\r\n"+nonceB64[2:], ciphertextB64),
+		"ciphertext trailing LF":     rebuild(nonceB64, ciphertextB64+"\n"),
+		"ciphertext trailing CR":     rebuild(nonceB64, ciphertextB64+"\r"),
+		"ciphertext trailing CRLF":   rebuild(nonceB64, ciphertextB64+"\r\n"),
+		"ciphertext embedded LF":     rebuild(nonceB64, ciphertextB64[:2]+"\n"+ciphertextB64[2:]),
+		"ciphertext embedded CRLF":   rebuild(nonceB64, ciphertextB64[:2]+"\r\n"+ciphertextB64[2:]),
+		"both fields embedded CR/LF": rebuild(nonceB64[:2]+"\r"+nonceB64[2:], ciphertextB64[:2]+"\n"+ciphertextB64[2:]),
+	}
+
+	for name, env := range cases {
+		t.Run(name, func(t *testing.T) {
+			if _, err := c.Decrypt(ctx, env); err == nil {
+				t.Fatalf("expected error decrypting envelope with non-canonical base64 (%s)", name)
+			}
+		})
+	}
+
+	// The unmodified, canonical envelope must still decrypt: this guards
+	// against a check that is so strict it rejects valid input too.
+	if _, err := c.Decrypt(ctx, valid); err != nil {
+		t.Fatalf("Decrypt(valid): %v", err)
+	}
+}
+
 func TestConcurrentEncryptDecrypt(t *testing.T) {
 	kr := testKeyring(t, "active", map[string][32]byte{"retired": func() [32]byte {
 		var k [32]byte

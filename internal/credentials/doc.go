@@ -49,9 +49,9 @@
 // derived from any field. Fields are never delimiter-joined without framing
 // that could make them ambiguous: the key ID alphabet excludes ':', and the
 // nonce/ciphertext fields are standard base64, which cannot contain ':'
-// either, so the four-way split is unambiguous. The ciphertext field is the
-// raw output of AEAD.Seal, which already appends the authentication tag; no
-// tag is carried separately.
+// either, so the five-way split (magic, version, key ID, nonce, ciphertext)
+// is unambiguous. The ciphertext field is the raw output of AEAD.Seal, which
+// already appends the authentication tag; no tag is carried separately.
 //
 // Any value carrying the "gophishfr-cred:" prefix that a future offline
 // legacy-plaintext migration encounters is a collision/blocker to raise, not

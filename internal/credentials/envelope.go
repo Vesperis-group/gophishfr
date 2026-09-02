@@ -98,7 +98,7 @@ func parseEnvelope(env Envelope) (*rawEnvelope, error) {
 		return nil, fmt.Errorf("%w: invalid key id", ErrInvalidEnvelope)
 	}
 
-	nonce, err := base64.StdEncoding.Strict().DecodeString(nonceField)
+	nonce, err := decodeCanonicalBase64(nonceField)
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid nonce encoding", ErrInvalidEnvelope)
 	}
@@ -106,7 +106,7 @@ func parseEnvelope(env Envelope) (*rawEnvelope, error) {
 		return nil, fmt.Errorf("%w: empty nonce", ErrInvalidEnvelope)
 	}
 
-	ciphertext, err := base64.StdEncoding.Strict().DecodeString(ciphertextField)
+	ciphertext, err := decodeCanonicalBase64(ciphertextField)
 	if err != nil {
 		return nil, fmt.Errorf("%w: invalid ciphertext encoding", ErrInvalidEnvelope)
 	}

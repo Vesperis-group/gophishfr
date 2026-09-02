@@ -12,8 +12,10 @@ import (
 
 // prettyPrintf renders v through every common fmt verb an accidental
 // log/debug statement might use, so a redaction regression is caught
-// regardless of which verb was used.
-func prettyPrintf(v *credentials.Keyring) string {
+// regardless of which verb was used. v is `any` rather than *credentials.
+// Keyring so the same helper exercises a *Keyring, a dereferenced Keyring
+// value, and a nil *Keyring alike.
+func prettyPrintf(v any) string {
 	return fmt.Sprintf("%v %+v %#v %s", v, v, v, v)
 }
 
@@ -95,6 +97,31 @@ func TestParseKeyringJSONRejections(t *testing.T) {
 			"version": 1,
 			"active_key_id": "k1",
 			"keys": [{"id": "k1", "key": "` + synthB64Key(0x01)[:len(synthB64Key(0x01))-1] + `A"}]
+		}`,
+		"key encoding trailing LF": `{
+			"version": 1,
+			"active_key_id": "k1",
+			"keys": [{"id": "k1", "key": "` + synthB64Key(0x01) + `\n"}]
+		}`,
+		"key encoding trailing CR": `{
+			"version": 1,
+			"active_key_id": "k1",
+			"keys": [{"id": "k1", "key": "` + synthB64Key(0x01) + `\r"}]
+		}`,
+		"key encoding trailing CRLF": `{
+			"version": 1,
+			"active_key_id": "k1",
+			"keys": [{"id": "k1", "key": "` + synthB64Key(0x01) + `\r\n"}]
+		}`,
+		"key encoding embedded LF": `{
+			"version": 1,
+			"active_key_id": "k1",
+			"keys": [{"id": "k1", "key": "` + synthB64Key(0x01)[:4] + `\n` + synthB64Key(0x01)[4:] + `"}]
+		}`,
+		"key encoding embedded CRLF": `{
+			"version": 1,
+			"active_key_id": "k1",
+			"keys": [{"id": "k1", "key": "` + synthB64Key(0x01)[:4] + `\r\n` + synthB64Key(0x01)[4:] + `"}]
 		}`,
 		"wrong key size (too short)": `{
 			"version": 1,
@@ -243,9 +270,9 @@ func TestKeyringStringDoesNotExposeKeyMaterial(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewKeyring: %v", err)
 	}
+	b64 := base64.StdEncoding.EncodeToString(secret)
 
 	rendered := kr.String()
-	b64 := base64.StdEncoding.EncodeToString(secret)
 	if strings.Contains(rendered, b64) {
 		t.Fatalf("Keyring.String() leaked key material: %s", rendered)
 	}
@@ -258,5 +285,71 @@ func TestKeyringStringDoesNotExposeKeyMaterial(t *testing.T) {
 	printed := prettyPrintf(kr)
 	if strings.Contains(printed, b64) {
 		t.Fatalf("fmt printing of *Keyring leaked key material: %s", printed)
+	}
+}
+
+// TestKeyringFormattingValueDoesNotExposeKeyMaterial covers the gap the
+// crypto Inspector flagged: String/GoString were previously defined only on
+// *Keyring, so a dereferenced Keyring value (for example fmt.Sprintf("%v",
+// *kr)) did not implement fmt.Stringer at all and fell back to fmt's default
+// struct dump, which prints every field, including the keys map's raw key
+// bytes. String/GoString must now be implemented so that a plain Keyring
+// value is exactly as redacted as a *Keyring.
+func TestKeyringFormattingValueDoesNotExposeKeyMaterial(t *testing.T) {
+	secret := synthKey(0xCD)
+	kr, err := credentials.NewKeyring("k1", map[string][]byte{"k1": secret})
+	if err != nil {
+		t.Fatalf("NewKeyring: %v", err)
+	}
+	value := *kr
+	b64 := base64.StdEncoding.EncodeToString(secret)
+
+	rendered := value.String()
+	if strings.Contains(rendered, b64) {
+		t.Fatalf("Keyring.String() (value receiver) leaked key material: %s", rendered)
+	}
+	goRendered := value.GoString()
+	if strings.Contains(goRendered, b64) {
+		t.Fatalf("Keyring.GoString() (value receiver) leaked key material: %s", goRendered)
+	}
+
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
+		t.Run(verb, func(t *testing.T) {
+			printed := fmt.Sprintf(verb, value)
+			if strings.Contains(printed, b64) {
+				t.Fatalf("fmt %s of a dereferenced Keyring value leaked key material: %s", verb, printed)
+			}
+			if strings.Contains(printed, "keys:map[") {
+				t.Fatalf("fmt %s of a dereferenced Keyring value printed the raw keys map: %s", verb, printed)
+			}
+		})
+	}
+}
+
+// TestKeyringFormattingNilPointerDoesNotPanic covers the pointer half of the
+// same requirement: formatting a nil *Keyring through fmt must never panic
+// and must never print key material (there is none to print, but a
+// regression could plausibly reintroduce a nil-unsafe accessor call).
+func TestKeyringFormattingNilPointerDoesNotPanic(t *testing.T) {
+	var kr *credentials.Keyring
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Fatalf("formatting a nil *Keyring panicked: %v", r)
+		}
+	}()
+
+	for _, verb := range []string{"%v", "%+v", "%#v", "%s"} {
+		t.Run(verb, func(t *testing.T) {
+			printed := fmt.Sprintf(verb, kr)
+			if strings.Contains(printed, "map[") {
+				t.Fatalf("fmt %s of a nil *Keyring unexpectedly printed map contents: %s", verb, printed)
+			}
+		})
+	}
+
+	printed := prettyPrintf(kr)
+	if strings.Contains(printed, "map[") {
+		t.Fatalf("fmt printing of a nil *Keyring unexpectedly printed map contents: %s", printed)
 	}
 }
