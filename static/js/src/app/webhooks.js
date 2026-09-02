@@ -1,6 +1,7 @@
 let webhooks = [];
 let latestLoadRequest = 0;
 let latestEditRequest = 0;
+let createRequest = null;
 
 const setWebhookFormDisabled = (disabled) => {
     ["name", "url", "secret", "is_active", "modalSubmit"].forEach((id) => {
@@ -36,15 +37,27 @@ const saveWebhook = (id) => {
                 modalError(requestErrorMessage(error))
             })
     } else {
-        api.webhooks.post(wh)
-            .done(function(data) {
+        if (createRequest) {
+            return;
+        }
+        const createContext = latestEditRequest;
+        setWebhookFormDisabled(true);
+        createRequest = api.webhooks.post(wh);
+        createRequest
+            .then(function(data) {
+                createRequest = null;
                 load();
-                dismiss();
-                bsModalHide("#modal");
+                if (createContext === latestEditRequest) {
+                    dismiss();
+                    bsModalHide("#modal");
+                }
                 successFlash(`Webhook "${escapeHtml(wh.name)}" has been created successfully!`);
-            })
-            .fail(function(data) {
-                modalError(data.responseJSON.message)
+            }, function(error) {
+                createRequest = null;
+                if (createContext === latestEditRequest) {
+                    setWebhookFormDisabled(false);
+                    modalError(requestErrorMessage(error))
+                }
             })
     }
 };
@@ -133,7 +146,18 @@ const editWebhook = (id) => {
           });
     } else {
         document.getElementById("webhookModalLabel").textContent = "New Webhook"
-        setWebhookFormDisabled(false);
+        if (createRequest) {
+            const pendingCreate = createRequest;
+            setWebhookFormDisabled(true);
+            const enableCurrentCreateForm = function() {
+                if (editRequest === latestEditRequest) {
+                    setWebhookFormDisabled(false);
+                }
+            };
+            pendingCreate.then(enableCurrentCreateForm, enableCurrentCreateForm);
+        } else {
+            setWebhookFormDisabled(false);
+        }
     }
 };
 
@@ -142,6 +166,7 @@ const deleteWebhook = (id) => {
     if (!wh) {
         return;
     }
+    var deleteRequest = null;
     Swal.fire({
         title: "Are you sure?",
         text: `This will delete the webhook '${escapeHtml(wh.name)}'`,
@@ -153,18 +178,15 @@ const deleteWebhook = (id) => {
         reverseButtons: true,
         allowOutsideClick: false,
         preConfirm: function () {
-            return new Promise((resolve, reject) => {
-                api.webhookId.delete(id)
-                    .done((msg) => {
-                        resolve()
-                    })
-                    .fail((data) => {
-                        reject(data.responseJSON.message)
-                    })
-            })
-            .catch(error => {
-                Swal.showValidationMessage(error)
-              })
+            if (deleteRequest) {
+                return deleteRequest;
+            }
+            deleteRequest = api.webhookId.delete(id)
+                .then(undefined, function(error) {
+                    deleteRequest = null;
+                    Swal.showValidationMessage(requestErrorMessage(error))
+                });
+            return deleteRequest;
         }
     }).then(function(result) {
         if (result.value) {

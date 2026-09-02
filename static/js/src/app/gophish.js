@@ -465,7 +465,7 @@ var api = {
             return requestJSON("/webhooks/", "GET", {})
         },
         post: function(webhook) {
-            return query("/webhooks/", "POST", webhook, false)
+            return requestJSON("/webhooks/", "POST", webhook)
         },
     },
     webhookId: {
@@ -476,7 +476,7 @@ var api = {
             return requestJSON("/webhooks/" + webhook.id, "PUT", webhook)
         },
         delete: function(id) {
-            return query("/webhooks/" + id, "DELETE", {}, false)
+            return requestJSON("/webhooks/" + id, "DELETE", {})
         },
         ping: function(id) {
             return requestJSON("/webhooks/" + id + "/validate", "POST", {})
