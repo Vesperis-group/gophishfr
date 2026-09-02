@@ -113,9 +113,9 @@ func (as *Server) IMAPServer(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		im.ModifiedDate = time.Now().UTC()
-		err = models.PostIMAP(&im, ctx.Get(r, "user_id").(int64))
+		err = models.PostIMAP(&im, ctx.Get(r, "user_id").(int64), as.credentialCipher)
 		if err != nil {
-			JSONResponse(w, models.Response{Success: false, Message: err.Error()}, http.StatusInternalServerError)
+			JSONResponse(w, models.Response{Success: false, Message: "Unable to save IMAP settings."}, http.StatusInternalServerError)
 			return
 		}
 		JSONResponse(w, models.Response{Success: true, Message: "Successfully saved IMAP settings."}, http.StatusCreated)

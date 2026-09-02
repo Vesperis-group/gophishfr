@@ -3,6 +3,7 @@ package api
 import (
 	"net/http"
 
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	mid "github.com/Vesperis-group/gophishfr/middleware"
 	"github.com/Vesperis-group/gophishfr/middleware/ratelimit"
 	"github.com/Vesperis-group/gophishfr/models"
@@ -18,9 +19,10 @@ type ServerOption func(*Server)
 // stopped. Rather, it's meant to be used as an http.Handler in the
 // AdminServer.
 type Server struct {
-	handler http.Handler
-	worker  worker.Worker
-	limiter *ratelimit.PostLimiter
+	handler          http.Handler
+	worker           worker.Worker
+	limiter          *ratelimit.PostLimiter
+	credentialCipher *credentials.Cipher
 }
 
 // NewServer returns a new instance of the API handler with the provided
@@ -49,6 +51,14 @@ func WithWorker(w worker.Worker) ServerOption {
 func WithLimiter(limiter *ratelimit.PostLimiter) ServerOption {
 	return func(as *Server) {
 		as.limiter = limiter
+	}
+}
+
+// WithCredentialCipher injects the immutable cipher used only for IMAP
+// credential persistence.
+func WithCredentialCipher(credentialCipher *credentials.Cipher) ServerOption {
+	return func(as *Server) {
+		as.credentialCipher = credentialCipher
 	}
 }
 

@@ -16,6 +16,7 @@ import (
 	"github.com/Vesperis-group/gophishfr/config"
 	ctx "github.com/Vesperis-group/gophishfr/context"
 	"github.com/Vesperis-group/gophishfr/controllers/api"
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	log "github.com/Vesperis-group/gophishfr/logger"
 	mid "github.com/Vesperis-group/gophishfr/middleware"
 	"github.com/Vesperis-group/gophishfr/middleware/ratelimit"
@@ -35,10 +36,11 @@ type AdminServerOption func(*AdminServer)
 // AdminServer is an HTTP server that implements the administrative GophishFR
 // handlers, including the dashboard and REST API.
 type AdminServer struct {
-	server  *http.Server
-	worker  worker.Worker
-	config  config.AdminServer
-	limiter *ratelimit.PostLimiter
+	server           *http.Server
+	worker           worker.Worker
+	config           config.AdminServer
+	limiter          *ratelimit.PostLimiter
+	credentialCipher *credentials.Cipher
 }
 
 var defaultTLSConfig = &tls.Config{
@@ -66,6 +68,14 @@ var defaultTLSConfig = &tls.Config{
 func WithWorker(w worker.Worker) AdminServerOption {
 	return func(as *AdminServer) {
 		as.worker = w
+	}
+}
+
+// WithCredentialCipher injects the immutable IMAP credential cipher into the
+// administrative API.
+func WithCredentialCipher(credentialCipher *credentials.Cipher) AdminServerOption {
+	return func(as *AdminServer) {
+		as.credentialCipher = credentialCipher
 	}
 }
 
@@ -141,6 +151,7 @@ func (as *AdminServer) registerRoutes() {
 	api := api.NewServer(
 		api.WithWorker(as.worker),
 		api.WithLimiter(as.limiter),
+		api.WithCredentialCipher(as.credentialCipher),
 	)
 	router.PathPrefix("/api/").Handler(api)
 

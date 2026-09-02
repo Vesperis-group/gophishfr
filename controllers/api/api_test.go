@@ -9,14 +9,16 @@ import (
 	"testing"
 
 	"github.com/Vesperis-group/gophishfr/config"
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	"github.com/Vesperis-group/gophishfr/models"
 )
 
 type testContext struct {
-	apiKey    string
-	config    *config.Config
-	apiServer *Server
-	admin     models.User
+	apiKey           string
+	config           *config.Config
+	apiServer        *Server
+	admin            models.User
+	credentialCipher *credentials.Cipher
 }
 
 func setupTest(t *testing.T) *testContext {
@@ -31,6 +33,17 @@ func setupTest(t *testing.T) *testContext {
 	}
 	ctx := &testContext{}
 	ctx.config = conf
+	keyring, err := credentials.NewKeyring(
+		"api-test-active-key",
+		map[string][]byte{"api-test-active-key": bytes.Repeat([]byte{0x41}, 32)},
+	)
+	if err != nil {
+		t.Fatalf("create test credential keyring: %v", err)
+	}
+	ctx.credentialCipher, err = credentials.New(keyring)
+	if err != nil {
+		t.Fatalf("create test credential cipher: %v", err)
+	}
 	// Get the API key to use for these tests
 	u, err := models.GetUser(1)
 	if err != nil {
@@ -38,7 +51,7 @@ func setupTest(t *testing.T) *testContext {
 	}
 	ctx.apiKey = u.ApiKey
 	ctx.admin = u
-	ctx.apiServer = NewServer()
+	ctx.apiServer = NewServer(WithCredentialCipher(ctx.credentialCipher))
 	return ctx
 }
 

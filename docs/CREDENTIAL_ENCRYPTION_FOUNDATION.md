@@ -7,11 +7,10 @@ comment (`internal/credentials/doc.go`), which is the authoritative reference
 for exact behaviour. This page summarizes it for readers who are not
 browsing `go doc`.
 
-**Production credentials encrypted by this change: NONE.** This is the
-primitive only. No database column, model, controller, or bootstrap path in
-this repository calls into `internal/credentials` yet. IMAP/SMTP/webhook
-integration, and the offline legacy-plaintext migration that will accompany
-it, are separate, later changes.
+The first production integration is IMAP-password-only and is documented in
+[`IMAP_CREDENTIAL_ENCRYPTION.md`](IMAP_CREDENTIAL_ENCRYPTION.md). SMTP,
+webhook, and other credentials remain outside this foundation and are not
+encrypted by that integration.
 
 ## Threat model
 
@@ -167,11 +166,10 @@ synthetic 32-byte key for local experimentation:
 openssl rand -base64 32
 ```
 
-Nothing in this repository reads `GOPHISHFR_CREDENTIAL_KEYRING_FILE` yet, and
-nothing requires it: wiring that environment variable to `LoadKeyringFile`,
-and deciding whether its absence should be fail-closed, is left to the change
-that actually starts encrypting a credential column. Until then, a GophishFR
-installation without that variable set continues to run exactly as before.
+The IMAP integration reads `GOPHISHFR_CREDENTIAL_KEYRING_FILE` once at process
+bootstrap. Its absence is compatible with installations that do not use
+encrypted IMAP credentials; IMAP secret reads and writes fail closed without
+it. See the operational guide linked above.
 
 ## AAD / Context
 
