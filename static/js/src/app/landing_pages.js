@@ -5,34 +5,118 @@
 */
 var pages = []
 var htmlEditor
+var latestPageRequest = 0
+var saveRequest = null
+var activePageId = null
+var refreshPageModal = null
+var latestImportRequest = 0
+var importSiteRequest = null
+
+function setPageFormDisabled(disabled) {
+    ["name", "capture_credentials_checkbox", "capture_passwords_checkbox",
+        "redirect_url_input"]
+        .forEach(function (id) {
+            document.getElementById(id).disabled = disabled
+        })
+    document.getElementById("modalSubmit").disabled = disabled
+    document.querySelector('#modal button[onclick^="bsModalShow(\'#importSiteModal\'"]').disabled = disabled
+    var codeEditor = document.querySelector("#modal .gophish-code-editor")
+    if (codeEditor) {
+        codeEditor.inert = disabled
+    }
+}
+
+function enablePageFormAfterPendingSave(pageRequest) {
+    if (!saveRequest) {
+        setPageFormDisabled(false)
+        return
+    }
+    var pendingSave = saveRequest
+    setPageFormDisabled(true)
+    var enableCurrentForm = function () {
+        if (pageRequest == latestPageRequest) {
+            setPageFormDisabled(false)
+        }
+    }
+    pendingSave.then(enableCurrentForm, enableCurrentForm)
+}
+
+function setImportSiteFormDisabled(disabled) {
+    document.getElementById("url").disabled = disabled
+    document.querySelector("#importSiteModal #modalSubmit").disabled = disabled
+}
+
+function enableImportSiteAfterPendingRequest(importRequest) {
+    if (!importSiteRequest) {
+        setImportSiteFormDisabled(false)
+        return
+    }
+    var pendingImport = importSiteRequest
+    setImportSiteFormDisabled(true)
+    var enableCurrentForm = function () {
+        if (importRequest == latestImportRequest) {
+            setImportSiteFormDisabled(false)
+        }
+    }
+    pendingImport.then(enableCurrentForm, enableCurrentForm)
+}
 
 
-// Save attempts to POST to /templates/
-function save(idx) {
+// Save attempts to POST or PUT a landing page.
+function save(pageId) {
+    if (saveRequest) {
+        return
+    }
     var page = {}
     page.name = document.getElementById("name").value
     page.html = htmlEditor.getData()
     page.capture_credentials = document.getElementById("capture_credentials_checkbox").checked
     page.capture_passwords = document.getElementById("capture_passwords_checkbox").checked
     page.redirect_url = document.getElementById("redirect_url_input").value
-    if (idx != -1) {
-        page.id = pages[idx].id
-        api.pageId.put(page)
-            .done(function (data) {
+    var saveContext = latestPageRequest
+    setPageFormDisabled(true)
+    if (pageId != -1) {
+        page.id = pageId
+        saveRequest = api.pageId.put(page)
+        saveRequest
+            .then(function (data) {
+                saveRequest = null
                 successFlash("Page edited successfully!")
                 load()
-                dismiss()
+                if (saveContext == latestPageRequest) {
+                    dismiss()
+                } else if (activePageId == page.id && refreshPageModal) {
+                    var savedPage = pages.find(function (candidate) {
+                        return candidate.id == page.id
+                    })
+                    if (savedPage) {
+                        Object.assign(savedPage, data)
+                    }
+                    refreshPageModal()
+                }
+            }, function () {
+                saveRequest = null
+                if (saveContext == latestPageRequest) {
+                    setPageFormDisabled(false)
+                }
             })
     } else {
         // Submit the page
-        api.pages.post(page)
-            .done(function (data) {
+        saveRequest = api.pages.post(page)
+        saveRequest
+            .then(function () {
+                saveRequest = null
                 successFlash("Page added successfully!")
                 load()
-                dismiss()
-            })
-            .fail(function (data) {
-                modalError(data.responseJSON.message)
+                if (saveContext == latestPageRequest) {
+                    dismiss()
+                }
+            }, function (error) {
+                saveRequest = null
+                if (saveContext == latestPageRequest) {
+                    setPageFormDisabled(false)
+                    modalError(requestErrorMessage(error))
+                }
             })
     }
 }
@@ -57,6 +141,9 @@ function setCredentialOptionsVisible(visible) {
 }
 
 function dismiss() {
+    latestPageRequest++
+    activePageId = null
+    refreshPageModal = null
     clearModalFlashes()
     document.getElementById("name").value = ""
     document.getElementById("html_editor").value = ""
@@ -74,25 +161,29 @@ function dismiss() {
 }
 
 var deletePage = function (idx) {
+    var pageId = pages[idx].id
+    var pageName = pages[idx].name
+    var deleteRequest = null
     Swal.fire({
         title: "Are you sure?",
         text: "This will delete the landing page. This can't be undone!",
         type: "warning",
         animation: false,
         showCancelButton: true,
-        confirmButtonText: "Delete " + escapeHtml(pages[idx].name),
+        confirmButtonText: "Delete " + escapeHtml(pageName),
         confirmButtonColor: "#428bca",
         reverseButtons: true,
         allowOutsideClick: false,
         preConfirm: function () {
-            return new Promise(function (resolve, reject) {
-                api.pageId.delete(pages[idx].id)
-                    .done(function (msg) {
-                        resolve()
-                    })
-                    .fail(function (data) {
-                        reject(data.responseJSON.message)
-                    })
+            if (deleteRequest) {
+                return deleteRequest
+            }
+            deleteRequest = api.pageId.delete(pageId)
+            return deleteRequest.then(function (response) {
+                return response
+            }, function (error) {
+                deleteRequest = null
+                Swal.showValidationMessage(requestErrorMessage(error))
             })
         }
     }).then(function (result) {
@@ -116,28 +207,53 @@ var deletePage = function (idx) {
 }
 
 function importSite() {
-    url = document.getElementById("url").value
+    if (importSiteRequest) {
+        return
+    }
+    var url = document.getElementById("url").value
     if (!url) {
         modalError("No URL Specified!")
     } else {
-        api.clone_site({
-                url: url,
-                include_resources: false
-            })
-            .done(function (data) {
+        var importContext = latestImportRequest
+        setImportSiteFormDisabled(true)
+        importSiteRequest = api.clone_site({
+            url: url,
+            include_resources: false
+        })
+        importSiteRequest
+            .then(function (data) {
+                importSiteRequest = null
+                if (importContext != latestImportRequest) {
+                    return
+                }
                 htmlEditor.setData(data.html)
                 htmlEditor.showPreview()
                 bsModalHide("#importSiteModal")
-            })
-            .fail(function (data) {
-                modalError(data.responseJSON.message)
+            }, function (error) {
+                importSiteRequest = null
+                if (importContext != latestImportRequest) {
+                    return
+                }
+                setImportSiteFormDisabled(false)
+                modalError(requestErrorMessage(error))
             })
     }
 }
 
 function edit(idx) {
+    var pageRequest = ++latestPageRequest
+    var pageId = idx == -1 ? null : pages[idx].id
+    activePageId = pageId
+    refreshPageModal = activePageId == null ? null : function () {
+        var refreshedIndex = pages.findIndex(function (page) {
+            return page.id == activePageId
+        })
+        if (refreshedIndex != -1) {
+            edit(refreshedIndex)
+        }
+    }
     bindModalSubmit(function () {
-        save(idx)
+        save(pageId == null ? -1 : pageId)
     })
     htmlEditor = GophishHTMLEditor.create("html_editor")
     var page = {}
@@ -157,9 +273,13 @@ function edit(idx) {
         htmlEditor.setData("")
     }
     htmlEditor.showSource()
+    enablePageFormAfterPendingSave(pageRequest)
 }
 
 function copy(idx) {
+    var pageRequest = ++latestPageRequest
+    activePageId = null
+    refreshPageModal = null
     bindModalSubmit(function () {
         save(-1)
     })
@@ -168,6 +288,7 @@ function copy(idx) {
     document.getElementById("name").value = "Copy of " + page.name
     htmlEditor.setData(page.html)
     htmlEditor.showSource()
+    enablePageFormAfterPendingSave(pageRequest)
 }
 
 function load() {
@@ -243,6 +364,17 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('modal').addEventListener('hidden.bs.modal', function (event) {
         dismiss()
     });
+    document.getElementById('importSiteModal').addEventListener('show.bs.modal', function () {
+        var importRequest = ++latestImportRequest
+        enableImportSiteAfterPendingRequest(importRequest)
+    })
+    document.getElementById('importSiteModal').addEventListener('hidden.bs.modal', function () {
+        latestImportRequest++
+        document.getElementById("url").value = ""
+        if (!importSiteRequest) {
+            setImportSiteFormDisabled(false)
+        }
+    })
     document.getElementById("capture_credentials_checkbox").addEventListener("change", function () {
         setCredentialOptionsVisible(this.checked)
     })

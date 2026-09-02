@@ -378,7 +378,7 @@ var api = {
         },
         // post() - Posts a page to POST /pages
         post: function (page) {
-            return query("/pages/", "POST", page, false)
+            return requestJSON("/pages/", "POST", page)
         }
     },
     // pageId contains the endpoints for /pages/:id
@@ -389,11 +389,11 @@ var api = {
         },
         // put() - Puts a page to PUT /pages/:id
         put: function (page) {
-            return query("/pages/" + page.id, "PUT", page, false)
+            return requestJSON("/pages/" + page.id, "PUT", page)
         },
         // delete() - Deletes a page at DELETE /pages/:id
         delete: function (id) {
-            return query("/pages/" + id, "DELETE", {}, false)
+            return requestJSON("/pages/" + id, "DELETE", {})
         }
     },
     // SMTP contains the endpoints for /smtp
@@ -488,7 +488,7 @@ var api = {
     },
     // clone_site handles importing a site by url
     clone_site: function (req) {
-        return query("/import/site", "POST", req, false)
+        return requestJSON("/import/site", "POST", req)
     },
     // send_test_email sends an email to the specified email address
     send_test_email: function (req) {
