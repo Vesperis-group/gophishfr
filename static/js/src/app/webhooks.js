@@ -1,6 +1,15 @@
 let webhooks = [];
+let latestLoadRequest = 0;
+let latestEditRequest = 0;
+
+const setWebhookFormDisabled = (disabled) => {
+    ["name", "url", "secret", "is_active", "modalSubmit"].forEach((id) => {
+        document.getElementById(id).disabled = disabled;
+    });
+};
 
 const dismiss = () => {
+    latestEditRequest++;
     document.getElementById("name").value = "";
     document.getElementById("url").value = "";
     document.getElementById("secret").value = "";
@@ -41,10 +50,14 @@ const saveWebhook = (id) => {
 };
 
 const load = () => {
+    const loadRequest = ++latestLoadRequest;
     document.getElementById("webhookTable").style.display = "none";
     document.getElementById("loading").style.display = "";
     api.webhooks.get()
-        .done((whs) => {
+        .then((whs) => {
+            if (loadRequest !== latestLoadRequest) {
+                return;
+            }
             webhooks = whs;
             document.getElementById("loading").style.display = "none"
             document.getElementById("webhookTable").style.display = ""
@@ -76,8 +89,10 @@ const load = () => {
                     `
                 ]).draw()
             })
-        })
-        .fail(() => {
+        }, () => {
+            if (loadRequest !== latestLoadRequest) {
+                return;
+            }
             errorFlash("Error fetching webhooks")
         })
 };
@@ -88,6 +103,7 @@ const load = () => {
 let submitHandler = null;
 
 const editWebhook = (id) => {
+    const editRequest = ++latestEditRequest;
     const submit = document.getElementById("modalSubmit");
     if (submitHandler) {
         submit.removeEventListener("click", submitHandler);
@@ -98,18 +114,26 @@ const editWebhook = (id) => {
     submit.addEventListener("click", submitHandler);
     if (id !== -1) {
         document.getElementById("webhookModalLabel").textContent = "Edit Webhook"
+        setWebhookFormDisabled(true);
         api.webhookId.get(id)
-          .done(function(wh) {
+          .then(function(wh) {
+              if (editRequest !== latestEditRequest) {
+                  return;
+              }
               document.getElementById("name").value = wh.name;
               document.getElementById("url").value = wh.url;
               document.getElementById("secret").value = wh.secret;
               document.getElementById("is_active").checked = wh.is_active;
-          })
-          .fail(function () {
+              setWebhookFormDisabled(false);
+          }, function () {
+              if (editRequest !== latestEditRequest) {
+                  return;
+              }
               errorFlash("Error fetching webhook")
           });
     } else {
         document.getElementById("webhookModalLabel").textContent = "New Webhook"
+        setWebhookFormDisabled(false);
     }
 };
 

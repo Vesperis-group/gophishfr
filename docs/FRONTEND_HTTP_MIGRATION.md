@@ -10,7 +10,7 @@ legacy helper or any synchronous caller.
 
 ## Current scope
 
-Fourteen wrappers whose complete consumer set has a measured native-Promise
+Sixteen wrappers whose complete consumer set has a measured native-Promise
 contract now use `requestJSON()`:
 
 - `api.users.get`
@@ -27,17 +27,26 @@ contract now use `requestJSON()`:
 - `api.userId.delete`
 - `api.webhookId.put`
 - `api.reset`
+- `api.webhooks.get`
+- `api.webhookId.get`
 
 Their callers use the two-handler form of `Promise.then()`. This keeps every
 rejection handled without adding a jqXHR compatibility shim. IMAP validation
-uses `finally()` for its unconditional control cleanup. The remaining 33
-wrappers still use `query()`: all 32 synchronous wrappers and the unused
+uses `finally()` for its unconditional control cleanup. The remaining 31
+wrappers still use `query()`: 30 synchronous wrappers and the unused
 asynchronous `campaignId.summary` wrapper.
 
 This increment migrated 10 of the 11 asynchronous wrappers that remained after
 the first native-transport change. `campaignId.summary` has no first-party
 consumer, so changing its externally observable jqXHR return is not justified
 without usage evidence.
+
+The first synchronous-XHR increment migrated the read-only `webhooks.get` and
+`webhookId.get` wrappers. Their consumers remain void callback boundaries, while
+tests delay each response to prove that table and modal state are not consumed
+before the native Promise settles. Superseded responses cannot overwrite newer
+state, and edit controls remain disabled until the current detail request
+succeeds.
 
 No endpoint, method, payload, authentication rule, or backend handler changed.
 The direct form-encoded `$.post()` in `settings.js` is separate from `query()`
@@ -94,9 +103,9 @@ for now:
 | `userId.get` | `GET /users/:id` | async | migrated | all callers handle rejection |
 | `userId.put` | `PUT /users/:id` | async | migrated | submit success and rejection are covered |
 | `userId.delete` | `DELETE /users/:id` | async | migrated | SweetAlert consumes the native Promise directly |
-| `webhooks.get` | `GET /webhooks/` | sync | retained | likely accidental |
+| `webhooks.get` | `GET /webhooks/` | sync | migrated | list state waits for the native Promise |
 | `webhooks.post` | `POST /webhooks/` | sync | retained | likely accidental |
-| `webhookId.get` | `GET /webhooks/:id` | sync | retained | likely accidental |
+| `webhookId.get` | `GET /webhooks/:id` | sync | migrated | edit state waits for the native Promise |
 | `webhookId.put` | `PUT /webhooks/:id` | async | migrated | submit success and rejection are covered |
 | `webhookId.delete` | `DELETE /webhooks/:id` | sync | retained | likely accidental |
 | `webhookId.ping` | `POST /webhooks/:id/validate` | async | migrated | all callers handle rejection |
@@ -105,13 +114,13 @@ for now:
 | `send_test_email` | `POST /util/send_test_email` | async | migrated | all callers handle rejection |
 | `reset` | `POST /reset` | async | migrated | API key update and server error paths are covered |
 
-The synchronous classification totals 3 required, 24 likely accidental, and 5
+The synchronous classification totals 3 required, 22 likely accidental, and 5
 unused/unknown wrappers. Those labels are migration inputs, not permission to
 change them in bulk.
 
 ### Synchronous families
 
-The 32 retained synchronous wrappers divide into bounded workflow families:
+The 30 retained synchronous wrappers divide into bounded workflow families:
 
 | Family | Wrappers | Count | Main migration risk |
 | --- | --- | ---: | --- |
@@ -121,13 +130,12 @@ The 32 retained synchronous wrappers divide into bounded workflow families:
 | Landing page/clone | `pages.get`, `pages.post`, `pageId.get`, `pageId.put`, `pageId.delete`, `clone_site` | 6 | untrusted HTML and remote clone flow |
 | Sending profile | `SMTP.get`, `SMTP.post`, `SMTPId.get`, `SMTPId.put`, `SMTPId.delete` | 5 | credential-bearing forms and campaign option ordering |
 | IMAP settings | `IMAP.get`, `IMAP.post` | 2 | credential-bearing form and chained lifecycle callbacks |
-| Webhook CRUD | `webhooks.get`, `webhooks.post`, `webhookId.get`, `webhookId.delete` | 4 | list refresh and destructive-action timing |
+| Webhook writes | `webhooks.post`, `webhookId.delete` | 2 | list refresh and destructive-action timing |
 
-The first recommended synchronous follow-up is the read-only pair
-`webhooks.get` and `webhookId.get`. Their consumers are callback-driven, browser
-coverage already exists, and they do not participate in the campaign option
-ordering that currently requires `templates.get`, `pages.get`, and `SMTP.get`
-to complete synchronously.
+The next recommended synchronous follow-up is the write pair `webhooks.post`
+and `webhookId.delete`. Their modal and SweetAlert boundaries already isolate
+the asynchronous work, but creation refresh and destructive-action timing need
+their own measured regression tests.
 
 ## Measured legacy contract
 
@@ -178,8 +186,10 @@ The frontend smoke suite covers all migrated consumer families, including
 campaign refresh cleanup, report lookup failure, group option failure,
 completion, user update and deletion, webhook update, API-key reset, IMAP
 success/failure cleanup, failed user loads, failed webhook pings, and both
-test-email error surfaces. The wrapper suite also removes `window.$` and
-`window.jQuery` while invoking the 10 wrappers migrated in this increment.
+test-email error surfaces. The webhook-read coverage includes legacy/native HTTP
+parity, list and edit failures, repeated actions, delayed-response ordering, and
+fixed UI messages. The wrapper suite also removes `window.$` and
+`window.jQuery` while invoking migrated wrappers.
 Tests never send email or contact a non-loopback host.
 
 ## Follow-up families
@@ -188,7 +198,7 @@ Future changes should remain incremental:
 
 1. Establish whether `campaignId.summary` has an external runtime consumer
    before changing or removing its jqXHR contract.
-2. Migrate the synchronous webhook reads as a separately tested workflow.
+2. Migrate the synchronous webhook writes as a separately tested workflow.
 3. Remove other accidental synchronous XHR one workflow at a time, with
    ordering and UI-state regression coverage.
 4. Delete or justify unused wrappers after checking external extension

@@ -2121,18 +2121,134 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     // element rather than the table. A migration that passes the container
     // instead would silently disable nothing.
     const webhookRequests: string[] = [];
+    const webhookReadRequests: string[] = [];
     const captureWebhook = (request: Request) => {
+      const url = new URL(request.url());
+      if (
+        request.method() === "GET" &&
+        (url.pathname === "/api/webhooks/" ||
+          /^\/api\/webhooks\/\d+$/.test(url.pathname))
+      ) {
+        webhookReadRequests.push(`${url.pathname}${url.search}`);
+      }
       if (
         request.method() === "POST" &&
-        new URL(request.url()).pathname === "/api/webhooks/"
+        url.pathname === "/api/webhooks/"
       ) {
         webhookRequests.push(request.postData() ?? "");
       }
     };
     page.on("request", captureWebhook);
 
+    const webhookReadConsoleBefore = consoleErrors.length;
+    const webhookReadResponsesBefore = failedLocalResponses.length;
+    const webhookListRequest = /\/api\/webhooks\/\?\{\}$/;
+    await page.route(webhookListRequest, (route) =>
+      route.fulfill({
+        body: JSON.stringify({ message: "synthetic webhook list failure" }),
+        contentType: "application/json",
+        status: 500,
+      }),
+    );
     await page.getByRole("link", { name: "Webhooks" }).click();
     await expect(page).toHaveURL(/\/webhooks$/);
+    await expect(page.locator('[id="flashes"]').first()).toContainText(
+      "Error fetching webhooks",
+    );
+    await expect(page.locator("#loading")).toBeVisible();
+    await expect(page.locator("#webhookTable")).toBeHidden();
+    expect(webhookReadRequests).toEqual(["/api/webhooks/?{}"]);
+    await page.unroute(webhookListRequest);
+    let releaseOlderWebhookList: () => void = () => {};
+    let releaseNewerWebhookList: () => void = () => {};
+    const olderWebhookListGate = new Promise<void>((resolve) => {
+      releaseOlderWebhookList = resolve;
+    });
+    const newerWebhookListGate = new Promise<void>((resolve) => {
+      releaseNewerWebhookList = resolve;
+    });
+    let webhookListRequestNumber = 0;
+    await page.evaluate(() => {
+      type API = {
+        webhooks: { get: () => Promise<unknown> };
+      };
+      const globals = window as unknown as {
+        api: API;
+        webhookListSettlements: Promise<void>[];
+      };
+      const originalGet = globals.api.webhooks.get;
+      globals.webhookListSettlements = [];
+      globals.api.webhooks.get = () => {
+        const request = originalGet();
+        globals.webhookListSettlements.push(
+          new Promise<void>((resolve) => {
+            const settleAfterConsumer = () => {
+              setTimeout(resolve, 0);
+            };
+            request.then(settleAfterConsumer, settleAfterConsumer);
+          }),
+        );
+        return request;
+      };
+    });
+    await page.route(webhookListRequest, async (route) => {
+      const requestNumber = webhookListRequestNumber++;
+      const isOlderRequest = requestNumber === 0;
+      await (isOlderRequest ? olderWebhookListGate : newerWebhookListGate);
+      await route.fulfill({
+        body: JSON.stringify([
+          {
+            id: isOlderRequest ? 101 : 202,
+            is_active: true,
+            name: isOlderRequest ? "older-webhook-list" : "newer-webhook-list",
+            url: "https://example.invalid/hook",
+          },
+        ]),
+        contentType: "application/json",
+        status: 200,
+      });
+    });
+    await page.evaluate("load()");
+    await expect.poll(() => webhookListRequestNumber).toBe(1);
+    await expect(page.locator("#loading")).toBeVisible();
+    await expect(page.locator("#webhookTable")).toBeHidden();
+    await page.evaluate("load()");
+    await expect.poll(() => webhookListRequestNumber).toBe(2);
+    releaseNewerWebhookList();
+    await page.evaluate(() => {
+      const globals = window as unknown as {
+        webhookListSettlements: Promise<void>[];
+      };
+      return globals.webhookListSettlements[1];
+    });
+    await expect(page.locator("#loading")).toBeHidden();
+    await expect(page.locator("#webhookTable")).toBeVisible();
+    await expect(page.locator("#webhookTable")).toContainText(
+      "newer-webhook-list",
+    );
+    releaseOlderWebhookList();
+    await page.evaluate(() => {
+      const globals = window as unknown as {
+        webhookListSettlements: Promise<void>[];
+      };
+      return globals.webhookListSettlements[0];
+    });
+    await expect(page.locator("#webhookTable")).toContainText(
+      "newer-webhook-list",
+    );
+    await expect(page.locator("#webhookTable")).not.toContainText(
+      "older-webhook-list",
+    );
+    await page.unroute(webhookListRequest);
+    await page.evaluate("load()");
+    await expect(page.locator("#loading")).toBeHidden();
+    await expect(page.locator("#webhookTable")).toBeVisible();
+    expect(webhookReadRequests).toEqual([
+      "/api/webhooks/?{}",
+      "/api/webhooks/?{}",
+      "/api/webhooks/?{}",
+      "/api/webhooks/?{}",
+    ]);
 
     const webhookName = `browser_webhook_${Date.now()}`;
     await openApplicationModal(page, "New Webhook");
@@ -2149,6 +2265,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator("#modal")).not.toBeVisible();
 
     await expect.poll(() => webhookRequests.length).toBe(1);
+    await expect.poll(() => webhookReadRequests.length).toBe(5);
     const webhook = JSON.parse(webhookRequests[0]) as {
       name: string;
       url: string;
@@ -2217,11 +2334,128 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     ]);
     failedLocalResponses.length = pingFailedResponsesBefore;
 
-    // Editing through the delegated control loads that row's values.
+    const webhookDetailRequest = /\/api\/webhooks\/\d+\?\{\}$/;
+    await page.route(webhookDetailRequest, (route) =>
+      route.fulfill({
+        body: JSON.stringify({ message: "synthetic webhook lookup failure" }),
+        contentType: "application/json",
+        status: 404,
+      }),
+    );
     await row.locator("button.edit_button").click();
     await expect(page.locator("#modal")).toBeVisible();
+    await expect(page.locator('[id="flashes"]').first()).toContainText(
+      "Error fetching webhook",
+    );
+    await expect(page.locator("#name")).toHaveValue("");
+    await expect(page.locator("#url")).toHaveValue("");
+    await expect(page.locator("#modalSubmit")).toBeDisabled();
+    expect(webhookReadRequests).toHaveLength(6);
+    await closeApplicationModal(page);
+    await page.unroute(webhookDetailRequest);
+
+    // A response from a closed edit modal must not populate a newer create
+    // modal with the previous webhook's data or secret.
+    let releaseStaleWebhookDetail: () => void = () => {};
+    const staleWebhookDetailGate = new Promise<void>((resolve) => {
+      releaseStaleWebhookDetail = resolve;
+    });
+    await page.evaluate(() => {
+      type API = {
+        webhookId: { get: (id: number) => Promise<unknown> };
+      };
+      const globals = window as unknown as {
+        api: API;
+        webhookDetailSettlements: Promise<void>[];
+      };
+      const originalGet = globals.api.webhookId.get;
+      globals.webhookDetailSettlements = [];
+      globals.api.webhookId.get = (id) => {
+        const request = originalGet(id);
+        globals.webhookDetailSettlements.push(
+          new Promise<void>((resolve) => {
+            const settleAfterConsumer = () => {
+              setTimeout(resolve, 0);
+            };
+            request.then(settleAfterConsumer, settleAfterConsumer);
+          }),
+        );
+        return request;
+      };
+    });
+    await page.route(webhookDetailRequest, async (route) => {
+      await staleWebhookDetailGate;
+      await route.fulfill({
+        body: JSON.stringify({
+          id: 404,
+          is_active: true,
+          name: "stale-webhook",
+          secret: "stale-secret",
+          url: "https://stale.invalid/hook",
+        }),
+        contentType: "application/json",
+        status: 200,
+      });
+    });
+    await row.locator("button.edit_button").click();
+    await expect(page.locator("#modal")).toBeVisible();
+    await expect(page.locator("#modalSubmit")).toBeDisabled();
+    await expect.poll(() => webhookReadRequests.length).toBe(7);
+    await closeApplicationModal(page);
+    await openApplicationModal(page, "New Webhook");
+    releaseStaleWebhookDetail();
+    await page.evaluate(() => {
+      const globals = window as unknown as {
+        webhookDetailSettlements: Promise<void>[];
+      };
+      return globals.webhookDetailSettlements[0];
+    });
+    await expect(page.locator("#webhookModalLabel")).toHaveText("New Webhook");
+    await expect(page.locator("#name")).toHaveValue("");
+    await expect(page.locator("#url")).toHaveValue("");
+    await expect(page.locator("#secret")).toHaveValue("");
+    expect(await page.locator("#is_active").isChecked()).toBe(false);
+    await expect(page.locator("#modalSubmit")).toBeEnabled();
+    await closeApplicationModal(page);
+    await page.unroute(webhookDetailRequest);
+
+    // Repeating the delegated action must issue one request and populate only
+    // after that request succeeds.
+    let releaseWebhookDetail: () => void = () => {};
+    const webhookDetailGate = new Promise<void>((resolve) => {
+      releaseWebhookDetail = resolve;
+    });
+    await page.route(webhookDetailRequest, async (route) => {
+      await webhookDetailGate;
+      await route.continue();
+    });
+    await row.locator("button.edit_button").click();
+    await expect(page.locator("#modal")).toBeVisible();
+    await expect(page.locator("#name")).toHaveValue("");
+    await expect(page.locator("#url")).toHaveValue("");
+    await expect(page.locator("#modalSubmit")).toBeDisabled();
+    releaseWebhookDetail();
     await expect.poll(() => page.locator("#name").inputValue()).toBe(webhookName);
     expect(await page.locator("#is_active").isChecked()).toBe(true);
+    await expect(page.locator("#modalSubmit")).toBeEnabled();
+    expect(webhookReadRequests).toHaveLength(8);
+    await page.unroute(webhookDetailRequest);
+
+    expect(
+      consoleErrors
+        .slice(webhookReadConsoleBefore)
+        .filter(
+          (entry) =>
+            !entry.includes("status of 404 (Not Found)") &&
+            !entry.includes("status of 500 (Internal Server Error)"),
+        ),
+    ).toEqual([]);
+    consoleErrors.length = webhookReadConsoleBefore;
+    expect(failedLocalResponses.slice(webhookReadResponsesBefore)).toEqual([
+      "500 /api/webhooks/",
+      expect.stringMatching(/^404 \/api\/webhooks\/\d+$/),
+    ]);
+    failedLocalResponses.length = webhookReadResponsesBefore;
 
     const webhookUpdateConsoleBefore = consoleErrors.length;
     const webhookUpdateResponsesBefore = failedLocalResponses.length;
