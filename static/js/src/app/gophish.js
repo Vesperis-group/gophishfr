@@ -284,11 +284,11 @@ var api = {
         },
         // post() - Posts a campaign to POST /campaigns
         post: function (data) {
-            return query("/campaigns/", "POST", data, false)
+            return requestJSON("/campaigns/", "POST", data)
         },
         // summary() - Queries the API for GET /campaigns/summary
         summary: function () {
-            return query("/campaigns/summary", "GET", {}, false)
+            return requestJSON("/campaigns/summary", "GET", {})
         }
     },
     // campaignId contains the endpoints for /campaigns/:id
@@ -299,7 +299,7 @@ var api = {
         },
         // delete() - Deletes a campaign at DELETE /campaigns/:id
         delete: function (id) {
-            return query("/campaigns/" + id, "DELETE", {}, false)
+            return requestJSON("/campaigns/" + id, "DELETE", {})
         },
         // results() - Queries the API for GET /campaigns/:id/results
         results: function (id) {

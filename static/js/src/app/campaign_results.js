@@ -118,6 +118,8 @@ function dismiss() {
 
 // Deletes a campaign after prompting the user
 function deleteCampaign() {
+    var campaignId = campaign.id
+    var deleteRequest = null
     Swal.fire({
         title: "Are you sure?",
         text: "This will delete the campaign. This can't be undone!",
@@ -130,15 +132,15 @@ function deleteCampaign() {
         allowOutsideClick: false,
         showLoaderOnConfirm: true,
         preConfirm: function () {
-            return new Promise(function (resolve, reject) {
-                api.campaignId.delete(campaign.id)
-                    .done(function (msg) {
-                        resolve()
-                    })
-                    .fail(function (data) {
-                        reject(data.responseJSON.message)
-                    })
-            })
+            if (deleteRequest) {
+                return deleteRequest
+            }
+            deleteRequest = api.campaignId.delete(campaignId)
+                .then(undefined, function (error) {
+                    deleteRequest = null
+                    Swal.showValidationMessage(requestErrorMessage(error))
+                })
+            return deleteRequest
         }
     }).then(function (result) {
         if(result.value){
