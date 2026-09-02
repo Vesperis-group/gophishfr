@@ -25,6 +25,7 @@ function bindModalSubmit(handler) {
 
 var profiles = []
 var latestProfileRequest = 0
+var latestProfileLoadRequest = 0
 var saveRequest = null
 var activeProfileId = null
 var refreshProfileModal = null
@@ -306,11 +307,15 @@ function applyProfileFields(profile, name) {
 }
 
 function load() {
+    var loadRequest = ++latestProfileLoadRequest
     document.getElementById("profileTable").style.display = "none"
     document.getElementById("emptyMessage").style.display = "none"
     document.getElementById("loading").style.display = ""
     api.SMTP.get()
-        .done(function (ss) {
+        .then(function (ss) {
+            if (loadRequest != latestProfileLoadRequest) {
+                return
+            }
             profiles = ss
             document.getElementById("loading").style.display = "none"
             if (profiles.length > 0) {
@@ -345,8 +350,10 @@ function load() {
             } else {
                 document.getElementById("emptyMessage").style.display = ""
             }
-        })
-        .fail(function () {
+        }, function () {
+            if (loadRequest != latestProfileLoadRequest) {
+                return
+            }
             document.getElementById("loading").style.display = "none"
             errorFlash("Error fetching profiles")
         })

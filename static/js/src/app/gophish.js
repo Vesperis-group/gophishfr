@@ -336,7 +336,7 @@ var api = {
     templates: {
         // get() - Queries the API for GET /templates
         get: function () {
-            return query("/templates/", "GET", {}, false)
+            return requestJSON("/templates/", "GET", {})
         },
         // post() - Posts a template to POST /templates
         post: function (template) {
@@ -358,7 +358,7 @@ var api = {
     pages: {
         // get() - Queries the API for GET /pages
         get: function () {
-            return query("/pages/", "GET", {}, false)
+            return requestJSON("/pages/", "GET", {})
         },
         // post() - Posts a page to POST /pages
         post: function (page) {
@@ -380,7 +380,7 @@ var api = {
     SMTP: {
         // get() - Queries the API for GET /smtp
         get: function () {
-            return query("/smtp/", "GET", {}, false)
+            return requestJSON("/smtp/", "GET", {})
         },
         // post() - Posts a SMTP to POST /smtp
         post: function (smtp) {

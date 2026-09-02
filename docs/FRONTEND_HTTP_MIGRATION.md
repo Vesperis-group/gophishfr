@@ -5,8 +5,9 @@ Audit date: 2026-09-02
 The frontend historically exposes API wrappers from
 `static/js/src/app/gophish.js`. All 47 wrappers returned a jQuery jqXHR through
 `query()`, including 32 wrappers that explicitly set `async: false`. This
-migration introduces a native Promise/fetch transport without changing the
-legacy helper or any synchronous caller.
+migration introduced a native Promise/fetch transport and incrementally moved
+every retained wrapper to it. The legacy helper remains present for a separate
+removal change, but has no runtime caller.
 
 `window.api` and its `api.*` properties are internal frontend implementation
 details, not a public API or supported extension point. This does not change the
@@ -14,8 +15,8 @@ separate HTTP REST API exposed under `/api/`.
 
 ## Current scope
 
-Thirty-eight wrappers whose complete consumer set has a measured native-Promise
-contract now use `requestJSON()`:
+All 41 retained wrappers now use `requestJSON()` with measured native-Promise
+contracts:
 
 - `api.users.get`
 - `api.userId.get`
@@ -29,6 +30,7 @@ contract now use `requestJSON()`:
 - `api.groupId.get`
 - `api.groupId.put`
 - `api.groupId.delete`
+- `api.templates.get`
 - `api.IMAP.validate`
 - `api.users.post`
 - `api.userId.put`
@@ -43,10 +45,12 @@ contract now use `requestJSON()`:
 - `api.templateId.put`
 - `api.templateId.delete`
 - `api.import_email`
+- `api.pages.get`
 - `api.pages.post`
 - `api.pageId.put`
 - `api.pageId.delete`
 - `api.clone_site`
+- `api.SMTP.get`
 - `api.SMTP.post`
 - `api.SMTPId.put`
 - `api.SMTPId.delete`
@@ -56,11 +60,10 @@ contract now use `requestJSON()`:
 - `api.IMAP.get`
 - `api.IMAP.post`
 
-Their callers use the two-handler form of `Promise.then()`. This keeps every
-rejection handled without adding a jqXHR compatibility shim. IMAP validation
-uses `finally()` for its unconditional control cleanup. The only 3 wrappers
-that still use `query()` are the synchronous `templates.get`, `pages.get`, and
-`SMTP.get` loaders required by campaign option ordering.
+Their callers use native Promise settlement handlers without a jqXHR
+compatibility shim. IMAP validation uses `finally()` for its unconditional
+control cleanup. `query()` and its jQuery Ajax implementation remain unchanged,
+but no retained wrapper calls them.
 
 Six unused internal wrappers were removed rather than migrated:
 `campaigns.get`, `campaignId.summary`, `groups.get`, `templateId.get`,
@@ -86,8 +89,8 @@ stale edit and save settlements, while SweetAlert consumes one native deletion
 Promise per confirmation attempt.
 
 The template mutation increment migrated `templates.post`, `templateId.put`,
-`templateId.delete`, and `import_email`. The required `templates.get` wrapper
-remains synchronous and untouched.
+`templateId.delete`, and `import_email`. The later option-loader increment
+migrated `templates.get`.
 Create, update, and import requests keep their modal data retryable on failure;
 duplicate writes are suppressed; and settlements from a closed modal cannot
 overwrite a newer modal. The exact CodeMirror HTML source remains the request
@@ -97,8 +100,8 @@ rather than mutable table indexes. Pending attachment reads temporarily block
 submission and cannot write into a later modal.
 
 The landing page mutation increment migrated `pages.post`, `pageId.put`,
-`pageId.delete`, and `clone_site`. The required `pages.get` wrapper remains
-synchronous and untouched. Create, update, and site
+`pageId.delete`, and `clone_site`. The later option-loader increment migrated
+`pages.get`. Create, update, and site
 clone requests suppress duplicate actions and keep their current modal retryable.
 Settlements from a closed modal cannot overwrite a newer modal, while edit and
 delete actions capture stable page IDs instead of mutable table indexes. Exact
@@ -106,8 +109,8 @@ CodeMirror source remains the save and clone destination, and cloned untrusted
 HTML reaches rendered DOM only through the existing sanitized, sandboxed preview.
 
 The sending profile mutation increment migrated `SMTP.post`, `SMTPId.put`, and
-`SMTPId.delete`. The required `SMTP.get` wrapper remains synchronous and
-untouched. Create and update payloads preserve
+`SMTPId.delete`. The later option-loader increment migrated `SMTP.get`. Create
+and update payloads preserve
 explicit empty credentials, false booleans, and complete header replacement.
 Duplicate writes are suppressed, stale settlements cannot overwrite a newer
 modal, and destructive actions capture stable profile IDs. An omitted
@@ -145,15 +148,25 @@ browser's successful-control set, file values are excluded to match
 spaces. The unused `X-Requested-With` library-identification header is not
 retained; no backend or middleware reads it.
 
-This removes the last executable first-party jQuery use outside `query()`. The
-only remaining runtime blocker is the unchanged synchronous `query()` transport
-used by the three required `templates.get`, `pages.get`, and `SMTP.get` campaign
-loaders.
+The final hard option-loader increment migrated `templates.get`, `pages.get`,
+and `SMTP.get`. `setupOptions()` now returns a Promise while preserving the
+measured templates, pages, and SMTP request order. New and copied campaigns keep
+launch controls disabled until the current option workflow settles; copy waits
+for those options before loading campaign detail. Superseded workflows cannot
+overwrite the latest action, closing the modal invalidates pending work,
+hard-loader failures stop continuation and remain retryable, and group-summary
+errors retain their independent historical behavior. The same wrappers also
+drive their three list pages through native Promise handlers that ignore
+superseded responses.
+
+This removes the last runtime caller of `query()` and the last executable
+first-party jQuery use outside its retained implementation. Removing `query()`
+itself remains intentionally out of scope for this increment.
 
 ## Wrapper inventory
 
-`Sync classification` describes why a synchronous wrapper remains synchronous
-for now:
+`Legacy mode` records the original jqXHR mode. Earlier audit classifications
+used these categories:
 
 - **required**: current ordering depends on the request completing before later
   code runs;
@@ -178,17 +191,17 @@ for now:
 | `groupId.get` | `GET /groups/:id` | sync | migrated | edit state waits for the current native Promise |
 | `groupId.put` | `PUT /groups/:id` | sync | migrated | modal stays retryable and refreshes once after success |
 | `groupId.delete` | `DELETE /groups/:id` | sync | migrated | SweetAlert consumes one native Promise per confirmation attempt |
-| `templates.get` | `GET /templates/` | sync | retained | required by campaign option ordering |
+| `templates.get` | `GET /templates/` | sync | migrated | explicit Promise chain preserves campaign option ordering |
 | `templates.post` | `POST /templates/` | sync | migrated | modal stays retryable and suppresses duplicate writes |
 | `templateId.get` | `GET /templates/:id` | sync | removed | unused internal wrapper; REST endpoint unchanged |
 | `templateId.put` | `PUT /templates/:id` | sync | migrated | modal stays retryable and rejects stale settlements |
 | `templateId.delete` | `DELETE /templates/:id` | sync | migrated | SweetAlert consumes one native Promise per confirmation attempt |
-| `pages.get` | `GET /pages/` | sync | retained | required by campaign option ordering |
+| `pages.get` | `GET /pages/` | sync | migrated | explicit Promise chain preserves campaign option ordering |
 | `pages.post` | `POST /pages/` | sync | migrated | modal stays retryable and suppresses duplicate writes |
 | `pageId.get` | `GET /pages/:id` | sync | removed | unused internal wrapper; REST endpoint unchanged |
 | `pageId.put` | `PUT /pages/:id` | sync | migrated | stable page ID and modal context reject stale settlements |
 | `pageId.delete` | `DELETE /pages/:id` | sync | migrated | SweetAlert consumes one native Promise per confirmation attempt |
-| `SMTP.get` | `GET /smtp/` | sync | retained | required by campaign option ordering |
+| `SMTP.get` | `GET /smtp/` | sync | migrated | explicit Promise chain preserves campaign option ordering |
 | `SMTP.post` | `POST /smtp/` | sync | migrated | explicit credential and header payloads remain stable across native settlement |
 | `SMTPId.get` | `GET /smtp/:id` | sync | removed | unused internal wrapper; REST endpoint unchanged |
 | `SMTPId.put` | `PUT /smtp/:id` | sync | migrated | stable profile ID and modal context reject stale settlements |
@@ -212,17 +225,12 @@ for now:
 | `send_test_email` | `POST /util/send_test_email` | async | migrated | all callers handle rejection |
 | `reset` | `POST /reset` | async | migrated | API key update and server error paths are covered |
 
-The synchronous classification now totals 3 required wrappers.
+The synchronous classification now totals zero retained wrappers.
 
 ### Synchronous families
 
-The 3 retained synchronous wrappers divide into bounded workflow families:
-
-| Family | Wrappers | Count | Main migration risk |
-| --- | --- | ---: | --- |
-| Template loading | `templates.get` | 1 | campaign option ordering |
-| Landing page loading | `pages.get` | 1 | campaign option ordering |
-| Sending profile loading | `SMTP.get` | 1 | campaign option ordering |
+No retained wrapper uses synchronous XHR. The legacy `query()` implementation
+remains available but has no runtime caller.
 
 ## Measured legacy contract
 
@@ -296,6 +304,12 @@ network failures, the complete two-group launch payload, canonical template
 attachments, and stored date instants. It also proves duplicate suppression,
 stable deletion IDs, handled retryable failures, page-specific loading behavior,
 responsiveness under delayed summaries, and operation without `jQuery.ajax`.
+Hard option-loader coverage records exact GET contracts, the explicit
+templates-pages-SMTP order, New and Copy campaign state, preselection,
+per-loader failure and retry, delayed list rendering, DataTables stability, and
+superseded list and Copy isolation, including modal closure during a pending
+Copy. It also invokes all three wrappers and the complete Copy workflow with
+both jQuery globals removed.
 The account-settings form contract inventories every real control and compares
 its legacy and native form body, order, encoding, session cookie, disabled and
 empty-field behavior, HTTP 400/403/500 handling, retry, duplicate submissions,
@@ -304,9 +318,6 @@ Tests never send email or contact a non-loopback host.
 
 ## Follow-up families
 
-Future changes should remain incremental:
-
-1. Remove other accidental synchronous XHR one workflow at a time, with
-   ordering and UI-state regression coverage.
-2. Remove `query()` and jQuery Ajax only after no caller depends on jqXHR or
-   synchronous completion.
+Future changes should remain incremental. Remove the now-unused `query()` and
+jQuery Ajax implementation only in a dedicated follow-up that also audits the
+intentionally retained legacy/dead-code boundaries.

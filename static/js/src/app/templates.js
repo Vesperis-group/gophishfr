@@ -26,6 +26,7 @@ function bindModalSubmit(handler) {
 var templates = []
 var htmlEditor
 var latestTemplateRequest = 0
+var latestTemplateLoadRequest = 0
 var saveRequest = null
 var activeTemplateId = null
 var refreshTemplateModal = null
@@ -467,11 +468,15 @@ function importEmail() {
 }
 
 function load() {
+    var loadRequest = ++latestTemplateLoadRequest
     document.getElementById("templateTable").style.display = "none"
     document.getElementById("emptyMessage").style.display = "none"
     document.getElementById("loading").style.display = ""
     api.templates.get()
-        .done(function (ts) {
+        .then(function (ts) {
+            if (loadRequest != latestTemplateLoadRequest) {
+                return
+            }
             templates = ts
             document.getElementById("loading").style.display = "none"
             if (templates.length > 0) {
@@ -505,8 +510,10 @@ function load() {
             } else {
                 document.getElementById("emptyMessage").style.display = ""
             }
-        })
-        .fail(function () {
+        }, function () {
+            if (loadRequest != latestTemplateLoadRequest) {
+                return
+            }
             document.getElementById("loading").style.display = "none"
             errorFlash("Error fetching templates")
         })

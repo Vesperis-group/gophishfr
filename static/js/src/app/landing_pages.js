@@ -6,6 +6,7 @@
 var pages = []
 var htmlEditor
 var latestPageRequest = 0
+var latestPageLoadRequest = 0
 var saveRequest = null
 var activePageId = null
 var refreshPageModal = null
@@ -295,11 +296,15 @@ function load() {
     /*
         load() - Loads the current pages using the API
     */
+    var loadRequest = ++latestPageLoadRequest
     document.getElementById("pagesTable").style.display = "none"
     document.getElementById("emptyMessage").style.display = "none"
     document.getElementById("loading").style.display = ""
     api.pages.get()
-        .done(function (ps) {
+        .then(function (ps) {
+            if (loadRequest != latestPageLoadRequest) {
+                return
+            }
             pages = ps
             document.getElementById("loading").style.display = "none"
             if (pages.length > 0) {
@@ -333,8 +338,10 @@ function load() {
             } else {
                 document.getElementById("emptyMessage").style.display = ""
             }
-        })
-        .fail(function () {
+        }, function () {
+            if (loadRequest != latestPageLoadRequest) {
+                return
+            }
             document.getElementById("loading").style.display = "none"
             errorFlash("Error fetching pages")
         })
