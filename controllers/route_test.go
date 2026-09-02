@@ -3,6 +3,7 @@ package controllers
 import (
 	"fmt"
 	"net/http"
+	"net/http/cookiejar"
 	"net/url"
 	"strings"
 	"testing"
@@ -125,6 +126,74 @@ func TestLoginCSRF(t *testing.T) {
 
 			if got := resp.StatusCode; got != tt.expected {
 				t.Fatalf("invalid status code received. expected %d got %d", tt.expected, got)
+			}
+		})
+	}
+}
+
+func TestSettingsCSRF(t *testing.T) {
+	tests := []struct {
+		name         string
+		secFetchSite string
+		expected     int
+	}{
+		{
+			name:         "cross-site authenticated submission is rejected",
+			secFetchSite: "cross-site",
+			expected:     http.StatusForbidden,
+		},
+		{
+			name:         "same-origin submission reaches settings handler",
+			secFetchSite: "same-origin",
+			expected:     http.StatusBadRequest,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ctx := setupTest(t)
+			defer tearDown(t, ctx)
+
+			jar, err := cookiejar.New(nil)
+			if err != nil {
+				t.Fatalf("error creating cookie jar: %v", err)
+			}
+			client := &http.Client{Jar: jar}
+			loginResponse := attemptLogin(t, ctx, client, "admin", "gophish", "")
+			if err := loginResponse.Body.Close(); err != nil {
+				t.Fatalf("error closing login response body: %v", err)
+			}
+
+			request, err := http.NewRequest(
+				http.MethodPost,
+				fmt.Sprintf("%s/settings", ctx.adminServer.URL),
+				strings.NewReader(url.Values{
+					"current_password":     {"synthetic-invalid-password"},
+					"new_password":         {""},
+					"confirm_new_password": {""},
+				}.Encode()),
+			)
+			if err != nil {
+				t.Fatalf("error creating settings request: %v", err)
+			}
+			request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			request.Header.Set("Sec-Fetch-Site", tt.secFetchSite)
+
+			response, err := client.Do(request)
+			if err != nil {
+				t.Fatalf("error posting settings: %v", err)
+			}
+			defer func() {
+				if err := response.Body.Close(); err != nil {
+					t.Errorf("error closing settings response body: %v", err)
+				}
+			}()
+			if response.StatusCode != tt.expected {
+				t.Fatalf(
+					"invalid status code received. expected %d got %d",
+					tt.expected,
+					response.StatusCode,
+				)
 			}
 		})
 	}

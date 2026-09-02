@@ -9,6 +9,7 @@ import {
 } from "@playwright/test";
 import { assertCampaignFlowContract } from "./campaign-flow-contract";
 import { assertIMAPSettingsContract } from "./imap-settings-contract";
+import { assertSettingsFormContract } from "./settings-form-contract";
 
 const baseURL = requiredEnvironmentVariable("GOPHISHFR_BROWSER_BASE_URL");
 const username = requiredEnvironmentVariable("GOPHISHFR_BROWSER_USERNAME");
@@ -2712,36 +2713,16 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     ]);
     failedLocalResponses.length = resetFailedResponsesBefore;
 
-    // Submitting must not navigate: the handler has to cancel the browser's own
-    // submission and post in the background instead. The response is stubbed so
-    // the assertion is about that, and so the suite's "no failed request"
-    // invariant is not spent on what the server makes of an unchanged form.
-    const settingsBodies: string[] = [];
-    await page.route("**/settings", async (route) => {
-      settingsBodies.push(route.request().postData() ?? "");
-      await route.fulfill({
-        status: 200,
-        contentType: "application/json",
-        body: JSON.stringify({ message: "Settings updated" }),
-      });
-    });
-    const navigations: string[] = [];
-    const recordNavigation = (frame: Frame) => {
-      if (frame === page.mainFrame()) {
-        navigations.push(frame.url());
-      }
-    };
-    page.on("framenavigated", recordNavigation);
-    await page.locator("#settingsForm button[type=submit]").click();
-    await page.waitForTimeout(750);
-    page.off("framenavigated", recordNavigation);
-    expect(navigations).toEqual([]);
-    // The body is still produced by jQuery's serializer, which the follow-up
-    // AJAX change has to reproduce exactly.
-    expect(settingsBodies).toHaveLength(1);
-    expect(settingsBodies[0]).toContain("username=");
-    expect(settingsBodies[0]).toContain("csrf_token=");
-    await page.unroute("**/settings");
+    await assertSettingsFormContract(
+      page,
+      {
+        consoleErrors,
+        failedLocalRequests,
+        failedLocalResponses,
+        pageErrors,
+      },
+      true,
+    );
 
     await assertIMAPSettingsContract(page, {
       consoleErrors,
