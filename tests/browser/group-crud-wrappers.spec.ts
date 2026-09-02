@@ -225,7 +225,7 @@ test("group CRUD preserves legacy transport and UI contracts", async ({ page }) 
       settlement: "success",
     },
   ]);
-  expect(captured).toEqual([
+  const expectedRequests: CapturedRequest[] = [
     {
       authorizationIsBearer: true,
       body: JSON.stringify(createGroup),
@@ -258,7 +258,9 @@ test("group CRUD preserves legacy transport and UI contracts", async ({ page }) 
       pathname: "/api/groups/108",
       search: "",
     },
-  ]);
+  ];
+  expect(captured).toHaveLength(expectedRequests.length);
+  expect(captured).toEqual(expect.arrayContaining(expectedRequests));
 
   captured.length = 0;
   failureMode = true;

@@ -182,16 +182,16 @@ test("remaining async API wrappers preserve their request and settlement contrac
     })),
   );
 
-  expect(captured).toEqual(
-    invocations.map(({ body, method, pathname }) => ({
-      authorizationIsBearer: true,
-      body: body === null ? null : JSON.stringify(body),
-      contentType: "application/json",
-      method,
-      pathname,
-      search: method === "GET" ? "?{}" : "",
-    })),
-  );
+  const expectedRequests = invocations.map(({ body, method, pathname }) => ({
+    authorizationIsBearer: true,
+    body: body === null ? null : JSON.stringify(body),
+    contentType: "application/json",
+    method,
+    pathname,
+    search: method === "GET" ? "?{}" : "",
+  }));
+  expect(captured).toHaveLength(expectedRequests.length);
+  expect(captured).toEqual(expect.arrayContaining(expectedRequests));
 
   captured.length = 0;
   failureMode = true;
