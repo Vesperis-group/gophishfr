@@ -22,18 +22,22 @@ type RequestFailure = {
   status: number;
 };
 
-const syntheticSettings = {
+const syntheticResponseSettings = {
   delete_reported_campaign_email: true,
   enabled: true,
   folder: "Synthetic Reports",
   host: "imap.example.invalid",
   ignore_cert_errors: false,
   imap_freq: "90",
-  password: "synthetic-password-123",
   port: "993",
   restrict_domain: "example.invalid",
   tls: true,
   username: "synthetic-user",
+};
+
+const syntheticSettings = {
+  ...syntheticResponseSettings,
+  password: "synthetic-password-123",
 };
 
 function isIMAPSettingsRoute(route: Route): boolean {
@@ -115,7 +119,7 @@ async function assertTransportContracts(
         contentType: "application/json",
         json:
           request.method() === "GET"
-            ? [{ ...syntheticSettings, last_login: "2026-09-02T10:00:00Z" }]
+            ? [{ ...syntheticResponseSettings, last_login: "2026-09-02T10:00:00Z" }]
             : { message: "Successfully saved IMAP settings.", success: true },
         status: request.method() === "GET" ? 200 : 201,
       });
@@ -127,7 +131,7 @@ async function assertTransportContracts(
 
     expect(getResult).toEqual({
       ok: true,
-      value: [{ ...syntheticSettings, last_login: "2026-09-02T10:00:00Z" }],
+      value: [{ ...syntheticResponseSettings, last_login: "2026-09-02T10:00:00Z" }],
     });
     expect(postResult).toEqual({
       ok: true,
@@ -266,10 +270,75 @@ async function assertTransportContracts(
   });
 }
 
+async function assertStoredSecretContract(page: Page): Promise<void> {
+  await test.step("stored IMAP password remains write-only", async () => {
+    const contract = await page.evaluate(async (settings) => {
+      const apiKey = (
+        window as Window & {
+          user: { api_key: string };
+        }
+      ).user.api_key;
+      const headers = {
+        Authorization: `Bearer ${apiKey}`,
+        "Content-Type": "application/json",
+      };
+      const storedSettings = {
+        ...settings,
+        enabled: false,
+        host: "localhost",
+      };
+      const createResponse = await fetch("/api/imap/", {
+        body: JSON.stringify(storedSettings),
+        headers,
+        method: "POST",
+      });
+      const readResponse = await fetch("/api/imap/", { headers });
+      const readBody = await readResponse.text();
+      const updateResponse = await fetch("/api/imap/", {
+        body: JSON.stringify({ ...storedSettings, password: "" }),
+        headers,
+        method: "POST",
+      });
+      return {
+        createStatus: createResponse.status,
+        password: settings.password,
+        readBody,
+        readSettings: JSON.parse(readBody) as Array<Record<string, unknown>>,
+        readStatus: readResponse.status,
+        updateStatus: updateResponse.status,
+      };
+    }, syntheticSettings);
+
+    expect(contract.createStatus).toBe(201);
+    expect(contract.readStatus).toBe(200);
+    expect(contract.updateStatus).toBe(201);
+    expect(contract.readBody).not.toContain(contract.password);
+    expect(contract.readSettings).toHaveLength(1);
+    expect(contract.readSettings[0]).not.toHaveProperty("password");
+
+    await page.locator("#reporttab").click();
+    await expect(page.locator("#imaphost")).toHaveValue("localhost");
+    await expect(page.locator("#imappassword")).toHaveValue("");
+
+    const exposed = await page.evaluate((password) => {
+      const storageValues = [localStorage, sessionStorage].flatMap((storage) =>
+        Array.from({ length: storage.length }, (_, index) => storage.key(index))
+          .filter((key): key is string => key !== null)
+          .map((key) => storage.getItem(key) ?? ""),
+      );
+      return {
+        dom: document.documentElement.outerHTML.includes(password),
+        storage: storageValues.some((value) => value.includes(password)),
+      };
+    }, contract.password);
+    expect(exposed).toEqual({ dom: false, storage: false });
+  });
+}
+
 async function assertLoadConsumer(page: Page, usesNativePromises: boolean): Promise<void> {
   await test.step("IMAP loads preserve fields and reject stale responses", async () => {
     const contract = await page.evaluate(async (nativeMode) => {
-      type IMAPSettings = typeof syntheticSettings & { last_login: string };
+      type IMAPSettings = typeof syntheticResponseSettings & { last_login: string };
       type Failure = {
         data?: { message?: string };
         responseJSON?: { message?: string };
@@ -339,7 +408,6 @@ async function assertLoadConsumer(page: Page, usesNativePromises: boolean): Prom
         ignore_cert_errors: true,
         imap_freq: "120",
         last_login: "2026-09-01T10:00:00Z",
-        password: "synthetic-older-password",
         port: "143",
         restrict_domain: "older.example.invalid",
         tls: false,
@@ -353,7 +421,6 @@ async function assertLoadConsumer(page: Page, usesNativePromises: boolean): Prom
         ignore_cert_errors: false,
         imap_freq: "90",
         last_login: "2026-09-02T10:00:00Z",
-        password: "synthetic-password-123",
         port: "993",
         restrict_domain: "example.invalid",
         tls: true,
@@ -389,7 +456,6 @@ async function assertLoadConsumer(page: Page, usesNativePromises: boolean): Prom
         {
           ...second,
           folder: "",
-          password: "",
           restrict_domain: "",
         },
       ]);
@@ -402,6 +468,8 @@ async function assertLoadConsumer(page: Page, usesNativePromises: boolean): Prom
 
       const retainedHost = "retained-imap.example.invalid";
       (document.getElementById("imaphost") as HTMLInputElement).value = retainedHost;
+      (document.getElementById("imappassword") as HTMLInputElement).value =
+        "local-only-password";
       document.getElementById("reporttab")?.click();
       requests[3].resolve([]);
       await Promise.resolve();
@@ -409,6 +477,7 @@ async function assertLoadConsumer(page: Page, usesNativePromises: boolean): Prom
         host: value("imaphost"),
         lastLoginDisplay:
           (document.getElementById("lastlogindiv") as HTMLElement).style.display,
+        password: value("imappassword"),
       };
 
       document.getElementById("reporttab")?.click();
@@ -439,7 +508,7 @@ async function assertLoadConsumer(page: Page, usesNativePromises: boolean): Prom
             folder: "Current Reports",
             host: "current-imap.example.invalid",
             ignoreCertErrors: false,
-            password: "synthetic-password-123",
+            password: "",
             port: "993",
             restrictDomain: "example.invalid",
             tls: true,
@@ -451,7 +520,7 @@ async function assertLoadConsumer(page: Page, usesNativePromises: boolean): Prom
             folder: "Older Reports",
             host: "older-imap.example.invalid",
             ignoreCertErrors: true,
-            password: "synthetic-older-password",
+            password: "",
             port: "143",
             restrictDomain: "older.example.invalid",
             tls: false,
@@ -466,6 +535,7 @@ async function assertLoadConsumer(page: Page, usesNativePromises: boolean): Prom
     expect(contract.emptyListResult).toEqual({
       host: "retained-imap.example.invalid",
       lastLoginDisplay: "none",
+      password: "",
     });
     expect(contract.errors).toEqual(["Error fetching IMAP settings"]);
   });
@@ -634,9 +704,9 @@ async function assertSaveConsumer(page: Page, usesNativePromises: boolean): Prom
 
       setValue("imappassword", "");
       saveButton.click();
-      requests[requests.length - 1].reject({
-        data: { message: "No Password specified" },
-        responseJSON: { message: "No Password specified" },
+      requests[requests.length - 1].resolve({
+        message: "Successfully saved IMAP settings.",
+        success: true,
       });
       await Promise.resolve();
       await Promise.resolve();
@@ -671,7 +741,6 @@ async function assertSaveConsumer(page: Page, usesNativePromises: boolean): Prom
       usesNativePromises
         ? "synthetic native save failure"
         : "synthetic legacy save failure",
-      "No Password specified",
     ]);
     expect(contract.events).toEqual(
       usesNativePromises
@@ -681,7 +750,8 @@ async function assertSaveConsumer(page: Page, usesNativePromises: boolean): Prom
             "failure",
             "feedback",
             "reload",
-            "failure",
+            "feedback",
+            "reload",
           ]
         : [
             "feedback",
@@ -695,7 +765,8 @@ async function assertSaveConsumer(page: Page, usesNativePromises: boolean): Prom
             "feedback",
             "reload",
             "cleanup",
-            "failure",
+            "feedback",
+            "reload",
             "cleanup",
           ],
     );
@@ -703,10 +774,10 @@ async function assertSaveConsumer(page: Page, usesNativePromises: boolean): Prom
       usesNativePromises ? 0 : 5,
     );
     expect(contract.events.filter((event) => event === "feedback")).toHaveLength(
-      usesNativePromises ? 2 : 3,
+      usesNativePromises ? 3 : 4,
     );
     expect(contract.events.filter((event) => event === "reload")).toHaveLength(
-      usesNativePromises ? 2 : 3,
+      usesNativePromises ? 3 : 4,
     );
   });
 }
@@ -721,6 +792,7 @@ export async function assertIMAPSettingsContract(
       api.IMAP.post.toString().includes("requestJSON"),
   );
 
+  await assertStoredSecretContract(page);
   await assertTransportContracts(page, telemetry, usesNativePromises);
   await assertLoadConsumer(page, usesNativePromises);
   await assertSaveConsumer(page, usesNativePromises);

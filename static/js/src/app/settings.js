@@ -219,6 +219,7 @@ document.addEventListener('DOMContentLoaded', function () {
                 return
             }
             var lastLoginRow = document.getElementById("lastlogindiv")
+            document.getElementById("imappassword").value = ""
             if (imap.length == 0){
                 lastLoginRow.style.display = "none"
             } else {
@@ -231,7 +232,6 @@ document.addEventListener('DOMContentLoaded', function () {
                 document.getElementById("imapusername").value = imap.username
                 document.getElementById("imaphost").value = imap.host
                 document.getElementById("imapport").value = imap.port
-                document.getElementById("imappassword").value = imap.password
                 document.getElementById("use_tls").checked = imap.tls
                 document.getElementById("ignorecerterrors").checked = imap.ignore_cert_errors
                 document.getElementById("use_imap").checked = imap.enabled
