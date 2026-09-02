@@ -57,7 +57,7 @@ function captureRequest(route: Route): CapturedRequest {
   };
 }
 
-test("webhook reads preserve their HTTP and settlement contracts", async ({ page }) => {
+test("webhook wrappers preserve their HTTP and settlement contracts", async ({ page }) => {
   const captured: CapturedRequest[] = [];
   let failureMode = false;
 
@@ -123,13 +123,159 @@ test("webhook reads preserve their HTTP and settlement contracts", async ({ page
     },
   ]);
   expect(captured).toHaveLength(2);
+  await page.unroute("**/api/webhooks/**");
+
+  const webhook = {
+    is_active: false,
+    name: "",
+    secret: "synthetic-write-secret",
+    url: "https://webhook.invalid/endpoint",
+  };
+
+  captured.length = 0;
+  failureMode = false;
+  await page.route("**/api/webhooks/**", async (route) => {
+    captured.push(captureRequest(route));
+    await route.fulfill({
+      body: JSON.stringify(
+        failureMode
+          ? { message: "synthetic webhook write failure" }
+          : { message: "synthetic webhook write success" },
+      ),
+      contentType: "application/json",
+      status: failureMode ? 500 : 200,
+    });
+  });
+
+  expect(await runWriteInvocations(page, webhook)).toEqual([
+    {
+      data: { message: "synthetic webhook write success" },
+      name: "webhooks.post",
+      settlement: "success",
+    },
+    {
+      data: { message: "synthetic webhook write success" },
+      name: "webhookId.delete",
+      settlement: "success",
+    },
+  ]);
+  expect(captured).toEqual([
+    {
+      authorizationIsBearer: true,
+      body: JSON.stringify(webhook),
+      contentType: "application/json",
+      method: "POST",
+      pathname: "/api/webhooks/",
+      search: "",
+    },
+    {
+      authorizationIsBearer: true,
+      body: "{}",
+      contentType: "application/json",
+      method: "DELETE",
+      pathname: "/api/webhooks/108",
+      search: "",
+    },
+  ]);
+
+  captured.length = 0;
+  failureMode = true;
+  expect(await runWriteInvocations(page, webhook)).toEqual([
+    {
+      data: { message: "synthetic webhook write failure" },
+      name: "webhooks.post",
+      settlement: "failure",
+      status: 500,
+    },
+    {
+      data: { message: "synthetic webhook write failure" },
+      name: "webhookId.delete",
+      settlement: "failure",
+      status: 500,
+    },
+  ]);
+  expect(captured).toHaveLength(2);
+  await page.unroute("**/api/webhooks/**");
+
+  await page.route("**/api/webhooks/**", (route) => route.abort("failed"));
+  expect(await runWriteInvocations(page, webhook)).toEqual([
+    {
+      data: undefined,
+      name: "webhooks.post",
+      settlement: "failure",
+      status: 0,
+    },
+    {
+      data: undefined,
+      name: "webhookId.delete",
+      settlement: "failure",
+      status: 0,
+    },
+  ]);
+  await page.unroute("**/api/webhooks/**");
+
+  await page.goto("/webhooks");
+  await page.locator("#webhookTable").waitFor({ state: "visible" });
+
+  const returns = await page.evaluate(async () => {
+    type DeferredThenable = {
+      done: () => DeferredThenable;
+      fail: () => DeferredThenable;
+      then: () => DeferredThenable;
+    };
+    type API = {
+      webhooks: { post: () => DeferredThenable };
+    };
+    const globals = window as unknown as {
+      Swal: {
+        fire: (...args: unknown[]) => Promise<{ value: boolean }>;
+      };
+      api: API;
+    };
+    const originalPost = globals.api.webhooks.post;
+    const originalFire = globals.Swal.fire;
+    const pending: DeferredThenable = {
+      done() {
+        return pending;
+      },
+      fail() {
+        return pending;
+      },
+      then() {
+        return pending;
+      },
+    };
+
+    try {
+      globals.api.webhooks.post = () => pending;
+      globals.Swal.fire = () => Promise.resolve({ value: false });
+      window.eval(
+        'webhooks = [{ id: 108, name: "synthetic-return-webhook" }]',
+      );
+      const saveReturn = window.eval("saveWebhook(-1)");
+      const deleteReturn = window.eval("deleteWebhook(108)");
+      await Promise.resolve();
+      return {
+        deleteIsUndefined: deleteReturn === undefined,
+        saveIsUndefined: saveReturn === undefined,
+      };
+    } finally {
+      globals.api.webhooks.post = originalPost;
+      globals.Swal.fire = originalFire;
+    }
+  });
+
+  expect(returns).toEqual({
+    deleteIsUndefined: true,
+    saveIsUndefined: true,
+  });
 });
 
-test("webhook reads return native Promises without jQuery", async ({ page }) => {
+test("webhook wrappers return native Promises without jQuery", async ({ page }) => {
   await login(page);
   await page.route("**/api/webhooks/**", (route) =>
     route.fulfill({
-      body: JSON.stringify({ name: "native-webhook-read" }),
+      body: JSON.stringify({ name: "native-webhook-request" }),
       contentType: "application/json",
       status: 200,
     }),
@@ -142,8 +288,19 @@ test("webhook reads return native Promises without jQuery", async ({ page }) => 
       fail?: unknown;
     };
     type API = {
-      webhooks: { get: () => NativeRequest };
-      webhookId: { get: (id: number) => NativeRequest };
+      webhooks: {
+        get: () => NativeRequest;
+        post: (webhook: {
+          is_active: boolean;
+          name: string;
+          secret: string;
+          url: string;
+        }) => NativeRequest;
+      };
+      webhookId: {
+        delete: (id: number) => NativeRequest;
+        get: (id: number) => NativeRequest;
+      };
     };
     const globals = window as unknown as {
       $?: unknown;
@@ -159,6 +316,16 @@ test("webhook reads return native Promises without jQuery", async ({ page }) => 
       const requests: Array<[string, NativeRequest]> = [
         ["webhooks.get", globals.api.webhooks.get()],
         ["webhookId.get", globals.api.webhookId.get(108)],
+        [
+          "webhooks.post",
+          globals.api.webhooks.post({
+            is_active: false,
+            name: "",
+            secret: "synthetic-native-secret",
+            url: "https://webhook.invalid/native",
+          }),
+        ],
+        ["webhookId.delete", globals.api.webhookId.delete(108)],
       ];
       return Promise.all(
         requests.map(async ([name, request]) => ({
@@ -177,18 +344,32 @@ test("webhook reads return native Promises without jQuery", async ({ page }) => 
 
   expect(results).toEqual([
     {
-      data: { name: "native-webhook-read" },
+      data: { name: "native-webhook-request" },
       hasAlways: false,
       hasDone: false,
       hasFail: false,
       name: "webhooks.get",
     },
     {
-      data: { name: "native-webhook-read" },
+      data: { name: "native-webhook-request" },
       hasAlways: false,
       hasDone: false,
       hasFail: false,
       name: "webhookId.get",
+    },
+    {
+      data: { name: "native-webhook-request" },
+      hasAlways: false,
+      hasDone: false,
+      hasFail: false,
+      name: "webhooks.post",
+    },
+    {
+      data: { name: "native-webhook-request" },
+      hasAlways: false,
+      hasDone: false,
+      hasFail: false,
+      name: "webhookId.delete",
     },
   ]);
 });
@@ -230,6 +411,7 @@ async function runInvocations(page: Page): Promise<unknown[]> {
             );
         });
       }
+
       return Promise.resolve(request).then(
         (data) => ({ data, name, settlement: "success" }),
         (error: { data?: unknown; status?: number }) => ({
@@ -247,4 +429,68 @@ async function runInvocations(page: Page): Promise<unknown[]> {
     }
     return results;
   });
+}
+
+async function runWriteInvocations(
+  page: Page,
+  webhook: {
+    is_active: boolean;
+    name: string;
+    secret: string;
+    url: string;
+  },
+): Promise<unknown[]> {
+  return page.evaluate(async (payload) => {
+    type Deferred = {
+      done: (callback: (data: unknown) => void) => Deferred;
+      fail: (
+        callback: (error: {
+          data?: unknown;
+          responseJSON?: unknown;
+          status?: number;
+        }) => void,
+      ) => Deferred;
+    };
+    type Request = Deferred | Promise<unknown>;
+    type API = {
+      webhooks: { post: (webhook: typeof payload) => Request };
+      webhookId: { delete: (id: number) => Request };
+    };
+    const api = (window as unknown as { api: API }).api;
+    const requests: Array<[string, Request]> = [
+      ["webhooks.post", api.webhooks.post(payload)],
+      ["webhookId.delete", api.webhookId.delete(108)],
+    ];
+    const settle = (name: string, request: Request) => {
+      if ("done" in request) {
+        return new Promise((resolve) => {
+          request
+            .done((data) => resolve({ data, name, settlement: "success" }))
+            .fail((error) =>
+              resolve({
+                data: error.responseJSON,
+                name,
+                settlement: "failure",
+                status: error.status,
+              }),
+            );
+        });
+      }
+      return Promise.resolve(request).then(
+        (data) => ({ data, name, settlement: "success" }),
+        (error: { data?: unknown; status?: number }) => ({
+          data: error.data,
+          name,
+          settlement: "failure",
+          status: error.status,
+        }),
+      );
+    };
+
+    const results = [];
+    for (const [name, request] of requests) {
+      results.push(await settle(name, request));
+    }
+    return results;
+  }, webhook);
 }

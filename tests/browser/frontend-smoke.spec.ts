@@ -2120,7 +2120,8 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     // the button through the event, which under delegation is the matched
     // element rather than the table. A migration that passes the container
     // instead would silently disable nothing.
-    const webhookRequests: string[] = [];
+    const webhookPostRequests: string[] = [];
+    const webhookDeleteRequests: string[] = [];
     const webhookReadRequests: string[] = [];
     const captureWebhook = (request: Request) => {
       const url = new URL(request.url());
@@ -2135,7 +2136,13 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
         request.method() === "POST" &&
         url.pathname === "/api/webhooks/"
       ) {
-        webhookRequests.push(request.postData() ?? "");
+        webhookPostRequests.push(request.postData() ?? "");
+      }
+      if (
+        request.method() === "DELETE" &&
+        /^\/api\/webhooks\/\d+$/.test(url.pathname)
+      ) {
+        webhookDeleteRequests.push(request.postData() ?? "");
       }
     };
     page.on("request", captureWebhook);
@@ -2252,6 +2259,8 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
 
     const webhookName = `browser_webhook_${Date.now()}`;
     await openApplicationModal(page, "New Webhook");
+    await closeApplicationModal(page);
+    await openApplicationModal(page, "New Webhook");
     await page.locator("#name").fill(webhookName);
     // Unroutable on purpose: the ping below must fail fast and never leave the
     // machine.
@@ -2261,21 +2270,114 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     // what a user actually clicks.
     await page.locator('label[for="is_active"]').click();
     expect(await page.locator("#is_active").isChecked()).toBe(true);
+    const webhookCreateConsoleBefore = consoleErrors.length;
+    const webhookCreateResponsesBefore = failedLocalResponses.length;
+    let releaseWebhookCreateFailure: () => void = () => {};
+    const webhookCreateFailureGate = new Promise<void>((resolve) => {
+      releaseWebhookCreateFailure = resolve;
+    });
+    await page.route("**/api/webhooks/", async (route) => {
+      if (route.request().method() === "POST") {
+        await webhookCreateFailureGate;
+        await route.fulfill({
+          body: JSON.stringify({ message: "synthetic webhook create failure" }),
+          contentType: "application/json",
+          status: 400,
+        });
+        return;
+      }
+      await route.continue();
+    });
+    await page.evaluate(() => {
+      const submit = document.querySelector<HTMLButtonElement>(
+        "#modal #modalSubmit",
+      );
+      submit?.click();
+      submit?.click();
+    });
+    await expect.poll(() => webhookPostRequests.length).toBe(1);
+    await expect(page.locator("#modalSubmit")).toBeDisabled();
+    releaseWebhookCreateFailure();
+    await expect(page.locator("#modal")).toBeVisible();
+    await expect(page.locator('[id="modal.flashes"]')).toContainText(
+      "synthetic webhook create failure",
+    );
+    await expect(page.locator("#name")).toHaveValue(webhookName);
+    await expect(page.locator("#url")).toHaveValue("http://127.0.0.1:1/hook");
+    await expect(page.locator("#secret")).toHaveValue("synthetic-secret");
+    expect(await page.locator("#is_active").isChecked()).toBe(true);
+    await expect(page.locator("#modalSubmit")).toBeEnabled();
+    expect(webhookPostRequests).toHaveLength(1);
+    expect(webhookReadRequests).toHaveLength(4);
+    await page.unroute("**/api/webhooks/");
+
+    let releaseSupersededWebhookCreate: () => void = () => {};
+    const supersededWebhookCreateGate = new Promise<void>((resolve) => {
+      releaseSupersededWebhookCreate = resolve;
+    });
+    await page.route("**/api/webhooks/", async (route) => {
+      if (route.request().method() === "POST") {
+        await supersededWebhookCreateGate;
+        await route.fulfill({
+          body: JSON.stringify({ message: "superseded webhook create failure" }),
+          contentType: "application/json",
+          status: 500,
+        });
+        return;
+      }
+      await route.continue();
+    });
+    await page.locator("#modal #modalSubmit").click();
+    await expect.poll(() => webhookPostRequests.length).toBe(2);
+    await closeApplicationModal(page);
+    await openApplicationModal(page, "New Webhook");
+    await expect(page.locator("#modalSubmit")).toBeDisabled();
+    await page.evaluate(() => {
+      document.querySelector<HTMLButtonElement>("#modalSubmit")?.click();
+    });
+    expect(webhookPostRequests).toHaveLength(2);
+    releaseSupersededWebhookCreate();
+    await expect(page.locator("#modalSubmit")).toBeEnabled();
+    await expect(page.locator('[id="modal.flashes"]')).not.toContainText(
+      "superseded webhook create failure",
+    );
+    await page.unroute("**/api/webhooks/");
+    await page.locator("#name").fill(webhookName);
+    await page.locator("#url").fill("http://127.0.0.1:1/hook");
+    await page.locator("#secret").fill("synthetic-secret");
+    await page.locator('label[for="is_active"]').click();
     await page.locator("#modal #modalSubmit").click();
     await expect(page.locator("#modal")).not.toBeVisible();
 
-    await expect.poll(() => webhookRequests.length).toBe(1);
+    await expect.poll(() => webhookPostRequests.length).toBe(3);
     await expect.poll(() => webhookReadRequests.length).toBe(5);
-    const webhook = JSON.parse(webhookRequests[0]) as {
+    const webhook = JSON.parse(webhookPostRequests[0]) as {
       name: string;
       url: string;
       secret: string;
       is_active: boolean;
     };
+    expect(webhookPostRequests[1]).toBe(webhookPostRequests[0]);
+    expect(webhookPostRequests[2]).toBe(webhookPostRequests[0]);
     expect(webhook.name).toBe(webhookName);
     expect(webhook.url).toBe("http://127.0.0.1:1/hook");
     expect(webhook.secret).toBe("synthetic-secret");
     expect(webhook.is_active).toBe(true);
+    expect(
+      consoleErrors
+        .slice(webhookCreateConsoleBefore)
+        .filter(
+          (entry) =>
+            !entry.includes("status of 400 (Bad Request)") &&
+            !entry.includes("status of 500 (Internal Server Error)"),
+        ),
+    ).toEqual([]);
+    consoleErrors.length = webhookCreateConsoleBefore;
+    expect(failedLocalResponses.slice(webhookCreateResponsesBefore)).toEqual([
+      "400 /api/webhooks/",
+      "500 /api/webhooks/",
+    ]);
+    failedLocalResponses.length = webhookCreateResponsesBefore;
 
     await expect(page.locator("#webhookTable")).toContainText(webhookName);
     const row = page
@@ -2491,6 +2593,80 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       expect.stringMatching(/^400 \/api\/webhooks\/\d+$/),
     ]);
     failedLocalResponses.length = webhookUpdateResponsesBefore;
+
+    const updatedRow = page
+      .locator("#webhookTable tbody tr")
+      .filter({ hasText: updatedWebhookName });
+    const webhookDeletesBeforeCancel = webhookDeleteRequests.length;
+    await updatedRow.locator("button.delete_button").click();
+    await expect(page.locator(".swal2-popup")).toContainText("Are you sure?");
+    await page.locator(".swal2-cancel").click();
+    await expect(page.locator(".swal2-popup")).not.toBeVisible();
+    expect(webhookDeleteRequests).toHaveLength(webhookDeletesBeforeCancel);
+    await expect(updatedRow).toBeVisible();
+
+    const webhookDeleteConsoleBefore = consoleErrors.length;
+    const webhookDeleteResponsesBefore = failedLocalResponses.length;
+    let releaseWebhookDeleteFailure: () => void = () => {};
+    const webhookDeleteFailureGate = new Promise<void>((resolve) => {
+      releaseWebhookDeleteFailure = resolve;
+    });
+    await page.route("**/api/webhooks/*", async (route) => {
+      if (route.request().method() === "DELETE") {
+        await webhookDeleteFailureGate;
+        await route.fulfill({
+          body: JSON.stringify({ message: "synthetic webhook delete failure" }),
+          contentType: "application/json",
+          status: 500,
+        });
+        return;
+      }
+      await route.continue();
+    });
+    await updatedRow.locator("button.delete_button").click();
+    await page.evaluate(() => {
+      const confirm = document.querySelector<HTMLButtonElement>(".swal2-confirm");
+      confirm?.click();
+      confirm?.click();
+    });
+    await expect.poll(() => webhookDeleteRequests.length).toBe(1);
+    releaseWebhookDeleteFailure();
+    await expect(page.locator(".swal2-validation-message")).toContainText(
+      "synthetic webhook delete failure",
+    );
+    await expect(page.locator(".swal2-popup")).toBeVisible();
+    expect(webhookDeleteRequests).toEqual(["{}"]);
+    await expect(updatedRow).toBeVisible();
+    await page.locator(".swal2-cancel").click();
+    await expect(page.locator(".swal2-popup")).not.toBeVisible();
+    await page.unroute("**/api/webhooks/*");
+    expect(
+      consoleErrors
+        .slice(webhookDeleteConsoleBefore)
+        .filter((entry) => !entry.includes("status of 500 (Internal Server Error)")),
+    ).toEqual([]);
+    consoleErrors.length = webhookDeleteConsoleBefore;
+    expect(failedLocalResponses.slice(webhookDeleteResponsesBefore)).toEqual([
+      expect.stringMatching(/^500 \/api\/webhooks\/\d+$/),
+    ]);
+    failedLocalResponses.length = webhookDeleteResponsesBefore;
+
+    await updatedRow.locator("button.delete_button").click();
+    await page.locator(".swal2-confirm").click();
+    await expect(page.locator(".swal2-popup")).toContainText("Webhook Deleted!");
+    expect(webhookDeleteRequests).toEqual(["{}", "{}"]);
+    await expect(updatedRow).toBeVisible();
+    await Promise.all([
+      page.waitForResponse(
+        (response) =>
+          response.request().method() === "GET" &&
+          new URL(response.url()).pathname === "/api/webhooks/",
+      ),
+      page.locator(".swal2-confirm").click(),
+    ]);
+    await expect(page.locator("#webhookTable")).not.toContainText(
+      updatedWebhookName,
+    );
     await page.unroute("**/api/webhooks/*/validate");
     page.off("request", captureWebhook);
   });
