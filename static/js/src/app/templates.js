@@ -25,6 +25,13 @@ function bindModalSubmit(handler) {
 
 var templates = []
 var htmlEditor
+var latestTemplateRequest = 0
+var saveRequest = null
+var activeTemplateId = null
+var refreshTemplateModal = null
+var latestImportRequest = 0
+var importEmailRequest = null
+var pendingAttachmentReads = 0
 // attachmentsTable holds the DataTables instance backing the modal's attachment
 // list. It is recreated every time the modal opens, which is what the destroy
 // option did before.
@@ -43,8 +50,61 @@ var icons = {
     "application/x-msdownload": "fa-file-o"
 }
 
+function setTemplateFormDisabled(disabled) {
+    ["name", "subject", "envelope-sender", "text_editor", "use_tracker_checkbox",
+        "attachmentUpload"]
+        .forEach(function (id) {
+            document.getElementById(id).disabled = disabled
+        })
+    document.getElementById("modalSubmit").disabled = disabled || pendingAttachmentReads > 0
+    document.querySelector('#modal button[onclick^="bsModalShow(\'#importEmailModal\'"]').disabled = disabled
+    var codeEditor = document.querySelector("#modal .gophish-code-editor")
+    if (codeEditor) {
+        codeEditor.inert = disabled
+    }
+}
+
+function enableTemplateFormAfterPendingSave(templateRequest) {
+    if (!saveRequest) {
+        setTemplateFormDisabled(false)
+        return
+    }
+    var pendingSave = saveRequest
+    setTemplateFormDisabled(true)
+    var enableCurrentForm = function () {
+        if (templateRequest == latestTemplateRequest) {
+            setTemplateFormDisabled(false)
+        }
+    }
+    pendingSave.then(enableCurrentForm, enableCurrentForm)
+}
+
+function setImportEmailFormDisabled(disabled) {
+    document.getElementById("email_content").disabled = disabled
+    document.getElementById("convert_links_checkbox").disabled = disabled
+    document.querySelector("#importEmailModal #modalSubmit").disabled = disabled
+}
+
+function enableImportEmailAfterPendingRequest(importRequest) {
+    if (!importEmailRequest) {
+        setImportEmailFormDisabled(false)
+        return
+    }
+    var pendingImport = importEmailRequest
+    setImportEmailFormDisabled(true)
+    var enableCurrentForm = function () {
+        if (importRequest == latestImportRequest) {
+            setImportEmailFormDisabled(false)
+        }
+    }
+    pendingImport.then(enableCurrentForm, enableCurrentForm)
+}
+
 // Save attempts to POST to /templates/
-function save(idx) {
+function save(templateId) {
+    if (saveRequest || pendingAttachmentReads > 0) {
+        return
+    }
     var template = {
         attachments: []
     }
@@ -72,32 +132,61 @@ function save(idx) {
         })
     })
 
-    if (idx != -1) {
-        template.id = templates[idx].id
-        api.templateId.put(template)
-            .done(function (data) {
+    var saveContext = latestTemplateRequest
+    setTemplateFormDisabled(true)
+    if (templateId != -1) {
+        template.id = templateId
+        saveRequest = api.templateId.put(template)
+        saveRequest
+            .then(function () {
+                saveRequest = null
                 successFlash("Template edited successfully!")
                 load()
-                dismiss()
-            })
-            .fail(function (data) {
-                modalError(data.responseJSON.message)
+                if (saveContext == latestTemplateRequest) {
+                    dismiss()
+                } else if (activeTemplateId == template.id && refreshTemplateModal) {
+                    var savedTemplate = templates.find(function (candidate) {
+                        return candidate.id == template.id
+                    })
+                    if (savedTemplate) {
+                        Object.assign(savedTemplate, template)
+                    }
+                    attachmentsTable.clear().draw()
+                    refreshTemplateModal()
+                }
+            }, function (error) {
+                saveRequest = null
+                if (saveContext == latestTemplateRequest) {
+                    setTemplateFormDisabled(false)
+                    modalError(requestErrorMessage(error))
+                }
             })
     } else {
         // Submit the template
-        api.templates.post(template)
-            .done(function (data) {
+        saveRequest = api.templates.post(template)
+        saveRequest
+            .then(function () {
+                saveRequest = null
                 successFlash("Template added successfully!")
                 load()
-                dismiss()
-            })
-            .fail(function (data) {
-                modalError(data.responseJSON.message)
+                if (saveContext == latestTemplateRequest) {
+                    dismiss()
+                }
+            }, function (error) {
+                saveRequest = null
+                if (saveContext == latestTemplateRequest) {
+                    setTemplateFormDisabled(false)
+                    modalError(requestErrorMessage(error))
+                }
             })
     }
 }
 
 function dismiss() {
+    latestTemplateRequest++
+    activeTemplateId = null
+    refreshTemplateModal = null
+    pendingAttachmentReads = 0
     clearModalFlashes()
     if (attachmentsTable) {
         attachmentsTable.clear().draw()
@@ -114,25 +203,29 @@ function dismiss() {
 }
 
 var deleteTemplate = function (idx) {
+    var templateId = templates[idx].id
+    var templateName = templates[idx].name
+    var deleteRequest = null
     Swal.fire({
         title: "Are you sure?",
         text: "This will delete the template. This can't be undone!",
         type: "warning",
         animation: false,
         showCancelButton: true,
-        confirmButtonText: "Delete " + escapeHtml(templates[idx].name),
+        confirmButtonText: "Delete " + escapeHtml(templateName),
         confirmButtonColor: "#428bca",
         reverseButtons: true,
         allowOutsideClick: false,
         preConfirm: function () {
-            return new Promise(function (resolve, reject) {
-                api.templateId.delete(templates[idx].id)
-                    .done(function (msg) {
-                        resolve()
-                    })
-                    .fail(function (data) {
-                        reject(data.responseJSON.message)
-                    })
+            if (deleteRequest) {
+                return deleteRequest
+            }
+            deleteRequest = api.templateId.delete(templateId)
+            return deleteRequest.then(function (response) {
+                return response
+            }, function (error) {
+                deleteRequest = null
+                Swal.showValidationMessage(requestErrorMessage(error))
             })
         }
     }).then(function (result) {
@@ -194,13 +287,30 @@ function attach(files) {
     if (!attachmentsTable) {
         createAttachmentsTable()
     }
+    var attachmentContext = latestTemplateRequest
+    var targetTable = attachmentsTable
     Array.prototype.forEach.call(files, function (file) {
         var reader = new FileReader();
+        pendingAttachmentReads++
+        document.getElementById("modalSubmit").disabled = true
+        var finishRead = function () {
+            if (attachmentContext != latestTemplateRequest || targetTable != attachmentsTable) {
+                return false
+            }
+            pendingAttachmentReads--
+            if (pendingAttachmentReads == 0 && !saveRequest) {
+                document.getElementById("modalSubmit").disabled = false
+            }
+            return true
+        }
         /* Make this a datatable */
         reader.onload = function (e) {
+            if (!finishRead()) {
+                return
+            }
             var icon = icons[file.type] || "fa-file-o"
             // Add the record to the modal
-            attachmentsTable.row.add([
+            targetTable.row.add([
                 '<i class="fa ' + icon + '"></i>',
                 escapeHtml(file.name),
                 '<span class="remove-row"><i class="fa fa-trash-o"></i></span>',
@@ -209,6 +319,9 @@ function attach(files) {
             ]).draw()
         }
         reader.onerror = function (e) {
+            if (!finishRead()) {
+                return
+            }
             console.log(e)
         }
         reader.readAsDataURL(file)
@@ -216,8 +329,19 @@ function attach(files) {
 }
 
 function edit(idx) {
+    var templateRequest = ++latestTemplateRequest
+    var templateId = idx == -1 ? null : templates[idx].id
+    activeTemplateId = templateId
+    refreshTemplateModal = activeTemplateId == null ? null : function () {
+        var refreshedIndex = templates.findIndex(function (template) {
+            return template.id == activeTemplateId
+        })
+        if (refreshedIndex != -1) {
+            edit(refreshedIndex)
+        }
+    }
     bindModalSubmit(function () {
-        save(idx)
+        save(templateId == null ? -1 : templateId)
     })
     bindAttachmentUploadReset()
     htmlEditor = GophishHTMLEditor.create("html_editor")
@@ -258,9 +382,13 @@ function edit(idx) {
         htmlEditor.setData("")
     }
     htmlEditor.showSource()
+    enableTemplateFormAfterPendingSave(templateRequest)
 }
 
 function copy(idx) {
+    var templateRequest = ++latestTemplateRequest
+    activeTemplateId = null
+    refreshTemplateModal = null
     bindModalSubmit(function () {
         save(-1)
     })
@@ -294,19 +422,30 @@ function copy(idx) {
     } else {
         document.getElementById("use_tracker_checkbox").checked = false
     }
+    enableTemplateFormAfterPendingSave(templateRequest)
 }
 
 function importEmail() {
-    raw = document.getElementById("email_content").value
-    convert_links = document.getElementById("convert_links_checkbox").checked
+    if (importEmailRequest) {
+        return
+    }
+    var raw = document.getElementById("email_content").value
+    var convert_links = document.getElementById("convert_links_checkbox").checked
     if (!raw) {
         modalError("No Content Specified!")
     } else {
-        api.import_email({
-                content: raw,
-                convert_links: convert_links
-            })
-            .done(function (data) {
+        var importContext = latestImportRequest
+        setImportEmailFormDisabled(true)
+        importEmailRequest = api.import_email({
+            content: raw,
+            convert_links: convert_links
+        })
+        importEmailRequest
+            .then(function (data) {
+                importEmailRequest = null
+                if (importContext != latestImportRequest) {
+                    return
+                }
                 document.getElementById("text_editor").value = data.text
                 htmlEditor.setData(data.html)
                 document.getElementById("subject").value = data.subject
@@ -316,9 +455,13 @@ function importEmail() {
                     document.querySelector('.nav-tabs a[href="#html"]').click()
                 }
                 bsModalHide("#importEmailModal")
-            })
-            .fail(function (data) {
-                modalError(data.responseJSON.message)
+            }, function (error) {
+                importEmailRequest = null
+                if (importContext != latestImportRequest) {
+                    return
+                }
+                setImportEmailFormDisabled(false)
+                modalError(requestErrorMessage(error))
             })
     }
 }
@@ -392,13 +535,24 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById('modal').addEventListener('hidden.bs.modal', function (event) {
         dismiss()
     });
+    document.getElementById('importEmailModal').addEventListener('show.bs.modal', function () {
+        var importRequest = ++latestImportRequest
+        enableImportEmailAfterPendingRequest(importRequest)
+    })
     document.getElementById('importEmailModal').addEventListener('hidden.bs.modal', function (event) {
+        latestImportRequest++
         document.getElementById("email_content").value = ""
+        if (!importEmailRequest) {
+            setImportEmailFormDisabled(false)
+        }
     })
     // Handle Deletion. Bound once here rather than rebound every time the modal
     // opens, and the row is resolved from the clicked icon with a native DOM
     // lookup because the table's row selector no longer goes through jQuery.
     document.getElementById("attachmentsTable").addEventListener("click", function (event) {
+        if (saveRequest) {
+            return
+        }
         var icon = event.target.closest("span > i.fa-trash-o")
         if (!icon || !attachmentsTable) {
             return
