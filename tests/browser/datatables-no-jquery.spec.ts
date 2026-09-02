@@ -5,10 +5,9 @@ import { expect, test, type Page } from "@playwright/test";
 // This file proves one property in isolation: the table library the application
 // ships works with no jQuery on the page at all.
 //
-// The application still loads jQuery for its own code, so that property cannot
-// be observed there. Here the exact files that go into the shipped bundle are
-// injected into a blank page, jQuery is deliberately absent, and the table is
-// driven only through the API the application now uses.
+// The exact files that go into the shipped bundle are injected into a blank
+// page, jQuery is deliberately absent, and the table is driven only through the
+// API the application uses.
 
 const moduleRoot = path.join(__dirname, "..", "..", "node_modules");
 const vendorScripts = [

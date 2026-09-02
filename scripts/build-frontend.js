@@ -68,7 +68,6 @@ function packageDirectory(packageName) {
 }
 
 const vendorScriptPaths = [
-  managedFile("jquery", "dist", "jquery.js"),
   managedFile("bootstrap", "dist", "js", "bootstrap.bundle.min.js"),
   managedFile("moment", "min", "moment.min.js"),
   managedFile("papaparse", "papaparse.min.js"),
@@ -114,10 +113,6 @@ const stylesheetSources = [
 ];
 
 const managedVendorLicenses = [
-  {
-    component: "jQuery 3.7.1",
-    sourcePath: managedFile("jquery", "LICENSE.txt"),
-  },
   {
     component: "Chart.js 4.5.1",
     sourcePath: path.join(chartPackageDirectory, "LICENSE.md"),

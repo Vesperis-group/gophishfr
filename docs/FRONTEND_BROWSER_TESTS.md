@@ -40,8 +40,8 @@ fails. Browser system packages may need to be installed once on Linux with
 
 The suite verifies:
 
-- login rendering, CSS application, vendor globals, synthetic authentication,
-  and the dashboard redirect;
+- login rendering, CSS application, jQuery-global absence, vendor globals,
+  synthetic authentication, and the dashboard redirect;
 - dashboard chart rendering, values, labels, and campaign navigation;
 - campaign-result doughnut and timeline rendering, tooltip data, horizontal
   zoom, and zoom reset;
@@ -51,8 +51,8 @@ The suite verifies:
 - group DataTables rendering and client-side target entry;
 - template DataTables rendering, CKEditor initialization, and Bootstrap tabs;
 - User Management rendering and the bundled zxcvbn password-strength behavior;
-- legacy jqXHR and native fetch transport contracts, including handled HTTP,
-  parsing, and network failures without jQuery on the native path;
+- native fetch transport contracts, including handled HTTP, parsing, and
+  network failures with no jQuery runtime;
 - request and settlement parity for the 11 audited asynchronous wrappers, plus
   jQuery-free execution for the 10 migrated wrappers;
 - success, failure, and cleanup behavior for campaign results and reporting,

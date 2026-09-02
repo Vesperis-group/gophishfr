@@ -117,6 +117,15 @@ function requiredEnvironmentVariable(name: string): string {
   return value;
 }
 
+async function expectJQueryGlobalsAbsent(page: Page): Promise<void> {
+  expect(
+    await page.evaluate(() => ({
+      dollar: typeof (window as Window & { $?: unknown }).$,
+      jquery: typeof (window as Window & { jQuery?: unknown }).jQuery,
+    })),
+  ).toEqual({ dollar: "undefined", jquery: "undefined" });
+}
+
 async function openApplicationModal(page: Page, triggerName: string): Promise<void> {
   await page.waitForFunction(() => typeof window.bootstrap !== "undefined");
   await page.getByRole("button", { name: triggerName }).click();
@@ -402,20 +411,10 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(loginPresentation.buttonHeight).toBeGreaterThanOrEqual(40);
     expect(loginPresentation.inputBorderStyle).toBe("solid");
     expect(loginPresentation.inputHeight).toBeGreaterThanOrEqual(40);
+    await expectJQueryGlobalsAbsent(page);
     expect(
       await page.evaluate(
-        () =>
-          typeof window.jQuery === "function" &&
-          typeof (window as Window & { DataTable?: unknown }).DataTable === "function",
-      ),
-    ).toBe(true);
-    // Bootstrap jQuery bridge must be absent (data-bs-no-jquery disables it)
-    expect(
-      await page.evaluate(
-        () =>
-          typeof window.jQuery.fn.modal !== "function" &&
-          typeof window.jQuery.fn.tooltip !== "function" &&
-          typeof window.jQuery.fn.collapse !== "function",
+        () => typeof (window as Window & { DataTable?: unknown }).DataTable === "function",
       ),
     ).toBe(true);
     // Native Bootstrap 5 API must be available
@@ -453,6 +452,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     ]);
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
     await expect(page.locator("#dashboard")).toBeVisible();
+    await expectJQueryGlobalsAbsent(page);
     await expect(page.locator("#campaignTable")).toContainText(
       "Browser Fixture Campaign",
     );
@@ -1337,6 +1337,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   await test.step("campaign controls initialize Bootstrap and native widgets", async () => {
     await page.getByRole("link", { name: "Campaigns", exact: true }).click();
     await expect(page).toHaveURL(/\/campaigns$/);
+    await expectJQueryGlobalsAbsent(page);
 
     await expect(page.getByRole("heading", { name: "Campaigns" })).toBeVisible();
     await expect(page.locator("#campaignTable")).toContainText(
@@ -1454,8 +1455,8 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(
       await page.evaluate(
         () =>
-          window.jQuery.fn.select2 === undefined &&
-          window.jQuery.fn.datetimepicker === undefined &&
+          typeof window.$ === "undefined" &&
+          typeof window.jQuery === "undefined" &&
           typeof (window as unknown as { TomSelect?: unknown }).TomSelect === "function" &&
           document.querySelector("#launch_date")?.getAttribute("type") === "datetime-local",
       ),
@@ -1712,6 +1713,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   await test.step("group modal and DataTables interaction remain functional", async () => {
     await page.getByRole("link", { name: "Users & Groups" }).click();
     await expect(page).toHaveURL(/\/groups$/);
+    await expectJQueryGlobalsAbsent(page);
     await expect(page.getByRole("heading", { name: "Users & Groups" })).toBeVisible();
     await expect(page.locator("#groupTable")).toBeVisible();
     await expect(page.locator("#groupTable")).toContainText("Browser Fixture Group");
@@ -1869,6 +1871,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
 
     await page.getByRole("link", { name: "Email Templates" }).click();
     await expect(page).toHaveURL(/\/templates$/);
+    await expectJQueryGlobalsAbsent(page);
     await expect(page.locator("#templateTable")).toContainText(
       "Browser Attachment Fixture",
     );
@@ -1941,6 +1944,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   await test.step("landing page table sorts, searches and pages through its data", async () => {
     await page.getByRole("link", { name: "Landing Pages" }).click();
     await expect(page).toHaveURL(/\/landing_pages$/);
+    await expectJQueryGlobalsAbsent(page);
     await expect(page.locator("#pagesTable")).toBeVisible();
 
     // The fixtures seed 12 pages whose names sort in the exact reverse of their
@@ -2024,6 +2028,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
 
     await page.getByRole("link", { name: "User Management" }).click();
     await expect(page).toHaveURL(/\/users$/);
+    await expectJQueryGlobalsAbsent(page);
     await expect(page.locator("#userTable")).toContainText(username);
 
     // Open, close and reopen before submitting once.
@@ -2185,6 +2190,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     );
     await page.getByRole("link", { name: "Webhooks" }).click();
     await expect(page).toHaveURL(/\/webhooks$/);
+    await expectJQueryGlobalsAbsent(page);
     await expect(page.locator('[id="flashes"]').first()).toContainText(
       "Error fetching webhooks",
     );
@@ -2708,6 +2714,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       ),
       page.getByRole("link", { name: "Account Settings" }).click(),
     ]);
+    await expectJQueryGlobalsAbsent(page);
     await expect(page).toHaveURL(/\/settings$/);
 
     const resetConsoleErrorsBefore = consoleErrors.length;
@@ -2903,6 +2910,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
 
     await page.getByRole("link", { name: "Sending Profiles" }).click();
     await expect(page).toHaveURL(/\/sending_profiles$/);
+    await expectJQueryGlobalsAbsent(page);
     await expect(page.locator("#profileTable")).toContainText(
       "Browser Fixture Sending Profile",
     );
@@ -4340,13 +4348,8 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await page.evaluate(() => Swal.close());
   });
 
-  await test.step("jQuery 3.7.1 runtime identity confirmed", async () => {
-    const jQueryInfo = await page.evaluate(() => ({
-      version: window.jQuery.fn.jquery,
-      singleInstance: window.jQuery === window.$,
-    }));
-    expect(jQueryInfo.version).toBe("3.7.1");
-    expect(jQueryInfo.singleInstance).toBe(true);
+  await test.step("jQuery runtime globals remain absent", async () => {
+    await expectJQueryGlobalsAbsent(page);
   });
 
   expect(pageErrors).toEqual([]);

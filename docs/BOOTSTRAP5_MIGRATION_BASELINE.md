@@ -37,17 +37,16 @@ The Bootstrap 5 migration described as future work below is complete:
   `offset-*` grid classes, `float-end`/`float-start`, `btn-secondary`,
   `form-label`/`form-text`/`mb-3`, `table-sm`, and `badge`/`bg-*` (or
   `text-bg-*` for colored status pills) in place of `label`/`label-*`.
-- Bootstrap does NOT use its optional jQuery plugin bridge. `data-bs-no-jquery`
-  is set on all `<body>` elements, preventing Bootstrap from registering
-  `$.fn.modal`, `$.fn.tooltip`, etc. All Bootstrap lifecycle event listeners
+- Bootstrap does not use its optional jQuery plugin bridge. The jQuery runtime
+  is no longer distributed, and all Bootstrap lifecycle event listeners
   (`hidden.bs.modal`, `shown.bs.modal`, `hide.bs.modal`) use native
   `addEventListener` (centralized modal-stack logic in `gophish.js`, per-page
   dismiss handlers in each page script).
 - Google Fonts external stylesheet links were removed. Typography uses a
   system-local font stack — no CDN or external runtime asset is loaded.
-- `tests/browser/frontend-smoke.spec.ts` asserts the jQuery bridge is absent
-  (`$.fn.modal` is not a function), native Bootstrap API works, and blocks
-  any unexpected external request (no fonts.googleapis.com special-case).
+- `tests/browser/frontend-smoke.spec.ts` asserts both jQuery globals are absent,
+  the native Bootstrap API works, and blocks any unexpected external request
+  (no fonts.googleapis.com special-case).
 
 ## Current stack
 
@@ -56,21 +55,17 @@ The generated stylesheet (`static/css/dist/gophish.css`) is built in this order:
 1. Bootstrap 5.3.8 CSS (from `node_modules/bootstrap`);
 2. first-party GophishFR styles (`main.css`, `dashboard.css`, `gophishfr-theme.css`);
 3. DataTables Bootstrap 5 integration CSS;
-4. Font Awesome, checkbox.css, SweetAlert2, Select2.
+4. Font Awesome, checkbox.css, SweetAlert2, and Tom Select.
 
-The browser vendor bundle (`static/js/dist/vendor.min.js`) includes jQuery
-3.7.1, Bootstrap 5.3.8 bundle (with Popper), and legacy jQuery plugins
-(generated in that order by `scripts/build-frontend.js`).
-Bootstrap's optional jQuery bridge is disabled via `data-bs-no-jquery` on
-`<body>`. All Bootstrap lifecycle event listeners use native `addEventListener`.
-No external CDN, fonts, or runtime assets are loaded. Typography uses a
-system-local font stack.
+The browser vendor bundle (`static/js/dist/vendor.min.js`) includes Bootstrap
+5.3.8 bundle (with Popper) and the other inventoried native browser libraries.
+jQuery and its former plugins are not distributed. All Bootstrap lifecycle
+event listeners use native `addEventListener`. No external CDN, fonts, or
+runtime assets are loaded. Typography uses a system-local font stack.
 
-**Remaining jQuery debt:** jQuery 3.7.1 remains required by DataTables, Select2,
-and first-party DOM manipulation (`$(...)`). Blueimp File Upload and its sole
-jQuery UI Widget Factory dependency were removed after the Bootstrap migration,
-and the jQuery DateTimePicker was replaced by native `datetime-local` controls;
-jQuery UI is no longer distributed.
+**Remaining jQuery debt:** None. DataTables 3 and Tom Select are native, all
+first-party code uses browser APIs, and the direct jQuery package and runtime
+have been removed.
 
 **Flat UI:** Deleted from the repository. Historical attribution in NOTICE.
 
