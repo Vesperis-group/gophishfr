@@ -322,7 +322,7 @@ var api = {
         },
         // post() - Posts a group to POST /groups
         post: function (group) {
-            return query("/groups/", "POST", group, false)
+            return requestJSON("/groups/", "POST", group)
         },
         // summary() - Queries the API for GET /groups/summary
         summary: function () {
@@ -333,15 +333,15 @@ var api = {
     groupId: {
         // get() - Queries the API for GET /groups/:id
         get: function (id) {
-            return query("/groups/" + id, "GET", {}, false)
+            return requestJSON("/groups/" + id, "GET", {})
         },
         // put() - Puts a group to PUT /groups/:id
         put: function (group) {
-            return query("/groups/" + group.id, "PUT", group, false)
+            return requestJSON("/groups/" + group.id, "PUT", group)
         },
         // delete() - Deletes a group at DELETE /groups/:id
         delete: function (id) {
-            return query("/groups/" + id, "DELETE", {}, false)
+            return requestJSON("/groups/" + id, "DELETE", {})
         }
     },
     // templates contains the endpoints for /templates

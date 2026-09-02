@@ -62,7 +62,7 @@ type GroupSummary = {
 
 type GophishGroupsApi = {
   groupId: {
-    delete: (id: number) => JQueryDeferredLike<{ message?: string }>;
+    delete: (id: number) => Promise<{ message?: string }>;
   };
   groups: {
     get: () => JQueryDeferredLike<GroupSummary[]>;
@@ -3869,19 +3869,12 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     );
     expect(Number.isInteger(groupId)).toBe(true);
 
-    // Cleanup via the same first-party jqXHR-backed client, also wrapped in
-    // a native Promise.
+    // Cleanup via the migrated native group deletion wrapper.
     await page.evaluate(
-      (id) =>
-        new Promise<void>((resolve, reject) => {
-          const api = (window as Window & { api: GophishGroupsApi }).api;
-          api.groupId
-            .delete(id)
-            .done(() => resolve())
-            .fail((jqXHR) => {
-              reject(new Error(jqXHR.responseJSON?.message ?? "api.groupId.delete() request failed"));
-            });
-        }),
+      (id) => {
+        const api = (window as Window & { api: GophishGroupsApi }).api;
+        return api.groupId.delete(id);
+      },
       groupId,
     );
   });

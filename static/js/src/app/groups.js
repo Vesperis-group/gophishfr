@@ -1,4 +1,6 @@
 var groups = []
+var latestEditRequest = 0
+var saveRequest = null
 
 // The previous selector escaped the dot in this id, which defeats jQuery's
 // getElementById fast path, so it matched every element carrying the id rather
@@ -14,8 +16,34 @@ function clearModalFlashes() {
 // before and is what resets the table's ordering and search between edits.
 var targets = null
 
+function setGroupFormDisabled(disabled) {
+    ["name", "firstName", "lastName", "email", "position", "csvupload", "modalSubmit"]
+        .forEach(function (id) {
+            document.getElementById(id).disabled = disabled
+        })
+    document.querySelector("#targetForm button").disabled = disabled
+}
+
+function enableGroupFormAfterPendingSave(editRequest) {
+    if (!saveRequest) {
+        setGroupFormDisabled(false)
+        return
+    }
+    var pendingSave = saveRequest
+    setGroupFormDisabled(true)
+    var enableCurrentForm = function () {
+        if (editRequest == latestEditRequest) {
+            setGroupFormDisabled(false)
+        }
+    }
+    pendingSave.then(enableCurrentForm, enableCurrentForm)
+}
+
 // Save attempts to POST or PUT to /groups/
 function save(id) {
+    if (saveRequest) {
+        return
+    }
     // Named apart from the module-level DataTables instance, which this
     // function needs to read the rows back out of.
     var targetRecords = []
@@ -31,38 +59,55 @@ function save(id) {
         name: document.getElementById("name").value,
         targets: targetRecords
     }
+    var saveContext = latestEditRequest
+    setGroupFormDisabled(true)
     // Submit the group
     if (id != -1) {
         // If we're just editing an existing group,
         // we need to PUT /groups/:id
         group.id = id
-        api.groupId.put(group)
-            .done(function (data) {
+        saveRequest = api.groupId.put(group)
+        saveRequest
+            .then(function () {
+                saveRequest = null
                 successFlash("Group updated successfully!")
                 load()
-                dismiss()
-                bsModalHide("#modal")
-            })
-            .fail(function (data) {
-                modalError(data.responseJSON.message)
+                if (saveContext == latestEditRequest) {
+                    dismiss()
+                    bsModalHide("#modal")
+                }
+            }, function (error) {
+                saveRequest = null
+                if (saveContext == latestEditRequest) {
+                    setGroupFormDisabled(false)
+                    modalError(requestErrorMessage(error))
+                }
             })
     } else {
         // Else, if this is a new group, POST it
         // to /groups
-        api.groups.post(group)
-            .done(function (data) {
+        saveRequest = api.groups.post(group)
+        saveRequest
+            .then(function () {
+                saveRequest = null
                 successFlash("Group added successfully!")
                 load()
-                dismiss()
-                bsModalHide("#modal")
-            })
-            .fail(function (data) {
-                modalError(data.responseJSON.message)
+                if (saveContext == latestEditRequest) {
+                    dismiss()
+                    bsModalHide("#modal")
+                }
+            }, function (error) {
+                saveRequest = null
+                if (saveContext == latestEditRequest) {
+                    setGroupFormDisabled(false)
+                    modalError(requestErrorMessage(error))
+                }
             })
     }
 }
 
 function dismiss() {
+    latestEditRequest++
     if (targets) {
         targets.clear().draw()
     }
@@ -71,6 +116,7 @@ function dismiss() {
 }
 
 function edit(id) {
+    var editRequest = ++latestEditRequest
     targets = new DataTable("#targetsTable", {
         destroy: true, // Replace any previously instantiated table
         columnDefs: [{
@@ -83,11 +129,15 @@ function edit(id) {
     })
     if (id == -1) {
         document.getElementById("groupModalLabel").textContent = "New Group";
-        var group = {}
+        enableGroupFormAfterPendingSave(editRequest)
     } else {
         document.getElementById("groupModalLabel").textContent = "Edit Group";
+        setGroupFormDisabled(true)
         api.groupId.get(id)
-            .done(function (group) {
+            .then(function (group) {
+                if (editRequest != latestEditRequest) {
+                    return
+                }
                 document.getElementById("name").value = group.name
                 targetRows = []
                 group.targets.forEach(function (record) {
@@ -100,8 +150,11 @@ function edit(id) {
                   ])
                 });
                 targets.rows.add(targetRows).draw()
-            })
-            .fail(function () {
+                enableGroupFormAfterPendingSave(editRequest)
+            }, function () {
+                if (editRequest != latestEditRequest) {
+                    return
+                }
                 errorFlash("Error fetching group")
             })
     }
@@ -203,6 +256,7 @@ var deleteGroup = function (id) {
     if (!group) {
         return
     }
+    var deleteRequest = null
     Swal.fire({
         title: "Are you sure?",
         text: "This will delete the group. This can't be undone!",
@@ -214,15 +268,15 @@ var deleteGroup = function (id) {
         reverseButtons: true,
         allowOutsideClick: false,
         preConfirm: function () {
-            return new Promise(function (resolve, reject) {
-                api.groupId.delete(id)
-                    .done(function (msg) {
-                        resolve()
-                    })
-                    .fail(function (data) {
-                        reject(data.responseJSON.message)
-                    })
-            })
+            if (deleteRequest) {
+                return deleteRequest
+            }
+            deleteRequest = api.groupId.delete(id)
+                .then(undefined, function (error) {
+                    deleteRequest = null
+                    Swal.showValidationMessage(requestErrorMessage(error))
+                })
+            return deleteRequest
         }
     }).then(function (result) {
         if (result.value){

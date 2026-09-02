@@ -56,6 +56,13 @@ the native Promise to SweetAlert and preserves confirmation, cancellation,
 validation, and success-reload behavior. Duplicate submissions share or suppress
 the in-flight write instead of creating duplicate records or deletions.
 
+The group CRUD increment migrated `groups.post`, `groupId.get`, `groupId.put`,
+and `groupId.delete`. The unused/unknown `groups.get` wrapper remains synchronous
+and untouched. Group create/update payloads continue to serialize every
+DataTables target row in the table's current order. Modal request contexts reject
+stale edit and save settlements, while SweetAlert consumes one native deletion
+Promise per confirmation attempt.
+
 No endpoint, method, payload, authentication rule, or backend handler changed.
 The direct form-encoded `$.post()` in `settings.js` is separate from `query()`
 and is deliberately outside this migration.
@@ -83,11 +90,11 @@ for now:
 | `campaignId.complete` | `GET /campaigns/:id/complete` | async | migrated | SweetAlert consumes the native Promise directly |
 | `campaignId.summary` | `GET /campaigns/:id/summary` | async | retained | unused/unknown; jqXHR return may be externally consumed |
 | `groups.get` | `GET /groups/` | sync | retained | unused/unknown |
-| `groups.post` | `POST /groups/` | sync | retained | likely accidental |
+| `groups.post` | `POST /groups/` | sync | migrated | modal stays retryable and refreshes once after success |
 | `groups.summary` | `GET /groups/summary` | async | migrated | group list and campaign setup both handle rejection |
-| `groupId.get` | `GET /groups/:id` | sync | retained | likely accidental |
-| `groupId.put` | `PUT /groups/:id` | sync | retained | likely accidental |
-| `groupId.delete` | `DELETE /groups/:id` | sync | retained | likely accidental |
+| `groupId.get` | `GET /groups/:id` | sync | migrated | edit state waits for the current native Promise |
+| `groupId.put` | `PUT /groups/:id` | sync | migrated | modal stays retryable and refreshes once after success |
+| `groupId.delete` | `DELETE /groups/:id` | sync | migrated | SweetAlert consumes one native Promise per confirmation attempt |
 | `templates.get` | `GET /templates/` | sync | retained | required by campaign option ordering |
 | `templates.post` | `POST /templates/` | sync | retained | likely accidental |
 | `templateId.get` | `GET /templates/:id` | sync | retained | unused/unknown |
@@ -122,26 +129,27 @@ for now:
 | `send_test_email` | `POST /util/send_test_email` | async | migrated | all callers handle rejection |
 | `reset` | `POST /reset` | async | migrated | API key update and server error paths are covered |
 
-The synchronous classification totals 3 required, 20 likely accidental, and 5
+The synchronous classification totals 3 required, 16 likely accidental, and 5
 unused/unknown wrappers. Those labels are migration inputs, not permission to
 change them in bulk.
 
 ### Synchronous families
 
-The 28 retained synchronous wrappers divide into bounded workflow families:
+The 24 retained synchronous wrappers divide into bounded workflow families:
 
 | Family | Wrappers | Count | Main migration risk |
 | --- | --- | ---: | --- |
 | Campaign flow | `campaigns.get`, `campaigns.post`, `campaigns.summary`, `campaignId.delete` | 4 | launch and destructive-action timing |
-| Group CRUD | `groups.get`, `groups.post`, `groupId.get`, `groupId.put`, `groupId.delete` | 5 | modal and DataTable refresh ordering |
+| Group compatibility | `groups.get` | 1 | unused/unknown `window.api` consumer compatibility |
 | Template/import | `templates.get`, `templates.post`, `templateId.get`, `templateId.put`, `templateId.delete`, `import_email` | 6 | untrusted HTML and import sequencing |
 | Landing page/clone | `pages.get`, `pages.post`, `pageId.get`, `pageId.put`, `pageId.delete`, `clone_site` | 6 | untrusted HTML and remote clone flow |
 | Sending profile | `SMTP.get`, `SMTP.post`, `SMTPId.get`, `SMTPId.put`, `SMTPId.delete` | 5 | credential-bearing forms and campaign option ordering |
 | IMAP settings | `IMAP.get`, `IMAP.post` | 2 | credential-bearing form and chained lifecycle callbacks |
 
-The next recommended synchronous follow-up is group CRUD: `groups.get`,
-`groups.post`, `groupId.get`, `groupId.put`, and `groupId.delete`. Its modal and
-DataTable ordering require a separately measured migration.
+The next recommended synchronous follow-up is template mutations/import:
+`templates.post`, `templateId.put`, `templateId.delete`, and `import_email`.
+The unused/unknown `templateId.get` wrapper remains a separate compatibility
+decision.
 
 ## Measured legacy contract
 
