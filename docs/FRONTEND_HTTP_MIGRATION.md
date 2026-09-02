@@ -10,7 +10,7 @@ legacy helper or any synchronous caller.
 
 ## Current scope
 
-Thirty-six wrappers whose complete consumer set has a measured native-Promise
+Thirty-eight wrappers whose complete consumer set has a measured native-Promise
 contract now use `requestJSON()`:
 
 - `api.users.get`
@@ -49,11 +49,13 @@ contract now use `requestJSON()`:
 - `api.campaigns.post`
 - `api.campaigns.summary`
 - `api.campaignId.delete`
+- `api.IMAP.get`
+- `api.IMAP.post`
 
 Their callers use the two-handler form of `Promise.then()`. This keeps every
 rejection handled without adding a jqXHR compatibility shim. IMAP validation
-uses `finally()` for its unconditional control cleanup. The remaining 11
-wrappers still use `query()`: 10 synchronous wrappers and the unused
+uses `finally()` for its unconditional control cleanup. The remaining 9
+wrappers still use `query()`: 8 synchronous wrappers and the unused
 asynchronous `campaignId.summary` wrapper.
 
 This increment migrated 10 of the 11 asynchronous wrappers that remained after
@@ -119,6 +121,12 @@ deletion callers preserve their existing confirmation and success navigation,
 capture stable campaign IDs, suppress duplicate deletions, and handle native
 rejections without leaking them.
 
+The IMAP settings increment migrated `IMAP.get` and `IMAP.post`. Repeated loads
+cannot let an older response overwrite current settings, while duplicate saves
+are suppressed until the current request settles. The exact credential-bearing
+payload, success-feedback/reload order, retry behavior, and unconditional scroll
+cleanup remain covered with synthetic fixtures.
+
 No endpoint, method, payload, authentication rule, or backend handler changed.
 The direct form-encoded `$.post()` in `settings.js` is separate from `query()`
 and is deliberately outside this migration.
@@ -166,8 +174,8 @@ for now:
 | `SMTPId.get` | `GET /smtp/:id` | sync | retained | unused/unknown |
 | `SMTPId.put` | `PUT /smtp/:id` | sync | migrated | stable profile ID and modal context reject stale settlements |
 | `SMTPId.delete` | `DELETE /smtp/:id` | sync | migrated | SweetAlert consumes one native deletion Promise per confirmation attempt |
-| `IMAP.get` | `GET /imap/` | sync | retained | likely accidental |
-| `IMAP.post` | `POST /imap/` | sync | retained | likely accidental |
+| `IMAP.get` | `GET /imap/` | sync | migrated | settings form ignores superseded native responses |
+| `IMAP.post` | `POST /imap/` | sync | migrated | exact credential payload and ordered lifecycle callbacks are preserved |
 | `IMAP.validate` | `POST /imap/validate` | async | migrated | `finally()` preserves unconditional control cleanup |
 | `users.get` | `GET /users/` | async | migrated | all callers handle rejection |
 | `users.post` | `POST /users/` | async | migrated | submit success and rejection are covered |
@@ -185,13 +193,13 @@ for now:
 | `send_test_email` | `POST /util/send_test_email` | async | migrated | all callers handle rejection |
 | `reset` | `POST /reset` | async | migrated | API key update and server error paths are covered |
 
-The synchronous classification totals 3 required, 2 likely accidental, and 5
+The synchronous classification totals 3 required and 5
 unused/unknown wrappers. Those labels are migration inputs, not permission to
 change them in bulk.
 
 ### Synchronous families
 
-The 10 retained synchronous wrappers divide into bounded workflow families:
+The 8 retained synchronous wrappers divide into bounded workflow families:
 
 | Family | Wrappers | Count | Main migration risk |
 | --- | --- | ---: | --- |
@@ -200,11 +208,6 @@ The 10 retained synchronous wrappers divide into bounded workflow families:
 | Template compatibility | `templates.get`, `templateId.get` | 2 | campaign option ordering and unknown consumers |
 | Landing page compatibility | `pages.get`, `pageId.get` | 2 | campaign option ordering and unknown consumers |
 | Sending profile compatibility | `SMTP.get`, `SMTPId.get` | 2 | campaign option ordering and unknown consumers |
-| IMAP settings | `IMAP.get`, `IMAP.post` | 2 | credential-bearing form and chained lifecycle callbacks |
-
-The next bounded synchronous workflow is IMAP settings. The required `SMTP.get`
-and unused/unknown `SMTPId.get` wrappers remain separate ordering and
-compatibility decisions.
 
 ## Measured legacy contract
 
