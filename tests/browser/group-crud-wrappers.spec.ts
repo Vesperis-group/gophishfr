@@ -116,11 +116,9 @@ async function runGroupInvocations(
         );
       };
 
-      const results = [];
-      for (const [name, request] of requests) {
-        results.push(await settle(name, request));
-      }
-      return results;
+      return Promise.all(
+        requests.map(([name, request]) => settle(name, request)),
+      );
     },
     { createPayload: createGroup, updatePayload: updateGroup },
   );

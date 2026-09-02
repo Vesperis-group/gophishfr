@@ -142,11 +142,9 @@ async function runWrapperInvocations(
           ["templateId.delete", globals.api.templateId.delete(updatePayload.id)],
           ["import_email", globals.api.import_email(importPayload)],
         ];
-        const results = [];
-        for (const [name, request] of invocations) {
-          results.push(await settle(name, request));
-        }
-        return results;
+        return Promise.all(
+          invocations.map(([name, request]) => settle(name, request)),
+        );
       } finally {
         globals.$ = originalDollar;
         globals.jQuery = originalJQuery;
