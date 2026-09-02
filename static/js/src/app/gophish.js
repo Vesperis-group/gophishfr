@@ -404,7 +404,7 @@ var api = {
         },
         // post() - Posts a SMTP to POST /smtp
         post: function (smtp) {
-            return query("/smtp/", "POST", smtp, false)
+            return requestJSON("/smtp/", "POST", smtp)
         }
     },
     // SMTPId contains the endpoints for /smtp/:id
@@ -415,11 +415,11 @@ var api = {
         },
         // put() - Puts a SMTP to PUT /smtp/:id
         put: function (smtp) {
-            return query("/smtp/" + smtp.id, "PUT", smtp, false)
+            return requestJSON("/smtp/" + smtp.id, "PUT", smtp)
         },
         // delete() - Deletes a SMTP at DELETE /smtp/:id
         delete: function (id) {
-            return query("/smtp/" + id, "DELETE", {}, false)
+            return requestJSON("/smtp/" + id, "DELETE", {})
         }
     },
     // IMAP containts the endpoints for /imap/

@@ -24,11 +24,42 @@ function bindModalSubmit(handler) {
 }
 
 var profiles = []
+var latestProfileRequest = 0
+var saveRequest = null
+var activeProfileId = null
+var refreshProfileModal = null
 
 // headers holds the DataTables instance backing the modal's custom-header list.
 // It is recreated every time the modal opens, which is what the destroy option
 // did before.
 var headers = null
+
+function setProfileFormDisabled(disabled) {
+    ["name", "from", "host", "username", "password", "ignore_cert_errors",
+        "headerKey", "headerValue", "addCustomHeader", "modalSubmit"]
+        .forEach(function (id) {
+            document.getElementById(id).disabled = disabled
+        })
+    document.querySelector('#modal button[onclick^="bsModalShow(\'#sendTestEmailModal\'"]').disabled = disabled
+    var headersContainer = document.getElementById("headersTable_wrapper")
+        || document.getElementById("headersTable")
+    headersContainer.inert = disabled
+}
+
+function enableProfileFormAfterPendingSave(profileRequest) {
+    if (!saveRequest) {
+        setProfileFormDisabled(false)
+        return
+    }
+    var pendingSave = saveRequest
+    setProfileFormDisabled(true)
+    var enableCurrentForm = function () {
+        if (profileRequest == latestProfileRequest) {
+            setProfileFormDisabled(false)
+        }
+    }
+    pendingSave.then(enableCurrentForm, enableCurrentForm)
+}
 
 // Attempts to send a test email by POSTing to /campaigns/
 function sendTestEmail() {
@@ -69,8 +100,11 @@ function sendTestEmail() {
         })
 }
 
-// Save attempts to POST to /smtp/
-function save(idx) {
+// Save attempts to POST or PUT a sending profile.
+function save(profileId) {
+    if (saveRequest) {
+        return
+    }
     var profile = {
         headers: []
     }
@@ -87,32 +121,53 @@ function save(idx) {
     profile.username = document.getElementById("username").value
     profile.password = document.getElementById("password").value
     profile.ignore_cert_errors = document.getElementById("ignore_cert_errors").checked
-    if (idx != -1) {
-        profile.id = profiles[idx].id
-        api.SMTPId.put(profile)
-            .done(function (data) {
+    var saveContext = latestProfileRequest
+    setProfileFormDisabled(true)
+    if (profileId != -1) {
+        profile.id = profileId
+        saveRequest = api.SMTPId.put(profile)
+        saveRequest
+            .then(function () {
+                saveRequest = null
                 successFlash("Profile edited successfully!")
                 load()
-                dismiss()
-            })
-            .fail(function (data) {
-                modalError(data.responseJSON.message)
+                if (saveContext == latestProfileRequest) {
+                    dismiss()
+                } else if (activeProfileId == profile.id && refreshProfileModal) {
+                    refreshProfileModal()
+                }
+            }, function (error) {
+                saveRequest = null
+                if (saveContext == latestProfileRequest) {
+                    setProfileFormDisabled(false)
+                    modalError(requestErrorMessage(error))
+                }
             })
     } else {
         // Submit the profile
-        api.SMTP.post(profile)
-            .done(function (data) {
+        saveRequest = api.SMTP.post(profile)
+        saveRequest
+            .then(function () {
+                saveRequest = null
                 successFlash("Profile added successfully!")
                 load()
-                dismiss()
-            })
-            .fail(function (data) {
-                modalError(data.responseJSON.message)
+                if (saveContext == latestProfileRequest) {
+                    dismiss()
+                }
+            }, function (error) {
+                saveRequest = null
+                if (saveContext == latestProfileRequest) {
+                    setProfileFormDisabled(false)
+                    modalError(requestErrorMessage(error))
+                }
             })
     }
 }
 
 function dismiss() {
+    latestProfileRequest++
+    activeProfileId = null
+    refreshProfileModal = null
     clearModalFlashes()
     document.getElementById("name").value = ""
     document.getElementById("interface_type").value = "SMTP"
@@ -136,26 +191,29 @@ var dismissSendTestEmailModal = function () {
 
 
 var deleteProfile = function (idx) {
+    var profileId = profiles[idx].id
+    var profileName = profiles[idx].name
+    var deleteRequest = null
     Swal.fire({
         title: "Are you sure?",
         text: "This will delete the sending profile. This can't be undone!",
         type: "warning",
         animation: false,
         showCancelButton: true,
-        confirmButtonText: "Delete " + escapeHtml(profiles[idx].name),
+        confirmButtonText: "Delete " + escapeHtml(profileName),
         confirmButtonColor: "#428bca",
         reverseButtons: true,
         allowOutsideClick: false,
         preConfirm: function () {
-            return new Promise(function (resolve, reject) {
-                api.SMTPId.delete(profiles[idx].id)
-                    .done(function (msg) {
-                        resolve()
-                    })
-                    .fail(function (data) {
-                        reject(data.responseJSON.message)
-                    })
-            })
+            if (deleteRequest) {
+                return deleteRequest
+            }
+            deleteRequest = api.SMTPId.delete(profileId)
+                .then(undefined, function (error) {
+                    deleteRequest = null
+                    Swal.showValidationMessage(requestErrorMessage(error))
+                })
+            return deleteRequest
         }
     }).then(function (result) {
         if (result.value){
@@ -178,6 +236,7 @@ var deleteProfile = function (idx) {
 }
 
 function edit(idx) {
+    var profileRequest = ++latestProfileRequest
     headers = new DataTable("#headersTable", {
         destroy: true, // Replace any previously instantiated table
         columnDefs: [{
@@ -186,29 +245,52 @@ function edit(idx) {
         }]
     })
 
-    bindModalSubmit(function () {
-        save(idx)
-    })
     var profile = {}
     if (idx != -1) {
-        document.getElementById("profileModalLabel").textContent = "Edit Sending Profile"
         profile = profiles[idx]
-        applyProfileFields(profile, profile.name)
-        profile.headers.forEach(function (record) {
-            addCustomHeader(record.key, record.value)
-        });
+        var profileId = profile.id
+        activeProfileId = profileId
+        bindModalSubmit(function () {
+            save(profileId)
+        })
+        document.getElementById("profileModalLabel").textContent = "Edit Sending Profile"
+        refreshProfileModal = function () {
+            var currentProfile = profiles.find(function (candidate) {
+                return candidate.id == profileId
+            })
+            if (!currentProfile) {
+                return
+            }
+            headers.clear().draw()
+            applyProfileFields(currentProfile, currentProfile.name)
+            var currentHeaders = currentProfile.headers || []
+            currentHeaders.forEach(function (record) {
+                addCustomHeader(record.key, record.value)
+            })
+        }
+        refreshProfileModal()
     } else {
+        activeProfileId = null
+        refreshProfileModal = null
+        bindModalSubmit(function () {
+            save(-1)
+        })
         document.getElementById("profileModalLabel").textContent = "New Sending Profile"
     }
+    enableProfileFormAfterPendingSave(profileRequest)
 }
 
 function copy(idx) {
+    var profileRequest = ++latestProfileRequest
+    activeProfileId = null
+    refreshProfileModal = null
     bindModalSubmit(function () {
         save(-1)
     })
     var profile = {}
     profile = profiles[idx]
     applyProfileFields(profile, "Copy of " + profile.name)
+    enableProfileFormAfterPendingSave(profileRequest)
 }
 
 // applyProfileFields writes a stored profile into the modal. The name is
@@ -218,8 +300,8 @@ function applyProfileFields(profile, name) {
     document.getElementById("interface_type").value = profile.interface_type
     document.getElementById("from").value = profile.from_address
     document.getElementById("host").value = profile.host
-    document.getElementById("username").value = profile.username
-    document.getElementById("password").value = profile.password
+    document.getElementById("username").value = profile.username || ""
+    document.getElementById("password").value = profile.password || ""
     document.getElementById("ignore_cert_errors").checked = profile.ignore_cert_errors
 }
 
