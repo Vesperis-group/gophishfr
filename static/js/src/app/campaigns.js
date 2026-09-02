@@ -60,6 +60,7 @@ function setSelectPlaceholder(select, placeholder) {
 // groupSelect holds the Tom Select instance backing the multiple-choice groups
 // control, the only field that still needs search and removable tags.
 var groupSelect = null
+var launchRequest = null
 
 function setupGroupSelect() {
     if (groupSelect) {
@@ -92,6 +93,21 @@ function selectedGroupNames() {
     return Array.prototype.slice.call(select.selectedOptions).map(function (option) {
         return option.text
     })
+}
+
+function setCampaignLaunchDisabled(disabled) {
+    ["name", "template", "url", "page", "profile", "launch_date", "send_by_date",
+        "users", "launchButton"]
+        .forEach(function (id) {
+            document.getElementById(id).disabled = disabled
+        })
+    if (groupSelect) {
+        if (disabled) {
+            groupSelect.lock()
+        } else {
+            groupSelect.unlock()
+        }
+    }
 }
 
 var campaigns = []
@@ -160,51 +176,56 @@ function launch() {
         allowOutsideClick: false,
         showLoaderOnConfirm: true,
         preConfirm: function () {
-            return new Promise(function (resolve, reject) {
-                groups = selectedGroupNames().map(function (name) {
-                    return { name: name }
-                })
-                // Validate our fields
-                var launch_date = utcFromLocalDateTimeInput(document.getElementById("launch_date").value)
-                if (!launch_date) {
-                    // Refuse to schedule rather than post a launch date the API
-                    // cannot parse, which is what an empty control used to do.
-                    modalError("Please specify a launch date")
-                    Swal.close()
-                    return
-                }
-                var send_by_date = utcFromLocalDateTimeInput(document.getElementById("send_by_date").value)
-                campaign = {
-                    name: document.getElementById("name").value,
-                    template: {
-                        name: selectedOptionText(document.getElementById("template"))
-                    },
-                    url: document.getElementById("url").value,
-                    page: {
-                        name: selectedOptionText(document.getElementById("page"))
-                    },
-                    smtp: {
-                        name: selectedOptionText(document.getElementById("profile"))
-                    },
-                    launch_date: launch_date,
-                    send_by_date: send_by_date || null,
-                    groups: groups,
-                }
-                // Submit the campaign
-                api.campaigns.post(campaign)
-                    .done(function (data) {
-                        resolve()
-                        campaign = data
-                    })
-                    .fail(function (data) {
-                        showCampaignFlash(
-                            "modal.flashes",
-                            "alert-danger",
-                            "fa-exclamation-circle",
-                            data.responseJSON.message)
-                        Swal.close()
-                    })
+            if (launchRequest) {
+                return launchRequest
+            }
+            groups = selectedGroupNames().map(function (name) {
+                return { name: name }
             })
+            // Validate our fields
+            var launch_date = utcFromLocalDateTimeInput(document.getElementById("launch_date").value)
+            if (!launch_date) {
+                // Refuse to schedule rather than post a launch date the API
+                // cannot parse, which is what an empty control used to do.
+                modalError("Please specify a launch date")
+                Swal.close()
+                return
+            }
+            var send_by_date = utcFromLocalDateTimeInput(document.getElementById("send_by_date").value)
+            campaign = {
+                name: document.getElementById("name").value,
+                template: {
+                    name: selectedOptionText(document.getElementById("template"))
+                },
+                url: document.getElementById("url").value,
+                page: {
+                    name: selectedOptionText(document.getElementById("page"))
+                },
+                smtp: {
+                    name: selectedOptionText(document.getElementById("profile"))
+                },
+                launch_date: launch_date,
+                send_by_date: send_by_date || null,
+                groups: groups,
+            }
+            setCampaignLaunchDisabled(true)
+            launchRequest = api.campaigns.post(campaign)
+                .then(function (data) {
+                    launchRequest = null
+                    setCampaignLaunchDisabled(false)
+                    campaign = data
+                }, function (error) {
+                    launchRequest = null
+                    setCampaignLaunchDisabled(false)
+                    showCampaignFlash(
+                        "modal.flashes",
+                        "alert-danger",
+                        "fa-exclamation-circle",
+                        requestErrorMessage(error))
+                    Swal.close()
+                }
+            )
+            return launchRequest
         }
     }).then(function (result) {
         if (result.value){
@@ -274,26 +295,29 @@ function dismiss() {
 }
 
 function deleteCampaign(idx) {
+    var campaignId = campaigns[idx].id
+    var campaignName = campaigns[idx].name
+    var deleteRequest = null
     Swal.fire({
         title: "Are you sure?",
         text: "This will delete the campaign. This can't be undone!",
         type: "warning",
         animation: false,
         showCancelButton: true,
-        confirmButtonText: "Delete " + campaigns[idx].name,
+        confirmButtonText: "Delete " + campaignName,
         confirmButtonColor: "#428bca",
         reverseButtons: true,
         allowOutsideClick: false,
         preConfirm: function () {
-            return new Promise(function (resolve, reject) {
-                api.campaignId.delete(campaigns[idx].id)
-                    .done(function (msg) {
-                        resolve()
-                    })
-                    .fail(function (data) {
-                        reject(data.responseJSON.message)
-                    })
-            })
+            if (deleteRequest) {
+                return deleteRequest
+            }
+            deleteRequest = api.campaignId.delete(campaignId)
+                .then(undefined, function (error) {
+                    deleteRequest = null
+                    Swal.showValidationMessage(requestErrorMessage(error))
+                })
+            return deleteRequest
         }
     }).then(function (result) {
         if (result.value){
@@ -418,7 +442,7 @@ document.addEventListener("DOMContentLoaded", function () {
         dismiss()
     });
     api.campaigns.summary()
-        .done(function (data) {
+        .then(function (data) {
             campaigns = data.campaigns
             document.getElementById("loading").style.display = "none"
             if (campaigns.length > 0) {
@@ -489,8 +513,7 @@ document.addEventListener("DOMContentLoaded", function () {
                 // first empty-state block was shown.
                 document.getElementById("emptyMessage").style.display = ""
             }
-        })
-        .fail(function () {
+        }, function () {
             document.getElementById("loading").style.display = "none"
             errorFlash("Error fetching campaigns")
         })

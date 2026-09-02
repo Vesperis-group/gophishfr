@@ -10,7 +10,7 @@ legacy helper or any synchronous caller.
 
 ## Current scope
 
-Thirty-three wrappers whose complete consumer set has a measured native-Promise
+Thirty-six wrappers whose complete consumer set has a measured native-Promise
 contract now use `requestJSON()`:
 
 - `api.users.get`
@@ -46,11 +46,14 @@ contract now use `requestJSON()`:
 - `api.SMTP.post`
 - `api.SMTPId.put`
 - `api.SMTPId.delete`
+- `api.campaigns.post`
+- `api.campaigns.summary`
+- `api.campaignId.delete`
 
 Their callers use the two-handler form of `Promise.then()`. This keeps every
 rejection handled without adding a jqXHR compatibility shim. IMAP validation
-uses `finally()` for its unconditional control cleanup. The remaining 14
-wrappers still use `query()`: 13 synchronous wrappers and the unused
+uses `finally()` for its unconditional control cleanup. The remaining 11
+wrappers still use `query()`: 10 synchronous wrappers and the unused
 asynchronous `campaignId.summary` wrapper.
 
 This increment migrated 10 of the 11 asynchronous wrappers that remained after
@@ -107,6 +110,15 @@ modal, and destructive actions capture stable profile IDs. An omitted
 credential in the canonical response is rendered as an empty form field rather
 than the literal string `"undefined"`.
 
+The campaign flow increment migrated `campaigns.post`, `campaigns.summary`, and
+`campaignId.delete`. Launch preserves the exact form payload and date
+serialization while suppressing duplicate submissions and restoring the modal
+after a handled failure. Both summary pages keep their distinct loading/error
+behavior while remaining responsive during a delayed response. All three
+deletion callers preserve their existing confirmation and success navigation,
+capture stable campaign IDs, suppress duplicate deletions, and handle native
+rejections without leaking them.
+
 No endpoint, method, payload, authentication rule, or backend handler changed.
 The direct form-encoded `$.post()` in `settings.js` is separate from `query()`
 and is deliberately outside this migration.
@@ -126,10 +138,10 @@ for now:
 | Wrapper | Request | Legacy mode | Current state | Reason |
 | --- | --- | --- | --- | --- |
 | `campaigns.get` | `GET /campaigns/` | sync | retained | unused/unknown |
-| `campaigns.post` | `POST /campaigns/` | sync | retained | likely accidental |
-| `campaigns.summary` | `GET /campaigns/summary` | sync | retained | likely accidental |
+| `campaigns.post` | `POST /campaigns/` | sync | migrated | launch payload and modal state wait for one native Promise |
+| `campaigns.summary` | `GET /campaigns/summary` | sync | migrated | both list consumers wait for the native Promise |
 | `campaignId.get` | `GET /campaigns/:id` | async | migrated | copy and report flows handle rejection |
-| `campaignId.delete` | `DELETE /campaigns/:id` | sync | retained | likely accidental |
+| `campaignId.delete` | `DELETE /campaigns/:id` | sync | migrated | all three callers capture stable IDs and suppress duplicate deletion |
 | `campaignId.results` | `GET /campaigns/:id/results` | async | migrated | load and poll failures are handled; refresh UI is restored |
 | `campaignId.complete` | `GET /campaigns/:id/complete` | async | migrated | SweetAlert consumes the native Promise directly |
 | `campaignId.summary` | `GET /campaigns/:id/summary` | async | retained | unused/unknown; jqXHR return may be externally consumed |
@@ -173,17 +185,17 @@ for now:
 | `send_test_email` | `POST /util/send_test_email` | async | migrated | all callers handle rejection |
 | `reset` | `POST /reset` | async | migrated | API key update and server error paths are covered |
 
-The synchronous classification totals 3 required, 5 likely accidental, and 5
+The synchronous classification totals 3 required, 2 likely accidental, and 5
 unused/unknown wrappers. Those labels are migration inputs, not permission to
 change them in bulk.
 
 ### Synchronous families
 
-The 13 retained synchronous wrappers divide into bounded workflow families:
+The 10 retained synchronous wrappers divide into bounded workflow families:
 
 | Family | Wrappers | Count | Main migration risk |
 | --- | --- | ---: | --- |
-| Campaign flow | `campaigns.get`, `campaigns.post`, `campaigns.summary`, `campaignId.delete` | 4 | launch and destructive-action timing |
+| Campaign compatibility | `campaigns.get` | 1 | unused/unknown `window.api` consumer compatibility |
 | Group compatibility | `groups.get` | 1 | unused/unknown `window.api` consumer compatibility |
 | Template compatibility | `templates.get`, `templateId.get` | 2 | campaign option ordering and unknown consumers |
 | Landing page compatibility | `pages.get`, `pageId.get` | 2 | campaign option ordering and unknown consumers |
@@ -262,6 +274,11 @@ and payloads, including filled, unchanged, and empty credentials, empty and
 populated headers, and a false certificate-error flag. It proves failure retry,
 duplicate suppression, stable IDs, stale-modal isolation, canonical same-profile
 refresh, and operation without `window.$` or `window.jQuery`.
+Campaign flow coverage records exact launch/summary/delete transport, HTTP and
+network failures, the complete two-group launch payload, canonical template
+attachments, and stored date instants. It also proves duplicate suppression,
+stable deletion IDs, handled retryable failures, page-specific loading behavior,
+responsiveness under delayed summaries, and operation without `jQuery.ajax`.
 Tests never send email or contact a non-loopback host.
 
 ## Follow-up families

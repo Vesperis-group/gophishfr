@@ -1,4 +1,5 @@
 var campaigns = []
+var campaignDeleteRequests = {}
 // statuses maps result statuses to UI metadata.
 var statuses = {
     "Email Sent": {
@@ -80,11 +81,21 @@ var statsMapping = {
 }
 
 function deleteCampaign(idx) {
-    if (confirm("Delete " + campaigns[idx].name + "?")) {
-        api.campaignId.delete(campaigns[idx].id)
-            .done(function (data) {
+    var campaignId = campaigns[idx].id
+    var campaignName = campaigns[idx].name
+    if (confirm("Delete " + campaignName + "?")) {
+        if (campaignDeleteRequests[campaignId]) {
+            return
+        }
+        var deleteRequest = api.campaignId.delete(campaignId)
+        campaignDeleteRequests[campaignId] = deleteRequest
+        deleteRequest
+            .then(function (data) {
+                delete campaignDeleteRequests[campaignId]
                 successFlash(data.message)
                 location.reload()
+            }, function () {
+                delete campaignDeleteRequests[campaignId]
             })
     }
 }
@@ -178,7 +189,7 @@ function generateTimelineChart(campaigns) {
 // fired yet.
 document.addEventListener('DOMContentLoaded', function () {
     api.campaigns.summary()
-        .done(function (data) {
+        .then(function (data) {
             document.getElementById("loading").style.display = "none"
             campaigns = data.campaigns
             if (campaigns.length > 0) {
@@ -255,8 +266,7 @@ document.addEventListener('DOMContentLoaded', function () {
             } else {
                 document.getElementById("emptyMessage").style.display = ""
             }
-        })
-        .fail(function () {
+        }, function () {
             errorFlash("Error fetching campaigns")
         })
 })

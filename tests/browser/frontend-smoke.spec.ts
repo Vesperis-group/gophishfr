@@ -7,6 +7,7 @@ import {
   type Request,
   type Response,
 } from "@playwright/test";
+import { assertCampaignFlowContract } from "./campaign-flow-contract";
 
 const baseURL = requiredEnvironmentVariable("GOPHISHFR_BROWSER_BASE_URL");
 const username = requiredEnvironmentVariable("GOPHISHFR_BROWSER_USERNAME");
@@ -1452,6 +1453,15 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       ),
     ).toBe(true);
     await closeApplicationModal(page);
+  });
+
+  await test.step("campaign launch, summary and delete retain their transport contracts", async () => {
+    await assertCampaignFlowContract(page, {
+      consoleErrors,
+      failedLocalRequests,
+      failedLocalResponses,
+      pageErrors,
+    });
   });
 
   await test.step("campaign setup, copy and empty launch keep their state contracts", async () => {
@@ -4150,6 +4160,20 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   });
 
   await test.step("campaign launch submits and stores the selected instant", async () => {
+    const secondaryGroupName = `Browser Secondary Group ${Date.now()}`;
+    const secondaryGroup = await page.evaluate((name) => {
+      return api.groups.post({
+        name,
+        targets: [
+          {
+            email: "secondary@localhost.invalid",
+            first_name: "Browser",
+            last_name: "Secondary",
+            position: "Fixture",
+          },
+        ],
+      });
+    }, secondaryGroupName);
     const campaignPayloads: string[] = [];
     const captureCampaign = (request: Request) => {
       if (
@@ -4176,21 +4200,36 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     // The single-choice fields are native selects; the groups field is driven
     // through its Tom Select instance so the widget and the underlying select
     // stay in sync, exactly as a real user interaction would leave them.
-    await waitForSelectOption(page, "template", "Browser Fixture Template");
+    await waitForSelectOption(page, "template", "Browser Attachment Fixture");
     await waitForSelectOption(page, "page", "Browser Fixture Landing Page");
     await waitForSelectOption(page, "profile", "Browser Fixture Sending Profile");
     await waitForSelectOption(page, "users", "Browser Fixture Group");
+    await waitForSelectOption(page, "users", secondaryGroupName);
 
-    await page.locator("#template").selectOption({ label: "Browser Fixture Template" });
+    await page.locator("#template").selectOption({ label: "Browser Attachment Fixture" });
     await page.locator("#page").selectOption({ label: "Browser Fixture Landing Page" });
     await page
       .locator("#profile")
       .selectOption({ label: "Browser Fixture Sending Profile" });
 
-    await openGroupDropdown(page);
-    await page.keyboard.type("Browser Fixture Group");
-    await page.keyboard.press("Enter");
-    await expect(page.locator(".ts-control .item")).toContainText("Browser Fixture Group");
+    await page.evaluate((groupNames) => {
+      const select = document.querySelector("#users") as HTMLSelectElement & {
+        tomselect?: {
+          addItem: (value: string) => void;
+          options: Record<string, { text?: string }>;
+        };
+      };
+      for (const groupName of groupNames) {
+        const option = Object.entries(select.tomselect?.options ?? {}).find(
+          ([, entry]) => entry.text === groupName,
+        );
+        if (!option) {
+          throw new Error(`Campaign group option "${groupName}" is missing`);
+        }
+        select.tomselect?.addItem(option[0]);
+      }
+    }, ["Browser Fixture Group", secondaryGroupName]);
+    await expect(page.locator(".ts-control .item")).toHaveCount(2);
 
     await page.locator("#launchButton").click();
     await page.locator(".swal2-confirm").click();
@@ -4202,15 +4241,26 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     const payload = JSON.parse(campaignPayloads[0]) as {
       groups: Array<{ name: string }>;
       launch_date: string;
+      name: string;
       page: { name: string };
       send_by_date: string | null;
       smtp: { name: string };
       template: { name: string };
+      url: string;
     };
-    expect(payload.template.name).toBe("Browser Fixture Template");
-    expect(payload.page.name).toBe("Browser Fixture Landing Page");
-    expect(payload.smtp.name).toBe("Browser Fixture Sending Profile");
-    expect(payload.groups).toEqual([{ name: "Browser Fixture Group" }]);
+    expect(payload).toEqual({
+      groups: [
+        { name: "Browser Fixture Group" },
+        { name: secondaryGroupName },
+      ],
+      launch_date: expect.any(String),
+      name: campaignName,
+      page: { name: "Browser Fixture Landing Page" },
+      send_by_date: expect.any(String),
+      smtp: { name: "Browser Fixture Sending Profile" },
+      template: { name: "Browser Attachment Fixture" },
+      url: "http://127.0.0.1:1",
+    });
 
     // picker -> submit: the payload carries the UTC instant matching the local
     // value, computed independently of the page.
@@ -4220,10 +4270,43 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(payload.send_by_date).toBe(expectedSendBy);
     page.off("request", captureCampaign);
 
+    const canonical = await page.evaluate(
+      () =>
+        campaign as {
+          groups: Array<{ name: string }>;
+          results: Array<{ email: string }>;
+          template: { attachments: Array<{ name: string }>; name: string };
+        },
+    );
+    expect(canonical.groups.map((group) => group.name)).toEqual([
+      "Browser Fixture Group",
+      secondaryGroupName,
+    ]);
+    expect(canonical.results.map((result) => result.email).sort()).toEqual([
+      "fixture@localhost.invalid",
+      "secondary@localhost.invalid",
+    ]);
+    expect(canonical.template.name).toBe("Browser Attachment Fixture");
+    const expectedAttachmentNames = [
+      "added-by-browser-test.txt",
+      ...Array.from(
+        { length: 12 },
+        (_, index) => `attachment-${String(index + 1).padStart(2, "0")}.txt`,
+      ),
+    ].sort();
+    expect(
+      canonical.template.attachments.map((attachment) => attachment.name).sort(),
+    ).toEqual(expectedAttachmentNames);
+
     // submit -> store -> reload: the API returns the same instant it was given.
     const stored = await page.evaluate(
       (name) =>
-        new Promise<{ launch_date: string; send_by_date: string }>((resolve, reject) => {
+        new Promise<{
+          id: number;
+          launch_date: string;
+          send_by_date: string;
+          template: { attachments: Array<{ name: string }>; name: string };
+        }>((resolve, reject) => {
           window
             .fetch("/api/campaigns/", {
               headers: {
@@ -4231,7 +4314,13 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
               },
             })
             .then((response) => response.json())
-            .then((campaigns: Array<{ name: string; launch_date: string; send_by_date: string }>) => {
+            .then((campaigns: Array<{
+              id: number;
+              launch_date: string;
+              name: string;
+              send_by_date: string;
+              template: { attachments: Array<{ name: string }>; name: string };
+            }>) => {
               const created = campaigns.find((campaign) => campaign.name === name);
               if (!created) {
                 reject(new Error(`Campaign "${name}" was not stored`));
@@ -4245,6 +4334,19 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     );
     expect(new Date(stored.launch_date).getTime()).toBe(new Date(expectedLaunch).getTime());
     expect(new Date(stored.send_by_date).getTime()).toBe(new Date(expectedSendBy).getTime());
+    expect(stored.template.name).toBe("Browser Attachment Fixture");
+    expect(stored.template.attachments.map((attachment) => attachment.name).sort()).toEqual(
+      expectedAttachmentNames,
+    );
+
+    await page.evaluate(
+      async ({ campaignId, groupId }) => {
+        await api.campaignId.delete(campaignId);
+        await api.groupId.delete(groupId);
+      },
+      { campaignId: stored.id, groupId: secondaryGroup.id },
+    );
+    await page.evaluate(() => Swal.close());
   });
 
   await test.step("jQuery 3.7.1 runtime identity confirmed", async () => {
