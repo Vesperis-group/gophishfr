@@ -278,10 +278,6 @@ Define our API Endpoints
 var api = {
     // campaigns contains the endpoints for /campaigns
     campaigns: {
-        // get() - Queries the API for GET /campaigns
-        get: function () {
-            return query("/campaigns/", "GET", {}, false)
-        },
         // post() - Posts a campaign to POST /campaigns
         post: function (data) {
             return requestJSON("/campaigns/", "POST", data)
@@ -308,18 +304,10 @@ var api = {
         // complete() - Completes a campaign at POST /campaigns/:id/complete
         complete: function (id) {
             return requestJSON("/campaigns/" + id + "/complete", "GET", {})
-        },
-        // summary() - Queries the API for GET /campaigns/summary
-        summary: function (id) {
-            return query("/campaigns/" + id + "/summary", "GET", {}, true)
         }
     },
     // groups contains the endpoints for /groups
     groups: {
-        // get() - Queries the API for GET /groups
-        get: function () {
-            return query("/groups/", "GET", {}, false)
-        },
         // post() - Posts a group to POST /groups
         post: function (group) {
             return requestJSON("/groups/", "POST", group)
@@ -357,10 +345,6 @@ var api = {
     },
     // templateId contains the endpoints for /templates/:id
     templateId: {
-        // get() - Queries the API for GET /templates/:id
-        get: function (id) {
-            return query("/templates/" + id, "GET", {}, false)
-        },
         // put() - Puts a template to PUT /templates/:id
         put: function (template) {
             return requestJSON("/templates/" + template.id, "PUT", template)
@@ -383,10 +367,6 @@ var api = {
     },
     // pageId contains the endpoints for /pages/:id
     pageId: {
-        // get() - Queries the API for GET /pages/:id
-        get: function (id) {
-            return query("/pages/" + id, "GET", {}, false)
-        },
         // put() - Puts a page to PUT /pages/:id
         put: function (page) {
             return requestJSON("/pages/" + page.id, "PUT", page)
@@ -409,10 +389,6 @@ var api = {
     },
     // SMTPId contains the endpoints for /smtp/:id
     SMTPId: {
-        // get() - Queries the API for GET /smtp/:id
-        get: function (id) {
-            return query("/smtp/" + id, "GET", {}, false)
-        },
         // put() - Puts a SMTP to PUT /smtp/:id
         put: function (smtp) {
             return requestJSON("/smtp/" + smtp.id, "PUT", smtp)

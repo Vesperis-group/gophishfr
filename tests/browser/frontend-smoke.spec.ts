@@ -49,14 +49,6 @@ type HTMLEditorRegistry = {
   get: (id: string) => HTMLEditorHandle | undefined;
 };
 
-// Minimal shape of a jQuery jqXHR-derived deferred, matching what
-// static/js/src/app/gophish.js's query() (a $.ajax() wrapper) returns and
-// what static/js/src/app/groups.js consumes via .done()/.fail().
-type JQueryDeferredLike<T> = {
-  done: (callback: (data: T) => void) => JQueryDeferredLike<T>;
-  fail: (callback: (jqXHR: { responseJSON?: { message?: string } }) => void) => JQueryDeferredLike<T>;
-};
-
 type GroupSummary = {
   id: number;
   name: string;
@@ -67,7 +59,7 @@ type GophishGroupsApi = {
     delete: (id: number) => Promise<{ message?: string }>;
   };
   groups: {
-    get: () => JQueryDeferredLike<GroupSummary[]>;
+    summary: () => Promise<{ groups: GroupSummary[] }>;
   };
 };
 
@@ -3843,10 +3835,10 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await closeApplicationModal(page);
   });
 
-  await test.step("AJAX save/update path with synthetic fixture data", async () => {
+  await test.step("save/update path with synthetic fixture data", async () => {
     // Drive the real first-party UI flow on /groups so the group is actually
-    // created through api.groups.post(...).done/.fail inside groups.js, not
-    // a raw fetch() that bypasses the jQuery AJAX client entirely.
+    // created through api.groups.post() inside groups.js, not a raw fetch()
+    // that bypasses the production client.
     const groupName = `BrowserTestGroup_${Date.now()}`;
 
     await openApplicationModal(page, "New Group");
@@ -3862,29 +3854,17 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator("#modal")).not.toBeVisible();
     await expect(page.locator("#groupTable")).toContainText(groupName);
 
-    // Discover the created group's id through the first-party window.api
-    // client (the same jqXHR-backed client groups.js uses), wrapping its
-    // .done()/.fail() callbacks in a native Promise so Playwright can await it.
-    const groupId = await page.evaluate(
-      (name) =>
-        new Promise<number>((resolve, reject) => {
-          const api = (window as Window & { api: GophishGroupsApi }).api;
-          api.groups
-            .get()
-            .done((groups) => {
-              const created = groups.find((group) => group.name === name);
-              if (created) {
-                resolve(created.id);
-              } else {
-                reject(new Error(`Group "${name}" not found via api.groups.get()`));
-              }
-            })
-            .fail((jqXHR) => {
-              reject(new Error(jqXHR.responseJSON?.message ?? "api.groups.get() request failed"));
-            });
-        }),
-      groupName,
-    );
+    // The production group list uses this native summary response, whose id is
+    // sufficient to clean up the group created through the UI above.
+    const groupId = await page.evaluate(async (name) => {
+      const api = (window as Window & { api: GophishGroupsApi }).api;
+      const response = await api.groups.summary();
+      const created = response.groups.find((group) => group.name === name);
+      if (!created) {
+        throw new Error(`Group "${name}" not found via api.groups.summary()`);
+      }
+      return created.id;
+    }, groupName);
     expect(Number.isInteger(groupId)).toBe(true);
 
     // Cleanup via the migrated native group deletion wrapper.
