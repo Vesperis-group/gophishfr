@@ -8,6 +8,7 @@ import {
   type Response,
 } from "@playwright/test";
 import { assertCampaignFlowContract } from "./campaign-flow-contract";
+import { assertIMAPSettingsContract } from "./imap-settings-contract";
 
 const baseURL = requiredEnvironmentVariable("GOPHISHFR_BROWSER_BASE_URL");
 const username = requiredEnvironmentVariable("GOPHISHFR_BROWSER_USERNAME");
@@ -2749,6 +2750,13 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     expect(settingsBodies[0]).toContain("username=");
     expect(settingsBodies[0]).toContain("csrf_token=");
     await page.unroute("**/settings");
+
+    await assertIMAPSettingsContract(page, {
+      consoleErrors,
+      failedLocalRequests,
+      failedLocalResponses,
+      pageErrors,
+    });
 
     // The map preference lives on the UI tab. Its input is visually replaced by
     // its label, so the label is what gets clicked.

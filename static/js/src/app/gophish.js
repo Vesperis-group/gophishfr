@@ -425,10 +425,10 @@ var api = {
     // IMAP containts the endpoints for /imap/
     IMAP: {
         get: function() {
-            return query("/imap/", "GET", {}, !1)
+            return requestJSON("/imap/", "GET", {})
         },
         post: function(e) {
-            return query("/imap/", "POST", e, !1)
+            return requestJSON("/imap/", "POST", e)
         },
         validate: function(e) {
             return requestJSON("/imap/validate", "POST", e)

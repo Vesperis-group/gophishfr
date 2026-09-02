@@ -15,6 +15,9 @@ const imapControls = [
     "validateimap",
 ]
 
+let imapLoadGeneration = 0
+let imapSaveRequest
+
 function setIMAPControlsDisabled(disabled) {
     imapControls.forEach(function (id) {
         document.getElementById(id).disabled = disabled
@@ -57,6 +60,10 @@ document.addEventListener('DOMContentLoaded', function () {
     })
     //$("#imapForm").submit(function (e) {
     document.getElementById("savesettings").addEventListener("click", function() {
+        if (imapSaveRequest) {
+            return false
+        }
+
         var imapSettings = {}
         imapSettings.host = document.getElementById("imaphost").value
         imapSettings.port = document.getElementById("imapport").value
@@ -95,22 +102,20 @@ document.addEventListener('DOMContentLoaded', function () {
             imapSettings.imap_freq = "60"
         }
 
-        api.IMAP.post(imapSettings).done(function (data) {
+        imapSaveRequest = api.IMAP.post(imapSettings).then(function (data) {
                 if (data.success == true) {
                     successFlashFade("Successfully updated IMAP settings.", 2)
                 } else {
                     errorFlash("Unable to update IMAP settings.")
                 }
-            })
-            .done(function (data){
+                // This is the second legacy done callback and must run after feedback.
                 loadIMAPSettings()
-            })
-            .fail(function (data) {
-                errorFlash(data.responseJSON.message)
-            })
-            .always(function (data){
+            }, function (error) {
+                errorFlash(requestErrorMessage(error))
+            }).finally(function (){
                 document.body.scrollTop = 0;
                 document.documentElement.scrollTop = 0;
+                imapSaveRequest = undefined
             })
 
         return false
@@ -208,8 +213,11 @@ document.addEventListener('DOMContentLoaded', function () {
     })
 
     function loadIMAPSettings(){
-        api.IMAP.get()
-        .done(function (imap) {
+        var loadGeneration = ++imapLoadGeneration
+        api.IMAP.get().then(function (imap) {
+            if (loadGeneration != imapLoadGeneration) {
+                return
+            }
             var lastLoginRow = document.getElementById("lastlogindiv")
             if (imap.length == 0){
                 lastLoginRow.style.display = "none"
@@ -235,8 +243,10 @@ document.addEventListener('DOMContentLoaded', function () {
                 document.getElementById("imapfreq").value = imap.imap_freq
             }
 
-        })
-        .fail(function () {
+        }, function () {
+            if (loadGeneration != imapLoadGeneration) {
+                return
+            }
             errorFlash("Error fetching IMAP settings")
         })
     }
