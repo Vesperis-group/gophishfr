@@ -352,7 +352,7 @@ var api = {
         },
         // post() - Posts a template to POST /templates
         post: function (template) {
-            return query("/templates/", "POST", template, false)
+            return requestJSON("/templates/", "POST", template)
         }
     },
     // templateId contains the endpoints for /templates/:id
@@ -363,11 +363,11 @@ var api = {
         },
         // put() - Puts a template to PUT /templates/:id
         put: function (template) {
-            return query("/templates/" + template.id, "PUT", template, false)
+            return requestJSON("/templates/" + template.id, "PUT", template)
         },
         // delete() - Deletes a template at DELETE /templates/:id
         delete: function (id) {
-            return query("/templates/" + id, "DELETE", {}, false)
+            return requestJSON("/templates/" + id, "DELETE", {})
         }
     },
     // pages contains the endpoints for /pages
@@ -484,7 +484,7 @@ var api = {
     },
     // import handles all of the "import" functions in the api
     import_email: function (req) {
-        return query("/import/email", "POST", req, false)
+        return requestJSON("/import/email", "POST", req)
     },
     // clone_site handles importing a site by url
     clone_site: function (req) {

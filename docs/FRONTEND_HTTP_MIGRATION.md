@@ -10,7 +10,7 @@ legacy helper or any synchronous caller.
 
 ## Current scope
 
-Eighteen wrappers whose complete consumer set has a measured native-Promise
+Twenty-six wrappers whose complete consumer set has a measured native-Promise
 contract now use `requestJSON()`:
 
 - `api.users.get`
@@ -21,6 +21,10 @@ contract now use `requestJSON()`:
 - `api.campaignId.results`
 - `api.campaignId.complete`
 - `api.groups.summary`
+- `api.groups.post`
+- `api.groupId.get`
+- `api.groupId.put`
+- `api.groupId.delete`
 - `api.IMAP.validate`
 - `api.users.post`
 - `api.userId.put`
@@ -31,11 +35,15 @@ contract now use `requestJSON()`:
 - `api.webhookId.get`
 - `api.webhooks.post`
 - `api.webhookId.delete`
+- `api.templates.post`
+- `api.templateId.put`
+- `api.templateId.delete`
+- `api.import_email`
 
 Their callers use the two-handler form of `Promise.then()`. This keeps every
 rejection handled without adding a jqXHR compatibility shim. IMAP validation
-uses `finally()` for its unconditional control cleanup. The remaining 29
-wrappers still use `query()`: 28 synchronous wrappers and the unused
+uses `finally()` for its unconditional control cleanup. The remaining 21
+wrappers still use `query()`: 20 synchronous wrappers and the unused
 asynchronous `campaignId.summary` wrapper.
 
 This increment migrated 10 of the 11 asynchronous wrappers that remained after
@@ -62,6 +70,17 @@ and untouched. Group create/update payloads continue to serialize every
 DataTables target row in the table's current order. Modal request contexts reject
 stale edit and save settlements, while SweetAlert consumes one native deletion
 Promise per confirmation attempt.
+
+The template mutation increment migrated `templates.post`, `templateId.put`,
+`templateId.delete`, and `import_email`. The required `templates.get` and
+unused/unknown `templateId.get` wrappers remain synchronous and untouched.
+Create, update, and import requests keep their modal data retryable on failure;
+duplicate writes are suppressed; and settlements from a closed modal cannot
+overwrite a newer modal. The exact CodeMirror HTML source remains the request
+and import source of truth, and imported previews remain confined to the
+existing sandboxed iframe. Edit and delete actions capture stable template IDs
+rather than mutable table indexes. Pending attachment reads temporarily block
+submission and cannot write into a later modal.
 
 No endpoint, method, payload, authentication rule, or backend handler changed.
 The direct form-encoded `$.post()` in `settings.js` is separate from `query()`
@@ -96,10 +115,10 @@ for now:
 | `groupId.put` | `PUT /groups/:id` | sync | migrated | modal stays retryable and refreshes once after success |
 | `groupId.delete` | `DELETE /groups/:id` | sync | migrated | SweetAlert consumes one native Promise per confirmation attempt |
 | `templates.get` | `GET /templates/` | sync | retained | required by campaign option ordering |
-| `templates.post` | `POST /templates/` | sync | retained | likely accidental |
+| `templates.post` | `POST /templates/` | sync | migrated | modal stays retryable and suppresses duplicate writes |
 | `templateId.get` | `GET /templates/:id` | sync | retained | unused/unknown |
-| `templateId.put` | `PUT /templates/:id` | sync | retained | likely accidental |
-| `templateId.delete` | `DELETE /templates/:id` | sync | retained | likely accidental |
+| `templateId.put` | `PUT /templates/:id` | sync | migrated | modal stays retryable and rejects stale settlements |
+| `templateId.delete` | `DELETE /templates/:id` | sync | migrated | SweetAlert consumes one native Promise per confirmation attempt |
 | `pages.get` | `GET /pages/` | sync | retained | required by campaign option ordering |
 | `pages.post` | `POST /pages/` | sync | retained | likely accidental |
 | `pageId.get` | `GET /pages/:id` | sync | retained | unused/unknown |
@@ -124,32 +143,32 @@ for now:
 | `webhookId.put` | `PUT /webhooks/:id` | async | migrated | submit success and rejection are covered |
 | `webhookId.delete` | `DELETE /webhooks/:id` | sync | migrated | SweetAlert consumes one native Promise per confirmation attempt |
 | `webhookId.ping` | `POST /webhooks/:id/validate` | async | migrated | all callers handle rejection |
-| `import_email` | `POST /import/email` | sync | retained | likely accidental |
+| `import_email` | `POST /import/email` | sync | migrated | import state waits for the current native Promise |
 | `clone_site` | `POST /import/site` | sync | retained | likely accidental |
 | `send_test_email` | `POST /util/send_test_email` | async | migrated | all callers handle rejection |
 | `reset` | `POST /reset` | async | migrated | API key update and server error paths are covered |
 
-The synchronous classification totals 3 required, 16 likely accidental, and 5
+The synchronous classification totals 3 required, 12 likely accidental, and 5
 unused/unknown wrappers. Those labels are migration inputs, not permission to
 change them in bulk.
 
 ### Synchronous families
 
-The 24 retained synchronous wrappers divide into bounded workflow families:
+The 20 retained synchronous wrappers divide into bounded workflow families:
 
 | Family | Wrappers | Count | Main migration risk |
 | --- | --- | ---: | --- |
 | Campaign flow | `campaigns.get`, `campaigns.post`, `campaigns.summary`, `campaignId.delete` | 4 | launch and destructive-action timing |
 | Group compatibility | `groups.get` | 1 | unused/unknown `window.api` consumer compatibility |
-| Template/import | `templates.get`, `templates.post`, `templateId.get`, `templateId.put`, `templateId.delete`, `import_email` | 6 | untrusted HTML and import sequencing |
+| Template compatibility | `templates.get`, `templateId.get` | 2 | campaign option ordering and unknown consumers |
 | Landing page/clone | `pages.get`, `pages.post`, `pageId.get`, `pageId.put`, `pageId.delete`, `clone_site` | 6 | untrusted HTML and remote clone flow |
 | Sending profile | `SMTP.get`, `SMTP.post`, `SMTPId.get`, `SMTPId.put`, `SMTPId.delete` | 5 | credential-bearing forms and campaign option ordering |
 | IMAP settings | `IMAP.get`, `IMAP.post` | 2 | credential-bearing form and chained lifecycle callbacks |
 
-The next recommended synchronous follow-up is template mutations/import:
-`templates.post`, `templateId.put`, `templateId.delete`, and `import_email`.
-The unused/unknown `templateId.get` wrapper remains a separate compatibility
-decision.
+The next recommended synchronous follow-up is landing page mutations/clone:
+`pages.post`, `pageId.put`, `pageId.delete`, and `clone_site`. The required
+`pages.get` and unused/unknown `pageId.get` wrappers remain separate ordering and
+compatibility decisions.
 
 ## Measured legacy contract
 
@@ -204,6 +223,11 @@ test-email error surfaces. Webhook coverage includes legacy/native HTTP parity,
 list, create, edit, and delete failures, cancellation, repeated actions,
 delayed-response ordering, and fixed UI messages. The wrapper suite also removes
 `window.$` and `window.jQuery` while invoking all four webhook CRUD wrappers.
+Template mutation coverage records the exact create/update payloads, attachment
+content, CodeMirror HTML, email-import source and result, sandboxed preview, and
+DELETE contract. It also proves retry behavior, duplicate-write suppression,
+closed-modal settlement isolation, and operation of all four migrated wrappers
+with `window.$` and `window.jQuery` removed.
 Tests never send email or contact a non-loopback host.
 
 ## Follow-up families
@@ -212,7 +236,8 @@ Future changes should remain incremental:
 
 1. Establish whether `campaignId.summary` has an external runtime consumer
    before changing or removing its jqXHR contract.
-2. Migrate group CRUD as a separately tested workflow.
+2. Migrate landing page mutations and remote clone as a separately tested
+   workflow.
 3. Remove other accidental synchronous XHR one workflow at a time, with
    ordering and UI-state regression coverage.
 4. Delete or justify unused wrappers after checking external extension

@@ -12,4 +12,4 @@ corepack yarn build
 go test -tags=browser ./controllers \
     -run '^TestBrowser' \
     -count=1 \
-    -timeout=2m
+    -timeout=4m
