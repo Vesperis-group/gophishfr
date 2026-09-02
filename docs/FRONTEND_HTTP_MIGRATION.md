@@ -136,7 +136,19 @@ frontend load clears the password input. `POST /api/imap/` still accepts a
 non-empty password to create or rotate the secret; an empty or omitted password
 preserves the authenticated user's existing secret, but cannot create a new
 configuration, and JSON `null` is rejected. The direct form-encoded `$.post()`
-in `settings.js` is separate from `query()` and remains outside this migration.
+in `settings.js` was subsequently replaced by a local native `fetch` path. It
+keeps `POST /settings`, same-origin session credentials,
+`application/x-www-form-urlencoded`, DOM-order successful controls, explicit
+empty values, and content-type-based response parsing. `FormData` supplies the
+browser's successful-control set, file values are excluded to match
+`serialize()`, and the final encoding preserves jQuery's `+` representation for
+spaces. The unused `X-Requested-With` library-identification header is not
+retained; no backend or middleware reads it.
+
+This removes the last executable first-party jQuery use outside `query()`. The
+only remaining runtime blocker is the unchanged synchronous `query()` transport
+used by the three required `templates.get`, `pages.get`, and `SMTP.get` campaign
+loaders.
 
 ## Wrapper inventory
 
@@ -284,6 +296,10 @@ network failures, the complete two-group launch payload, canonical template
 attachments, and stored date instants. It also proves duplicate suppression,
 stable deletion IDs, handled retryable failures, page-specific loading behavior,
 responsiveness under delayed summaries, and operation without `jQuery.ajax`.
+The account-settings form contract inventories every real control and compares
+its legacy and native form body, order, encoding, session cookie, disabled and
+empty-field behavior, HTTP 400/403/500 handling, retry, duplicate submissions,
+redirect handling, and operation with both jQuery globals removed.
 Tests never send email or contact a non-loopback host.
 
 ## Follow-up families
@@ -292,6 +308,5 @@ Future changes should remain incremental:
 
 1. Remove other accidental synchronous XHR one workflow at a time, with
    ordering and UI-state regression coverage.
-2. Migrate the separate settings `$.post()` and form serialization path.
-3. Remove `query()` and jQuery Ajax only after no caller depends on jqXHR or
+2. Remove `query()` and jQuery Ajax only after no caller depends on jqXHR or
    synchronous completion.

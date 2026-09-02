@@ -24,6 +24,61 @@ function setIMAPControlsDisabled(disabled) {
     })
 }
 
+function serializeSettingsForm(form) {
+    var encoded = []
+    var formData = new FormData(form)
+    formData.forEach(function (value, name) {
+        // Native FormData includes files, while jQuery serialize() did not.
+        if (typeof value != "string") {
+            return
+        }
+        encoded.push(
+            encodeURIComponent(name) + "=" +
+            encodeURIComponent(value.replace(/\r?\n/g, "\r\n"))
+        )
+    })
+    return encoded.join("&").replace(/%20/g, "+")
+}
+
+function parseSettingsResponse(response) {
+    var contentType = response.headers.get("Content-Type") || ""
+    if (contentType.toLowerCase().indexOf("json") != -1) {
+        return response.json()
+    }
+    return response.text()
+}
+
+function postSettingsForm(form) {
+    return fetch("/settings", {
+        method: "POST",
+        credentials: "same-origin",
+        headers: {
+            "Accept": "*/*",
+            "Content-Type": "application/x-www-form-urlencoded; charset=UTF-8",
+        },
+        body: serializeSettingsForm(form),
+    }).then(function (response) {
+        return parseSettingsResponse(response).then(function (data) {
+            if (!response.ok) {
+                throw new APIRequestError(response.statusText || "Request failed", {
+                    status: response.status,
+                    statusText: response.statusText,
+                    data: data,
+                    responseText: typeof data == "string" ? data : JSON.stringify(data),
+                })
+            }
+            return data
+        })
+    }, function (error) {
+        throw new APIRequestError("Network request failed", {
+            status: 0,
+            statusText: "error",
+            responseText: "",
+            cause: error,
+        })
+    })
+}
+
 // The application scripts are plain classic scripts at the end of <body>, so
 // the document is still parsing when they run and DOMContentLoaded has not
 // fired yet.
@@ -46,16 +101,11 @@ document.addEventListener('DOMContentLoaded', function () {
     document.getElementById("settingsForm").addEventListener("submit", function (e) {
         e.preventDefault()
         e.stopPropagation()
-        // Deliberately still jQuery: this is a direct form-urlencoded POST whose
-        // body comes from jQuery's own serializer, not from the query() helper.
-        // Reproducing that payload exactly belongs with the AJAX and form
-        // migration, not here.
-        $.post("/settings", $("#settingsForm").serialize())
-            .done(function (data) {
+        postSettingsForm(e.currentTarget)
+            .then(function (data) {
                 successFlash(data.message)
-            })
-            .fail(function (data) {
-                errorFlash(data.responseJSON.message)
+            }, function (error) {
+                errorFlash(requestErrorMessage(error))
             })
     })
     //$("#imapForm").submit(function (e) {
