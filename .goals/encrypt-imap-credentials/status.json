@@ -1,7 +1,7 @@
 {
   "goal_id": "encrypt-imap-credentials",
-  "status": "completed",
-  "iteration": 1,
+  "status": "inspecting",
+  "iteration": 2,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "8653a8eee739978f5a38988f3544dece965b1de9",
@@ -11,6 +11,11 @@
       "iteration": 1,
       "verdict": "PASS",
       "summary": "Encrypted IMAP storage, offline migration and rollback, fail-closed runtime integration, SQLite/MySQL support, Docker deployment, tests, and documentation all met the goal."
+    },
+    {
+      "iteration": 2,
+      "verdict": "PASS",
+      "summary": "Docker CI Container build failure fixed by aligning temporary test fixture UID/GID to image app user while preserving mode 0400, read-only mount, external keyring storage, and fail-closed runtime behavior. No production code modified. All acceptance criteria remain satisfied."
     }
   ]
 }
