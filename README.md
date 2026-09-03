@@ -56,6 +56,8 @@ The container keeps `/opt/gophish` as its internal data directory for
 compatibility with existing deployments. Mount persistent configuration,
 database, and log storage according to your environment before using the image
 beyond local evaluation.
+Configuration file contents are not printed at startup because values may
+contain credentials; static startup messages remain available in container logs.
 
 ## Development
 

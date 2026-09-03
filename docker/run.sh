@@ -91,8 +91,6 @@ if [ -n "${DB_FILE_PATH+set}" ] ; then
         cat config.json.tmp > config.json
 fi
 
-echo "Runtime configuration: "
-cat config.json
-
 # start GophishFR
+echo "Starting GophishFR"
 exec ./gophishfr "$@"
