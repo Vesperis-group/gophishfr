@@ -35,16 +35,16 @@ all explicit external API-key transports and permissions remain compatible.
 
 1. Builder iteration 1 implemented dual authentication, conditional same-origin
    protection, frontend decoupling, tests, Docker, docs, and self-review in
-   commit `2097c482d01051674c07fc474ee42a59d4ac61af`.
+   commit `8148a7f0610cca2cd0bae2e9af0eb85e2494cfce`.
 2. Goal Inspector iteration 1 returned PASS in commit
-   `ee6037b3ffc56059122677c9a9dd7b10ad504b8e`.
+   `d161214ddcf069a07e59718e33f83e487eb17411`.
 3. Security/code reviews found that forced password change could be bypassed
    through session API access and campaign completion mutated through GET.
 4. Builder iteration 2 blocked unfinished-reset sessions and moved session/SPA
    campaign completion to protected POST in commit
-   `bbea0a3ebda86b6a6e1f2803c0ba85abc697bf4b`.
+   `23e6866709ceb5f0ad2ccc5f4990444c91cf6e20`.
 5. Goal Inspector iteration 2 returned PASS in commit
-   `05928046f5ebdf5966068d9dde6a58177bcf4823`.
+   `b928247eaecf782be19e7ec9903819754af70ce9`.
 6. Final independent security and code reviews returned PASS.
 
 ## Review Resolution

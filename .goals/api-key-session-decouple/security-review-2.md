@@ -3,7 +3,7 @@
 ## Verdict: PASS
 
 The final specialist re-reviewed the complete API session-decoupling branch
-after Builder commit `bbea0a3ebda86b6a6e1f2803c0ba85abc697bf4b`.
+after Builder commit `23e6866709ceb5f0ad2ccc5f4990444c91cf6e20`.
 
 - Sessions requiring password rotation cannot use `/api/*` before completing
   the forced reset; responses remain API JSON without redirects.
