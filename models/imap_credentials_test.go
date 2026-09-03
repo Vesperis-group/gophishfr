@@ -446,6 +446,9 @@ func TestSQLiteIMAPSchemaMigrationGuardsDuplicatesAndCiphertext(t *testing.T) {
 	if err := goose.Up(sqlDB, migrationsPath); err != nil {
 		t.Fatalf("apply schema after duplicate resolution: %v", err)
 	}
+	if err := goose.Down(sqlDB, migrationsPath); err != nil {
+		t.Fatalf("remove later SMTP credential migration: %v", err)
+	}
 	if _, err := sqlDB.Exec("INSERT INTO imap (user_id, password) VALUES (91, ?)", testIMAPSecret); err == nil {
 		t.Fatal("unique IMAP user constraint was not enforced")
 	}
@@ -503,6 +506,18 @@ func TestMySQLIMAPCredentialLifecycle(t *testing.T) {
 	if err := db.Exec("DELETE FROM imap").Error; err != nil {
 		t.Fatalf("clear mysql IMAP rows: %v", err)
 	}
+	if err := db.Exec("DELETE FROM headers").Error; err != nil {
+		t.Fatalf("clear mysql SMTP headers: %v", err)
+	}
+	if err := db.Exec("DELETE FROM smtp").Error; err != nil {
+		t.Fatalf("clear mysql SMTP rows: %v", err)
+	}
+	if err := goose.SetDialect("mysql"); err != nil {
+		t.Fatalf("set mysql dialect: %v", err)
+	}
+	if err := goose.Down(db.DB(), conf.MigrationsPath); err != nil {
+		t.Fatalf("remove later SMTP credential migration: %v", err)
+	}
 	t.Cleanup(func() {
 		_ = goose.SetDialect("mysql")
 		_ = goose.Up(db.DB(), conf.MigrationsPath)
@@ -534,6 +549,9 @@ func TestMySQLIMAPCredentialLifecycle(t *testing.T) {
 	}
 	if err := goose.Up(db.DB(), conf.MigrationsPath); err != nil {
 		t.Fatalf("apply mysql credential schema: %v", err)
+	}
+	if err := goose.Down(db.DB(), conf.MigrationsPath); err != nil {
+		t.Fatalf("remove later SMTP credential migration: %v", err)
 	}
 	if err := db.Exec("INSERT INTO imap (user_id, password) VALUES (101, ?)", testIMAPSecret).Error; err == nil {
 		t.Fatal("mysql unique IMAP user constraint was not enforced")

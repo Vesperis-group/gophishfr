@@ -1,6 +1,7 @@
 package api
 
 import (
+	"bytes"
 	"encoding/json"
 	"net/http"
 	"net/mail"
@@ -12,22 +13,45 @@ import (
 	"github.com/sirupsen/logrus"
 )
 
+type emailRequestAlias models.EmailRequest
+
+type emailRequest struct {
+	emailRequestAlias
+	SMTP smtpRequest `json:"smtp"`
+}
+
+func decodeEmailRequest(r *http.Request) (*models.EmailRequest, error) {
+	request := emailRequest{}
+	if err := json.NewDecoder(r.Body).Decode(&request); err != nil {
+		return nil, err
+	}
+	if bytes.Equal(bytes.TrimSpace(request.SMTP.Password), []byte("null")) {
+		return nil, errNullSMTPPassword
+	}
+	if len(request.SMTP.Password) > 0 {
+		if err := json.Unmarshal(request.SMTP.Password, &request.SMTP.SMTP.Password); err != nil {
+			return nil, err
+		}
+	}
+	result := models.EmailRequest(request.emailRequestAlias)
+	result.SMTP = request.SMTP.SMTP
+	return &result, nil
+}
+
 // SendTestEmail sends a test email using the template name
 // and Target given.
 func (as *Server) SendTestEmail(w http.ResponseWriter, r *http.Request) {
-	s := &models.EmailRequest{
-		ErrorChan: make(chan error),
-		UserId:    ctx.Get(r, "user_id").(int64),
-	}
 	if r.Method != "POST" {
 		JSONResponse(w, models.Response{Success: false, Message: "Method not allowed"}, http.StatusBadRequest)
 		return
 	}
-	err := json.NewDecoder(r.Body).Decode(s)
+	s, err := decodeEmailRequest(r)
 	if err != nil {
 		JSONResponse(w, models.Response{Success: false, Message: "Error decoding JSON Request"}, http.StatusBadRequest)
 		return
 	}
+	s.ErrorChan = make(chan error)
+	s.UserId = ctx.Get(r, "user_id").(int64)
 
 	storeRequest := false
 
@@ -81,7 +105,52 @@ func (as *Server) SendTestEmail(w http.ResponseWriter, r *http.Request) {
 		s.PageId = s.Page.Id
 	}
 
-	// If a complete sending profile is provided use it
+	incomingPassword := s.SMTP.Password
+	s.SMTP.Password = ""
+	if err := models.ValidateSMTPPassword(incomingPassword); err != nil {
+		JSONResponse(w, models.Response{Success: false, Message: err.Error()}, http.StatusBadRequest)
+		return
+	}
+	if s.SMTP.Id != 0 {
+		submitted := s.SMTP
+		stored, lookupErr := models.GetSMTP(s.SMTP.Id, s.UserId)
+		if lookupErr != nil {
+			JSONResponse(w, models.Response{Success: false, Message: "Sending profile not found"}, http.StatusBadRequest)
+			return
+		}
+		if incomingPassword == "" {
+			if stored.Password != "" {
+				credentialErr := models.ErrSMTPCredentialNotMigrated
+				if stored.PasswordCiphertext != "" {
+					credentialErr = models.ErrSMTPCredentialInvalidState
+				}
+				JSONResponse(w, models.Response{Success: false, Message: credentialErr.Error()}, http.StatusBadRequest)
+				return
+			}
+			if stored.PasswordCiphertext != "" {
+				// Bind only the fields that can redirect authentication. Safe
+				// unsaved message fields remain available to the test send.
+				submitted.Id = stored.Id
+				submitted.UserId = stored.UserId
+				submitted.Interface = stored.Interface
+				submitted.Host = stored.Host
+				submitted.Username = stored.Username
+				submitted.IgnoreCertErrors = stored.IgnoreCertErrors
+				submitted.Password = ""
+				submitted.PasswordCiphertext = stored.PasswordCiphertext
+				s.SMTP = submitted
+			} else {
+				// With no stored secret there is nothing to redirect, so the
+				// complete submitted connection context remains usable.
+				s.SMTP.UserId = stored.UserId
+				s.SMTP.PasswordCiphertext = ""
+			}
+		} else {
+			s.SMTP.UserId = stored.UserId
+			s.SMTP.PasswordCiphertext = ""
+		}
+	}
+	// If a complete sending profile is provided use it.
 	if err := s.SMTP.Validate(); err != nil {
 		// Otherwise get the SMTP requested by name
 		smtp, lookupErr := models.GetSMTPByName(s.SMTP.Name, s.UserId)
@@ -93,6 +162,11 @@ func (as *Server) SendTestEmail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		s.SMTP = smtp
+	}
+	if incomingPassword != "" {
+		s.SetRuntimeSMTPPassword(incomingPassword)
+		s.SMTP.Password = ""
+		s.SMTP.PasswordCiphertext = ""
 	}
 
 	_, err = mail.ParseAddress(s.Template.EnvelopeSender)

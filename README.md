@@ -83,6 +83,9 @@ in [`docs/GROUP_IMPORT_LIMITS.md`](docs/GROUP_IMPORT_LIMITS.md).
 IMAP keyring setup, offline credential migration, and safe rollback are
 documented in
 [`docs/IMAP_CREDENTIAL_ENCRYPTION.md`](docs/IMAP_CREDENTIAL_ENCRYPTION.md).
+SMTP sending-profile encryption, write-only API behavior, offline migration,
+and rollback are documented in
+[`docs/SMTP_CREDENTIAL_ENCRYPTION.md`](docs/SMTP_CREDENTIAL_ENCRYPTION.md).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for contribution requirements and
 [SECURITY.md](SECURITY.md) for responsible vulnerability reporting.

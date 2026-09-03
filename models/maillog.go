@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/Vesperis-group/gophishfr/config"
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	log "github.com/Vesperis-group/gophishfr/logger"
 	"github.com/Vesperis-group/gophishfr/mailer"
 	"github.com/gophish/gomail"
@@ -134,7 +135,7 @@ func (m *MailLog) Success() error {
 }
 
 // GetDialer returns a dialer based on the maillog campaign's SMTP configuration
-func (m *MailLog) GetDialer() (mailer.Dialer, error) {
+func (m *MailLog) GetDialer(credentialCipher *credentials.Cipher) (mailer.Dialer, error) {
 	c := m.cachedCampaign
 	if c == nil {
 		campaign, err := GetCampaignMailContext(m.CampaignId, m.UserId)
@@ -143,7 +144,7 @@ func (m *MailLog) GetDialer() (mailer.Dialer, error) {
 		}
 		c = &campaign
 	}
-	return c.SMTP.GetDialer()
+	return c.SMTP.GetDialer(credentialCipher)
 }
 
 // CacheCampaign allows bulk-mail workers to cache the otherwise expensive

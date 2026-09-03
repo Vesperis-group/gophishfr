@@ -3,6 +3,7 @@ package models
 import (
 	"crypto/tls"
 	"errors"
+	"fmt"
 	"net/mail"
 	"os"
 	"regexp"
@@ -11,6 +12,7 @@ import (
 	"time"
 
 	"github.com/Vesperis-group/gophishfr/dialer"
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	log "github.com/Vesperis-group/gophishfr/logger"
 	"github.com/Vesperis-group/gophishfr/mailer"
 	"github.com/gophish/gomail"
@@ -32,17 +34,18 @@ func (d *Dialer) Dial() (mailer.Sender, error) {
 
 // SMTP contains the attributes needed to handle the sending of campaign emails
 type SMTP struct {
-	Id               int64     `json:"id" gorm:"column:id; primary_key:yes"`
-	UserId           int64     `json:"-" gorm:"column:user_id"`
-	Interface        string    `json:"interface_type" gorm:"column:interface_type"`
-	Name             string    `json:"name"`
-	Host             string    `json:"host"`
-	Username         string    `json:"username,omitempty"`
-	Password         string    `json:"password,omitempty"`
-	FromAddress      string    `json:"from_address"`
-	IgnoreCertErrors bool      `json:"ignore_cert_errors"`
-	Headers          []Header  `json:"headers"`
-	ModifiedDate     time.Time `json:"modified_date"`
+	Id                 int64     `json:"id" gorm:"column:id; primary_key:yes"`
+	UserId             int64     `json:"-" gorm:"column:user_id"`
+	Interface          string    `json:"interface_type" gorm:"column:interface_type"`
+	Name               string    `json:"name"`
+	Host               string    `json:"host"`
+	Username           string    `json:"username,omitempty"`
+	Password           string    `json:"-" gorm:"column:password"`
+	PasswordCiphertext string    `json:"-" gorm:"column:password_ciphertext"`
+	FromAddress        string    `json:"from_address"`
+	IgnoreCertErrors   bool      `json:"ignore_cert_errors"`
+	Headers            []Header  `json:"headers"`
+	ModifiedDate       time.Time `json:"modified_date"`
 }
 
 // Header contains the fields and methods for a sending profile to have
@@ -68,6 +71,14 @@ var ErrHostNotSpecified = errors.New("No SMTP Host specified")
 
 // ErrInvalidHost indicates that the SMTP server string is invalid
 var ErrInvalidHost = errors.New("Invalid SMTP server address")
+
+// ErrSMTPCredentialContextChange prevents an existing stored password from
+// being silently redirected to a different authentication endpoint.
+var ErrSMTPCredentialContextChange = errors.New("a new SMTP password is required when changing credential routing")
+
+// ErrSMTPConcurrentChange indicates that an owner-scoped update no longer
+// matches the row state that was validated in the same transaction.
+var ErrSMTPConcurrentChange = errors.New("SMTP profile changed concurrently")
 
 // TableName specifies the database tablename for Gorm to use
 func (s SMTP) TableName() string {
@@ -114,7 +125,17 @@ func validateFromAddress(email string) bool {
 }
 
 // GetDialer returns a dialer for the given SMTP profile
-func (s *SMTP) GetDialer() (mailer.Dialer, error) {
+func (s *SMTP) GetDialer(credentialCipher *credentials.Cipher) (mailer.Dialer, error) {
+	password, err := DecryptSMTPPassword(*s, credentialCipher)
+	if err != nil {
+		return nil, err
+	}
+	return s.getDialer(password)
+}
+
+// getDialer constructs a dialer with a password that exists only in this call
+// stack. It is also used for non-persisted test-email credentials.
+func (s *SMTP) getDialer(password string) (mailer.Dialer, error) {
 	// Setup the message and dial
 	hp := strings.Split(s.Host, ":")
 	if len(hp) < 2 {
@@ -129,7 +150,7 @@ func (s *SMTP) GetDialer() (mailer.Dialer, error) {
 		return nil, err
 	}
 	dialer := dialer.Dialer()
-	d := gomail.NewWithDialer(dialer, host, port, s.Username, s.Password)
+	d := gomail.NewWithDialer(dialer, host, port, s.Username, password)
 	d.TLSConfig = &tls.Config{
 		ServerName:         host,
 		InsecureSkipVerify: s.IgnoreCertErrors,
@@ -193,71 +214,274 @@ func GetSMTPByName(n string, uid int64) (SMTP, error) {
 }
 
 // PostSMTP creates a new SMTP in the database.
-func PostSMTP(s *SMTP) error {
-	err := s.Validate()
-	if err != nil {
+func PostSMTP(s *SMTP, credentialCipher ...*credentials.Cipher) error {
+	if err := s.Validate(); err != nil {
 		log.Error(err)
 		return err
 	}
-	// Insert into the DB
-	err = db.Save(s).Error
-	if err != nil {
-		log.Error(err)
+	if err := ValidateSMTPPassword(s.Password); err != nil {
+		return err
 	}
-	// Save custom headers
-	for i := range s.Headers {
-		s.Headers[i].SMTPId = s.Id
-		err := db.Save(&s.Headers[i]).Error
+	if s.UserId <= 0 {
+		return ErrInvalidSMTPCredentialIdentity
+	}
+	var cipher *credentials.Cipher
+	if len(credentialCipher) != 0 {
+		cipher = credentialCipher[0]
+	}
+	password := s.Password
+	s.Password = ""
+	s.PasswordCiphertext = ""
+
+	transaction := db.Begin()
+	if transaction.Error != nil {
+		return transaction.Error
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			transaction.Rollback()
+		}
+	}()
+	if err := transaction.Omit("Headers").Create(s).Error; err != nil {
+		return err
+	}
+	if password != "" {
+		ciphertext, err := encryptSMTPPassword(cipher, s.UserId, s.Id, password)
 		if err != nil {
-			log.Error(err)
 			return err
 		}
+		update := transaction.Model(&SMTP{}).
+			Where("id = ? AND user_id = ? AND password = '' AND password_ciphertext = ''", s.Id, s.UserId).
+			Update("password_ciphertext", ciphertext)
+		if update.Error != nil {
+			return update.Error
+		}
+		if update.RowsAffected != 1 {
+			return fmt.Errorf("SMTP profile changed during credential creation")
+		}
+		s.PasswordCiphertext = ciphertext
 	}
-	return err
+	if err := verifySMTPCredentialStorage(
+		transaction,
+		s.Id,
+		s.UserId,
+		"",
+		s.PasswordCiphertext,
+	); err != nil {
+		return err
+	}
+	if err := saveSMTPHeaders(transaction, s); err != nil {
+		return err
+	}
+	if err := transaction.Commit().Error; err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 // PutSMTP edits an existing SMTP in the database.
 // Per the PUT Method RFC, it presumes all data for a SMTP is provided.
-func PutSMTP(s *SMTP) error {
-	err := s.Validate()
-	if err != nil {
+func PutSMTP(s *SMTP, credentialCipher ...*credentials.Cipher) error {
+	if err := s.Validate(); err != nil {
 		log.Error(err)
 		return err
 	}
-	err = db.Where("id=?", s.Id).Save(s).Error
-	if err != nil {
-		log.Error(err)
-	}
-	// Delete all custom headers, and replace with new ones
-	err = db.Where("smtp_id=?", s.Id).Delete(&Header{}).Error
-	if err != nil && err != gorm.ErrRecordNotFound {
-		log.Error(err)
+	if err := ValidateSMTPPassword(s.Password); err != nil {
 		return err
 	}
-	// Save custom headers
+	if s.Id <= 0 || s.UserId <= 0 {
+		return ErrInvalidSMTPCredentialIdentity
+	}
+	var cipher *credentials.Cipher
+	if len(credentialCipher) != 0 {
+		cipher = credentialCipher[0]
+	}
+	transaction := db.Begin()
+	if transaction.Error != nil {
+		return transaction.Error
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			transaction.Rollback()
+		}
+	}()
+
+	existing := SMTP{}
+	existingQuery := transaction.Where("id = ? AND user_id = ?", s.Id, s.UserId)
+	if conf != nil && conf.DBName == "mysql" {
+		existingQuery = existingQuery.Set("gorm:query_option", "FOR UPDATE")
+	}
+	if err := existingQuery.First(&existing).Error; err != nil {
+		return err
+	}
+	if err := validateSMTPSecretColumns(existing); err != nil {
+		return err
+	}
+	preserveCredential := s.Password == ""
+	if preserveCredential {
+		if existing.PasswordCiphertext != "" && !sameSMTPCredentialRouting(existing, *s) {
+			return ErrSMTPCredentialContextChange
+		}
+		s.PasswordCiphertext = existing.PasswordCiphertext
+	} else {
+		ciphertext, err := encryptSMTPPassword(cipher, s.UserId, s.Id, s.Password)
+		if err != nil {
+			return err
+		}
+		s.PasswordCiphertext = ciphertext
+	}
+	s.Password = ""
+
+	updateQuery := transaction.Model(&SMTP{}).
+		Where("id = ? AND user_id = ?", s.Id, s.UserId)
+	if preserveCredential {
+		updateQuery = updateQuery.Where(
+			"password = '' AND password_ciphertext = ?",
+			existing.PasswordCiphertext,
+		)
+		if existing.PasswordCiphertext != "" {
+			updateQuery = updateQuery.Where(`
+				interface_type = ? AND
+				host = ? AND
+				username = ? AND
+				ignore_cert_errors = ?
+			`,
+				existing.Interface,
+				existing.Host,
+				existing.Username,
+				existing.IgnoreCertErrors,
+			)
+		}
+	}
+	update := updateQuery.Updates(map[string]interface{}{
+		"interface_type":      s.Interface,
+		"name":                s.Name,
+		"host":                s.Host,
+		"username":            s.Username,
+		"password":            "",
+		"password_ciphertext": s.PasswordCiphertext,
+		"from_address":        s.FromAddress,
+		"modified_date":       s.ModifiedDate,
+		"ignore_cert_errors":  s.IgnoreCertErrors,
+	})
+	if update.Error != nil {
+		return update.Error
+	}
+	if update.RowsAffected > 1 {
+		return ErrSMTPConcurrentChange
+	}
+	if err := verifySMTPCredentialStorage(
+		transaction,
+		s.Id,
+		s.UserId,
+		"",
+		s.PasswordCiphertext,
+	); err != nil {
+		return err
+	}
+	if err := verifySMTPProfileStorage(transaction, s); err != nil {
+		return err
+	}
+	deleteHeaders := transaction.Exec(`
+		DELETE FROM headers
+		WHERE smtp_id = ?
+		  AND EXISTS (SELECT 1 FROM smtp WHERE id = ? AND user_id = ?)
+	`, s.Id, s.Id, s.UserId)
+	if deleteHeaders.Error != nil {
+		return deleteHeaders.Error
+	}
+	if err := saveSMTPHeaders(transaction, s); err != nil {
+		return err
+	}
+	if err := transaction.Commit().Error; err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func sameSMTPCredentialRouting(existing, update SMTP) bool {
+	return existing.Interface == update.Interface &&
+		existing.Host == update.Host &&
+		existing.Username == update.Username &&
+		existing.IgnoreCertErrors == update.IgnoreCertErrors
+}
+
+func verifySMTPProfileStorage(transaction *gorm.DB, expected *SMTP) error {
+	var stored SMTP
+	if err := transaction.Where(
+		"id = ? AND user_id = ?",
+		expected.Id,
+		expected.UserId,
+	).First(&stored).Error; err != nil {
+		return err
+	}
+	if stored.Interface != expected.Interface ||
+		stored.Name != expected.Name ||
+		stored.Host != expected.Host ||
+		stored.Username != expected.Username ||
+		stored.FromAddress != expected.FromAddress ||
+		stored.IgnoreCertErrors != expected.IgnoreCertErrors {
+		return ErrSMTPConcurrentChange
+	}
+	return nil
+}
+
+func saveSMTPHeaders(transaction *gorm.DB, s *SMTP) error {
 	for i := range s.Headers {
 		s.Headers[i].SMTPId = s.Id
-		err := db.Save(&s.Headers[i]).Error
-		if err != nil {
-			log.Error(err)
+		if err := transaction.Create(&s.Headers[i]).Error; err != nil {
 			return err
 		}
 	}
-	return err
+	return nil
 }
 
 // DeleteSMTP deletes an existing SMTP in the database.
 // An error is returned if a SMTP with the given user id and SMTP id is not found.
 func DeleteSMTP(id int64, uid int64) error {
-	// Delete all custom headers
-	err := db.Where("smtp_id=?", id).Delete(&Header{}).Error
-	if err != nil {
-		log.Error(err)
+	if id <= 0 || uid <= 0 {
+		return ErrInvalidSMTPCredentialIdentity
+	}
+	transaction := db.Begin()
+	if transaction.Error != nil {
+		return transaction.Error
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			transaction.Rollback()
+		}
+	}()
+	var count int
+	if err := transaction.Model(&SMTP{}).
+		Where("id = ? AND user_id = ?", id, uid).
+		Count(&count).Error; err != nil {
 		return err
 	}
-	err = db.Where("user_id=?", uid).Delete(SMTP{Id: id}).Error
-	if err != nil {
-		log.Error(err)
+	if count != 1 {
+		return gorm.ErrRecordNotFound
 	}
-	return err
+	if err := transaction.Exec(`
+		DELETE FROM headers
+		WHERE smtp_id = ?
+		  AND EXISTS (SELECT 1 FROM smtp WHERE id = ? AND user_id = ?)
+	`, id, id, uid).Error; err != nil {
+		return err
+	}
+	deleted := transaction.Where("id = ? AND user_id = ?", id, uid).Delete(&SMTP{})
+	if deleted.Error != nil {
+		return deleted.Error
+	}
+	if deleted.RowsAffected != 1 {
+		return gorm.ErrRecordNotFound
+	}
+	if err := transaction.Commit().Error; err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }

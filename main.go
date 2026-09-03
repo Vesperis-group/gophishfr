@@ -44,6 +44,7 @@ import (
 	"github.com/Vesperis-group/gophishfr/middleware"
 	"github.com/Vesperis-group/gophishfr/models"
 	"github.com/Vesperis-group/gophishfr/webhook"
+	"github.com/Vesperis-group/gophishfr/worker"
 )
 
 const (
@@ -62,6 +63,14 @@ var (
 	rollbackIMAPCredentials = kingpin.Flag(
 		"rollback-imap-credentials",
 		"Offline: decrypt IMAP passwords before downgrading the schema or binary.",
+	).Bool()
+	migrateSMTPCredentials = kingpin.Flag(
+		"migrate-smtp-credentials",
+		"Offline: encrypt legacy SMTP passwords after stopping all application writers.",
+	).Bool()
+	rollbackSMTPCredentials = kingpin.Flag(
+		"rollback-smtp-credentials",
+		"Offline: decrypt SMTP passwords before downgrading the schema or binary.",
 	).Bool()
 	mode = kingpin.Flag("mode", fmt.Sprintf("Run the binary in one of the modes (%s, %s or %s)", modeAll, modeAdmin, modePhish)).
 		Default("all").Enum(modeAll, modeAdmin, modePhish)
@@ -91,11 +100,27 @@ func main() {
 		log.Warnf("Please consider adding a contact_address entry in your config.json")
 	}
 	config.Version = string(version)
-	if *migrateIMAPCredentials && *rollbackIMAPCredentials {
-		log.Fatal("--migrate-imap-credentials and --rollback-imap-credentials are mutually exclusive")
+	credentialActions := 0
+	for _, selected := range []bool{
+		*migrateIMAPCredentials,
+		*rollbackIMAPCredentials,
+		*migrateSMTPCredentials,
+		*rollbackSMTPCredentials,
+	} {
+		if selected {
+			credentialActions++
+		}
+	}
+	if credentialActions > 1 {
+		log.Fatal("credential migration and rollback actions are mutually exclusive")
 	}
 	if *migrateIMAPCredentials || *rollbackIMAPCredentials {
 		if err := models.ValidateIMAPCredentialBackend(conf.DBName); err != nil {
+			log.Fatal(err)
+		}
+	}
+	if *migrateSMTPCredentials || *rollbackSMTPCredentials {
+		if err := models.ValidateSMTPCredentialBackend(conf.DBName); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -122,7 +147,10 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if (*migrateIMAPCredentials || *rollbackIMAPCredentials) && credentialCipher == nil {
+	if credentialActions != 0 && credentialCipher == nil {
+		if *migrateSMTPCredentials || *rollbackSMTPCredentials {
+			log.Fatal(models.ErrSMTPCredentialKeyringRequired)
+		}
 		log.Fatal(models.ErrIMAPCredentialKeyringRequired)
 	}
 
@@ -144,6 +172,18 @@ func main() {
 		log.Infof("IMAP credential %s complete: %d rows updated, %d rows unchanged", action, result.Updated, result.Unchanged)
 		return
 	}
+	if *migrateSMTPCredentials || *rollbackSMTPCredentials {
+		result, err := runSMTPCredentialAction(credentialCipher, *rollbackSMTPCredentials)
+		if err != nil {
+			log.Fatal(err)
+		}
+		action := "migration"
+		if *rollbackSMTPCredentials {
+			action = "rollback"
+		}
+		log.Infof("SMTP credential %s complete: %d rows updated, %d rows unchanged", action, result.Updated, result.Unchanged)
+		return
+	}
 
 	// Unlock any maillogs that may have been locked for processing
 	// when GophishFR was last shut down.
@@ -157,6 +197,12 @@ func main() {
 	adminOptions = append(adminOptions, controllers.WithCredentialCipher(credentialCipher))
 	if *disableMailer {
 		adminOptions = append(adminOptions, controllers.WithWorker(nil))
+	} else {
+		mailWorker, err := worker.New(worker.WithCredentialCipher(credentialCipher))
+		if err != nil {
+			log.Fatal(err)
+		}
+		adminOptions = append(adminOptions, controllers.WithWorker(mailWorker))
 	}
 	adminConfig := conf.AdminConf
 	adminServer := controllers.NewAdminServer(adminConfig, adminOptions...)
@@ -211,6 +257,16 @@ func loadCredentialCipher() (*credentials.Cipher, error) {
 		return nil, fmt.Errorf("initialize IMAP credential cipher: %w", err)
 	}
 	return credentialCipher, nil
+}
+
+func runSMTPCredentialAction(
+	credentialCipher *credentials.Cipher,
+	rollback bool,
+) (models.SMTPCredentialMigrationResult, error) {
+	if rollback {
+		return models.RollbackSMTPCredentials(credentialCipher)
+	}
+	return models.MigrateSMTPCredentials(credentialCipher)
 }
 
 func runIMAPCredentialAction(

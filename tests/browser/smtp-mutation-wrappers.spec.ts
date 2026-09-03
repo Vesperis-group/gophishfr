@@ -242,8 +242,10 @@ async function fillProfile(
 test("SMTP mutations preserve credential and modal contracts", async ({ page }) => {
   test.setTimeout(120_000);
   const pageErrors: string[] = [];
+  const consoleMessages: string[] = [];
   const externalRequests: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
+  page.on("console", (message) => consoleMessages.push(message.text()));
   page.on("request", (request) => {
     if (new URL(request.url()).origin !== localOrigin) {
       externalRequests.push(request.url());
@@ -510,14 +512,59 @@ test("SMTP mutations preserve credential and modal contracts", async ({ page }) 
     profileIndex,
   );
 
+  await createdRow.locator('button[onclick^="copy("]').click();
+  await expect(page.locator("#modal")).toBeVisible();
+  await expect(page.locator("#password")).toHaveValue("");
+  await closeProfileModal(page);
+
   await createdRow.locator('button[onclick^="edit("]').click();
   await expect(page.locator("#modal")).toBeVisible();
-  await expect(page.locator("#password")).toHaveValue(createProfile.password);
+  await expect(page.locator("#password")).toHaveValue("");
   const unchangedPasswordName = `${profileName}_unchanged_password`;
+  const unsavedFromAddress = "unsaved-test@profile.invalid";
   await page.locator("#name").fill(unchangedPasswordName);
-  await page.locator("#host").fill("127.0.0.1:2526");
-  await page.locator("#ignore_cert_errors").check({ force: true });
+  await page.locator("#from").fill(unsavedFromAddress);
   await addHeader(page, "X-Synthetic-Update", "unchanged-password");
+
+  let testEmailBody: string | null = null;
+  await page.route("**/api/util/send_test_email", async (route) => {
+    testEmailBody = route.request().postData();
+    await route.fulfill({
+      body: JSON.stringify({ success: true, message: "Email sent" }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+  await page.locator('button:has-text("Send Test Email")').click();
+  await expect(page.locator("#sendTestEmailModal")).toBeVisible();
+  await page
+    .locator("input[name=to_email]")
+    .fill("recipient@profile.invalid");
+  await page.locator("#sendTestModalSubmit").click();
+  await expect(
+    page.locator('[id="sendTestEmailModal.flashes"] .alert-success'),
+  ).toHaveText(/Email Sent!/);
+  await page
+    .locator("#sendTestEmailModal")
+    .getByText("Cancel")
+    .click();
+  await expect(page.locator("#sendTestEmailModal")).toBeHidden();
+  await page.unroute("**/api/util/send_test_email");
+  expect(testEmailBody).not.toBeNull();
+  expect((JSON.parse(testEmailBody ?? "{}") as { smtp: SMTPPayload }).smtp).toEqual({
+    from_address: unsavedFromAddress,
+    headers: [
+      { key: "X-Synthetic-Mode", value: "create-updated" },
+      { key: "X-Synthetic-Update", value: "unchanged-password" },
+    ],
+    host: createProfile.host,
+    id: profileId,
+    ignore_cert_errors: false,
+    interface_type: "SMTP",
+    name: unchangedPasswordName,
+    password: "",
+    username: createProfile.username,
+  });
 
   await page.route(
     (url) => url.pathname === `/api/smtp/${profileId}`,
@@ -534,7 +581,7 @@ test("SMTP mutations preserve credential and modal contracts", async ({ page }) 
   await expect(page.locator('[id="modal.flashes"]')).toContainText(
     "synthetic profile update failure",
   );
-  await expect(page.locator("#password")).toHaveValue(createProfile.password);
+  await expect(page.locator("#password")).toHaveValue("");
   await expect(page.locator("#modal #modalSubmit")).toBeEnabled();
 
   await page.locator("#modal #modalSubmit").click();
@@ -556,25 +603,28 @@ test("SMTP mutations preserve credential and modal contracts", async ({ page }) 
     unchangedPasswordRequests[0].body,
   );
   expect(JSON.parse(unchangedPasswordRequests[0].body ?? "")).toEqual({
-    from_address: createProfile.from_address,
+    from_address: unsavedFromAddress,
     headers: [
       { key: "X-Synthetic-Mode", value: "create-updated" },
       { key: "X-Synthetic-Update", value: "unchanged-password" },
     ],
-    host: "127.0.0.1:2526",
+    host: createProfile.host,
     id: profileId,
-    ignore_cert_errors: true,
+    ignore_cert_errors: false,
     interface_type: "SMTP",
     name: unchangedPasswordName,
-    password: createProfile.password,
+    password: "",
     username: createProfile.username,
   });
 
   await unchangedPasswordRow.locator('button[onclick^="edit("]').click();
   await expect(page.locator("#modal")).toBeVisible();
+  await expect(page.locator("#password")).toHaveValue("");
   const changedPasswordName = `${profileName}_changed_password`;
   const changedPassword = "synthetic-profile-secret-b";
   await page.locator("#name").fill(changedPasswordName);
+  await page.locator("#host").fill("127.0.0.1:2526");
+  await page.locator("#ignore_cert_errors").check({ force: true });
   await page.locator("#password").fill(changedPassword);
   await page.locator("#modal #modalSubmit").click();
   await expect(page.locator("#modal")).toBeHidden();
@@ -592,16 +642,18 @@ test("SMTP mutations preserve credential and modal contracts", async ({ page }) 
   expect(changedPasswordRequest).toBeDefined();
   expect(JSON.parse(changedPasswordRequest?.body ?? "")).toMatchObject({
     id: profileId,
+    host: "127.0.0.1:2526",
+    ignore_cert_errors: true,
     name: changedPasswordName,
     password: changedPassword,
   });
 
   await changedPasswordRow.locator('button[onclick^="edit("]').click();
   await expect(page.locator("#modal")).toBeVisible();
+  await expect(page.locator("#password")).toHaveValue("");
   const emptyPasswordName = `${profileName}_empty_password`;
   await page.locator("#name").fill(emptyPasswordName);
   await page.locator("#password").fill("");
-  await page.locator("#username").fill("");
   await page
     .locator("#headersTable tbody tr")
     .locator("span > i.fa-trash-o")
@@ -633,13 +685,13 @@ test("SMTP mutations preserve credential and modal contracts", async ({ page }) 
   expect(Object.hasOwn(emptyPasswordBody, "password")).toBe(true);
   expect(emptyPasswordBody.password).toBe("");
   expect(Object.hasOwn(emptyPasswordBody, "username")).toBe(true);
-  expect(emptyPasswordBody.username).toBe("");
+  expect(emptyPasswordBody.username).toBe(createProfile.username);
   expect(emptyPasswordBody.headers).toEqual([]);
 
   await emptyPasswordRow.locator('button[onclick^="edit("]').click();
   await expect(page.locator("#modal")).toBeVisible();
   await expect(page.locator("#password")).toHaveValue("");
-  await expect(page.locator("#username")).toHaveValue("");
+  await expect(page.locator("#username")).toHaveValue(createProfile.username);
   await expect.poll(() => headerRows(page)).toEqual([]);
   await closeProfileModal(page);
 
@@ -709,6 +761,28 @@ test("SMTP mutations preserve credential and modal contracts", async ({ page }) 
   page.off("request", captureMutation);
 
   expect(await wrappersUseNativeTransport(page)).toBe(true);
+
+  const browserCredentialState = await page.evaluate(() => ({
+    dom: document.documentElement.innerHTML,
+    profiles: JSON.stringify(
+      (window as unknown as { profiles: unknown[] }).profiles,
+    ),
+    storage: JSON.stringify({
+      local: { ...localStorage },
+      session: { ...sessionStorage },
+    }),
+  }));
+  for (const observable of [
+    browserCredentialState.dom,
+    browserCredentialState.profiles,
+    browserCredentialState.storage,
+    consoleMessages.join("\n"),
+  ]) {
+    expect(observable).not.toContain(createProfile.password);
+    expect(observable).not.toContain(changedPassword);
+    expect(observable).not.toContain("gophishfr-cred:");
+    expect(observable).not.toContain("password_ciphertext");
+  }
 
   let createCount = 0;
   let releaseCreate: (() => void) | undefined;

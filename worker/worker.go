@@ -4,6 +4,7 @@ import (
 	"context"
 	"time"
 
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	log "github.com/Vesperis-group/gophishfr/logger"
 	"github.com/Vesperis-group/gophishfr/mailer"
 	"github.com/Vesperis-group/gophishfr/models"
@@ -19,28 +20,40 @@ type Worker interface {
 
 // DefaultWorker is the background worker that handles watching for new campaigns and sending emails appropriately.
 type DefaultWorker struct {
-	mailer mailer.Mailer
+	mailer           mailer.Mailer
+	credentialCipher *credentials.Cipher
 }
 
+// Option configures a worker.
+type Option func(*DefaultWorker) error
+
 // New creates a new worker object to handle the creation of campaigns
-func New(options ...func(Worker) error) (Worker, error) {
-	defaultMailer := mailer.NewMailWorker()
-	w := &DefaultWorker{
-		mailer: defaultMailer,
-	}
+func New(options ...Option) (Worker, error) {
+	w := &DefaultWorker{}
 	for _, opt := range options {
 		if err := opt(w); err != nil {
 			return nil, err
 		}
+	}
+	if w.mailer == nil {
+		w.mailer = mailer.NewMailWorker(w.credentialCipher)
 	}
 	return w, nil
 }
 
 // WithMailer sets the mailer for a given worker.
 // By default, workers use a standard, default mailworker.
-func WithMailer(m mailer.Mailer) func(*DefaultWorker) error {
+func WithMailer(m mailer.Mailer) Option {
 	return func(w *DefaultWorker) error {
 		w.mailer = m
+		return nil
+	}
+}
+
+// WithCredentialCipher injects the immutable application credential cipher.
+func WithCredentialCipher(credentialCipher *credentials.Cipher) Option {
+	return func(w *DefaultWorker) error {
+		w.credentialCipher = credentialCipher
 		return nil
 	}
 }

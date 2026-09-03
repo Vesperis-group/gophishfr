@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/textproto"
 
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	log "github.com/Vesperis-group/gophishfr/logger"
 	"github.com/gophish/gomail"
 	"github.com/sirupsen/logrus"
@@ -54,7 +55,7 @@ type Mail interface {
 	Error(err error) error
 	Success() error
 	Generate(msg *gomail.Message) error
-	GetDialer() (Dialer, error)
+	GetDialer(*credentials.Cipher) (Dialer, error)
 	GetSmtpFrom() (string, error)
 }
 
@@ -62,15 +63,18 @@ type Mail interface {
 // on a channel to send. It's assumed that every slice of emails received is meant
 // to be sent to the same server.
 type MailWorker struct {
-	queue chan []Mail
+	queue            chan []Mail
+	credentialCipher *credentials.Cipher
 }
 
 // NewMailWorker returns an instance of MailWorker with the mail queue
 // initialized.
-func NewMailWorker() *MailWorker {
-	return &MailWorker{
-		queue: make(chan []Mail),
+func NewMailWorker(credentialCipher ...*credentials.Cipher) *MailWorker {
+	worker := &MailWorker{queue: make(chan []Mail)}
+	if len(credentialCipher) != 0 {
+		worker.credentialCipher = credentialCipher[0]
 	}
+	return worker
 }
 
 // Start launches the mail worker to begin listening on the Queue channel
@@ -82,7 +86,7 @@ func (mw *MailWorker) Start(ctx context.Context) {
 			return
 		case ms := <-mw.queue:
 			go func(ctx context.Context, ms []Mail) {
-				dialer, err := ms[0].GetDialer()
+				dialer, err := ms[0].GetDialer(mw.credentialCipher)
 				if err != nil {
 					errorMail(err, ms)
 					return
