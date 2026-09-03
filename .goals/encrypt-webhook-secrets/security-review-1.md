@@ -7,8 +7,8 @@ issue within the immutable goal.
 
 ## Finding — NULL legacy rows can silently ignore updates
 
-**Severity:** Medium  
-**Confidence:** 9/10  
+**Severity:** Medium
+**Confidence:** 9/10
 **Affected paths:** `models/webhook.go`, `models/webhook_credentials.go`
 
 The webhook schema allows `secret IS NULL`. Runtime verification normalizes
