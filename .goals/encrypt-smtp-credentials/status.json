@@ -60,6 +60,13 @@
       "result": "completed",
       "completed_at": "2026-09-03T05:04:14+02:00",
       "summary": "Preserved SQLite SMTP ID history, separated protected test-email routing from safe message fields, and verified MySQL no-op updates in transaction."
+    },
+    {
+      "iteration": 3,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-03T05:15:00+02:00",
+      "summary": "All three profile-integrity corrections verified complete and transactional. SQLite sequence preserved after delete. Test-email binds protected auth/routing while retaining safe from/headers. MySQL no-op PUT verifies all fields match before committing. All goal criteria remain met."
     }
   ]
 }
