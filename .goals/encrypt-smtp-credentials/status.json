@@ -1,7 +1,7 @@
 {
   "goal_id": "encrypt-smtp-credentials",
-  "status": "completed",
-  "iteration": 3,
+  "status": "inspecting",
+  "iteration": 4,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "eadca8c679eb785adda5ec0ab110340d4c2baae6",
@@ -81,6 +81,20 @@
       "result": "pass",
       "completed_at": "2026-09-03T05:17:00+02:00",
       "summary": "Final security review found no remaining high-confidence exploit or data-loss issue."
+    },
+    {
+      "iteration": 3,
+      "role": "ci",
+      "result": "fail",
+      "completed_at": "2026-09-03T05:26:00+02:00",
+      "summary": "Frontend browser smoke failed twice because the settings retry contract observed four unexpected prior success flash events."
+    },
+    {
+      "iteration": 4,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-03T05:36:44+02:00",
+      "summary": "Made the successful-controls browser scenario await its flash callback before the failure/retry scenario resets event state."
     }
   ]
 }

@@ -294,6 +294,12 @@ async function assertSuccessfulControls(page: Page): Promise<void> {
   });
   await submitSettingsForm(page);
   await expect.poll(() => bodies.length).toBe(1);
+  // Interception only proves that fetch started. Drain its success callback
+  // before the next scenario clears the recorder, or this event can arrive in
+  // the failure/retry phase on slower CI workers.
+  await expect.poll(async () => readFlashEvents(page)).toEqual([
+    { kind: "success", message: "Empty settings accepted" },
+  ]);
   await page.unroute("**/settings");
 
   expect(bodies).toEqual([

@@ -2,8 +2,10 @@
 
 ## Outcome
 
-The goal passed independent inspection, code review, and security-specialist
-review after three Builder iterations.
+The implementation passed independent inspection, code review, and
+security-specialist review after three Builder iterations. Builder iteration 4
+corrected the browser-suite event-lifecycle race exposed by PR #55 CI and is
+ready for independent inspection.
 SMTP sending-profile passwords are now write-only at the HTTP/browser boundary,
 encrypted at rest with the existing AES-256-GCM credential foundation, bound to
 the authenticated owner and immutable profile ID, and decrypted only at the SMTP
@@ -69,6 +71,13 @@ dialer boundary.
 8. The Goal Inspector returned PASS in commit
    `7b8d5b4e3874db9beab1ac5ae0f56a918c2d13b5`; final code and security
    re-reviews both returned PASS with no remaining high-confidence finding.
+9. PR #55 passed every CI job except browser smoke, which failed twice because a
+   settings retry contract observed a late success flash from its preceding
+   settings scenario. This is assigned to Builder iteration 4.
+10. Builder iteration 4 identified that the successful-controls settings helper
+    returned after request interception but before its asynchronous success
+    callback. It now verifies that exact flash before the failure/retry helper
+    resets event state.
 
 ## Inspector Findings
 
@@ -112,6 +121,19 @@ continue to prevent silent storage truncation from committing.
 - Two clean frontend builds produced the same sending-profile asset hash;
   dependency manifests and lockfiles remain unchanged.
 - Independent final code and security reviews reported no findings.
+
+## Iteration 4 validation
+
+- The unmodified full browser suite was reproduced in CI-equivalent order; the
+  local worker passed while both CI attempts consistently exposed the slower
+  callback race.
+- The full 12-test browser suite passed twice consecutively after the fix,
+  preserving SMTP success/error and credential non-exposure assertions.
+- `./scripts/verify.sh`: PASS with format, lint, module, vet, build, unit, race,
+  frontend, action-pin, and pinned-toolchain vulnerability gates.
+- Gitleaks, actionlint, and zizmor: PASS with no new findings.
+- No product code, generated asset, dependency manifest, lockfile, timeout, or
+  existing assertion was changed or weakened.
 
 ## Recommendations
 
