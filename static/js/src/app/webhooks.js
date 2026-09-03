@@ -4,7 +4,7 @@ let latestEditRequest = 0;
 let createRequest = null;
 
 const setWebhookFormDisabled = (disabled) => {
-    ["name", "url", "secret", "is_active", "modalSubmit"].forEach((id) => {
+    ["name", "url", "secret", "clear_secret", "is_active", "modalSubmit"].forEach((id) => {
         document.getElementById(id).disabled = disabled;
     });
 };
@@ -14,6 +14,8 @@ const dismiss = () => {
     document.getElementById("name").value = "";
     document.getElementById("url").value = "";
     document.getElementById("secret").value = "";
+    document.getElementById("clear_secret").checked = false;
+    document.getElementById("clear_secret_row").style.display = "none";
     document.getElementById("is_active").checked = false;
     document.getElementById("flashes").replaceChildren();
 };
@@ -22,9 +24,21 @@ const saveWebhook = (id) => {
     let wh = {
         name: document.getElementById("name").value,
         url: document.getElementById("url").value,
-        secret: document.getElementById("secret").value,
         is_active: document.getElementById("is_active").checked,
     };
+    // The secret field is write-only and always starts blank (see
+    // editWebhook), so "secret" is included only when the user explicitly
+    // typed a replacement value or checked the explicit removal control.
+    // Leaving both untouched omits the property entirely, which the API
+    // treats as "preserve any existing secret" -- an ordinary metadata-only
+    // edit can never silently clear or resend a stored secret.
+    const secretInput = document.getElementById("secret").value;
+    const clearSecret = document.getElementById("clear_secret").checked;
+    if (secretInput !== "") {
+        wh.secret = secretInput;
+    } else if (clearSecret) {
+        wh.secret = "";
+    }
     if (id != -1) {
         wh.id = parseInt(id);
         api.webhookId.put(wh)
@@ -125,8 +139,13 @@ const editWebhook = (id) => {
         saveWebhook(id);
     };
     submit.addEventListener("click", submitHandler);
+    document.getElementById("secret").value = "";
+    document.getElementById("clear_secret").checked = false;
     if (id !== -1) {
         document.getElementById("webhookModalLabel").textContent = "Edit Webhook"
+        // Explicit revocation only makes sense once a webhook already exists,
+        // and is offered only here -- never pre-checked.
+        document.getElementById("clear_secret_row").style.display = "";
         setWebhookFormDisabled(true);
         api.webhookId.get(id)
           .then(function(wh) {
@@ -135,7 +154,10 @@ const editWebhook = (id) => {
               }
               document.getElementById("name").value = wh.name;
               document.getElementById("url").value = wh.url;
-              document.getElementById("secret").value = wh.secret;
+              // The API never returns the stored secret (write-only): the
+              // field is left blank rather than fetched or prefilled.
+              document.getElementById("secret").value = "";
+              document.getElementById("clear_secret").checked = false;
               document.getElementById("is_active").checked = wh.is_active;
               setWebhookFormDisabled(false);
           }, function () {
@@ -146,6 +168,7 @@ const editWebhook = (id) => {
           });
     } else {
         document.getElementById("webhookModalLabel").textContent = "New Webhook"
+        document.getElementById("clear_secret_row").style.display = "none";
         if (createRequest) {
             const pendingCreate = createRequest;
             setWebhookFormDisabled(true);
@@ -235,6 +258,19 @@ document.addEventListener('DOMContentLoaded', function() {
     });
     document.getElementById("new_button").addEventListener("click", function() {
         editWebhook(-1);
+    });
+    // Typing a replacement value and asking to explicitly remove the secret
+    // are mutually exclusive: whichever the user touches most recently wins,
+    // so the two controls can never both look "armed" at once.
+    document.getElementById("secret").addEventListener("input", function() {
+        if (this.value !== "") {
+            document.getElementById("clear_secret").checked = false;
+        }
+    });
+    document.getElementById("clear_secret").addEventListener("change", function() {
+        if (this.checked) {
+            document.getElementById("secret").value = "";
+        }
     });
     // Rows are rebuilt whenever the table is redrawn, so these stay delegated.
     // The handler receives the button that was clicked: under the previous

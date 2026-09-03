@@ -5,11 +5,16 @@ image="${1:-gophishfr:ci}"
 workdir="$(mktemp -d)"
 container_id=""
 smtp_pid=""
+webhook_pid=""
 
 cleanup() {
     if [ -n "${smtp_pid}" ] && kill -0 "${smtp_pid}" >/dev/null 2>&1; then
         kill "${smtp_pid}" >/dev/null 2>&1 || true
         wait "${smtp_pid}" 2>/dev/null || true
+    fi
+    if [ -n "${webhook_pid}" ] && kill -0 "${webhook_pid}" >/dev/null 2>&1; then
+        kill "${webhook_pid}" >/dev/null 2>&1 || true
+        wait "${webhook_pid}" 2>/dev/null || true
     fi
     if [ -n "${container_id}" ] &&
        docker inspect "${container_id}" >/dev/null 2>&1; then
@@ -18,6 +23,72 @@ cleanup() {
     rm -rf "${workdir}"
 }
 trap cleanup EXIT
+
+start_webhook_probe() {
+    result_path="$1"
+    expected_requests="$2"
+    signing_secret="$3"
+    rm -f "${result_path}"
+    python3 - "${result_path}" "${expected_requests}" "${signing_secret}" <<'PY' &
+import hashlib
+import hmac
+import json
+import sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+result_path = sys.argv[1]
+expected_requests = int(sys.argv[2])
+signing_secret = sys.argv[3].encode("utf-8")
+state = {"count": 0, "signatures_valid": True}
+
+class ReusableHTTPServer(HTTPServer):
+    allow_reuse_address = True
+
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        body = self.rfile.read(length)
+        expected_signature = "sha256=" + hmac.new(
+            signing_secret, body, hashlib.sha256
+        ).hexdigest()
+        state["count"] += 1
+        state["signatures_valid"] = (
+            state["signatures_valid"]
+            and self.headers.get("X-Gophish-Signature") == expected_signature
+        )
+        self.send_response(204)
+        self.end_headers()
+
+    def log_message(self, _format, *_args):
+        pass
+
+server = ReusableHTTPServer(("127.0.0.1", 2526), Handler)
+server.timeout = 4
+if expected_requests == 0:
+    server.handle_request()
+else:
+    for _ in range(expected_requests):
+        server.handle_request()
+server.server_close()
+with open(result_path, "w", encoding="utf-8") as result:
+    json.dump(state, result)
+PY
+    webhook_pid=$!
+    sleep 1
+}
+
+assert_webhook_probe() {
+    result_path="$1"
+    expected_requests="$2"
+    wait "${webhook_pid}"
+    webhook_pid=""
+    if [ "$(jq -r '.count' "${result_path}")" != "${expected_requests}" ] ||
+       [ "$(jq -r '.signatures_valid' "${result_path}")" != "true" ]; then
+        echo "container webhook request count or HMAC verification failed" >&2
+        cat "${result_path}" >&2
+        exit 1
+    fi
+}
 
 python3 - "${workdir}/keyring.json" <<'PY'
 import base64
@@ -103,6 +174,8 @@ sqlite3 "${workdir}/gophish.db" \
     "INSERT INTO imap (user_id, host, port, username, password, password_ciphertext, tls, enabled, folder, imap_freq) VALUES (1, 'external-imap.invalid', 993, 'synthetic-container-user', 'synthetic-container-imap-password', '', 1, 1, 'INBOX', 60);"
 sqlite3 "${workdir}/gophish.db" \
     "INSERT INTO smtp (user_id, interface_type, name, host, username, password, password_ciphertext, from_address, ignore_cert_errors) VALUES (1, 'SMTP', 'Container encrypted SMTP', 'smtp.invalid:2525', 'synthetic-container-user', 'synthetic-container-smtp-password', '', 'sender@example.test', 0), (1, 'SMTP', 'Container no-auth SMTP', 'smtp.invalid:2525', '', '', '', 'sender@example.test', 0);"
+sqlite3 "${workdir}/gophish.db" \
+    "INSERT INTO webhooks (name, url, secret, secret_ciphertext, is_active) VALUES ('Container legacy webhook', 'http://127.0.0.1:2526/legacy', 'synthetic-container-webhook-legacy', '', 1), ('Container no-secret webhook', 'http://127.0.0.1:2526/no-secret', '', '', 0);"
 
 docker run --rm \
     --mount "type=bind,src=${workdir}/keyring.json,dst=/run/secrets/gophishfr-credential-keyring,readonly" \
@@ -133,6 +206,39 @@ smtp_state="$(sqlite3 "${workdir}/gophish.db" \
     "SELECT SUM(password <> ''), SUM(password_ciphertext <> ''), SUM(instr(password_ciphertext, 'synthetic-container-smtp-password') <> 0), SUM(username = '' AND password = '' AND password_ciphertext = '') FROM smtp;")"
 if [ "${smtp_state}" != "0|1|0|1" ]; then
     echo "container SMTP migration did not preserve encrypted/no-auth states" >&2
+    exit 1
+fi
+
+docker run --rm \
+    --mount "type=bind,src=${workdir}/keyring.json,dst=/run/secrets/gophishfr-credential-keyring,readonly" \
+    --mount "type=bind,src=${workdir},dst=/data" \
+    --env GOPHISHFR_CREDENTIAL_KEYRING_FILE=/run/secrets/gophishfr-credential-keyring \
+    --env DB_FILE_PATH=/data/gophish.db \
+    "${image}" \
+    ./docker/run.sh \
+    --migrate-webhook-secrets
+
+webhook_state="$(sqlite3 "${workdir}/gophish.db" \
+    "SELECT SUM(secret <> ''), SUM(secret_ciphertext <> ''), SUM(instr(secret_ciphertext, 'synthetic-container-webhook-legacy') <> 0), SUM(secret = '' AND secret_ciphertext = '') FROM webhooks;")"
+if [ "${webhook_state}" != "0|1|0|1" ]; then
+    echo "container webhook migration did not preserve encrypted/no-secret states" >&2
+    exit 1
+fi
+
+# Re-running is a byte-preserving no-op.
+legacy_webhook_ciphertext="$(sqlite3 "${workdir}/gophish.db" \
+    "SELECT secret_ciphertext FROM webhooks WHERE name = 'Container legacy webhook';")"
+docker run --rm \
+    --mount "type=bind,src=${workdir}/keyring.json,dst=/run/secrets/gophishfr-credential-keyring,readonly" \
+    --mount "type=bind,src=${workdir},dst=/data" \
+    --env GOPHISHFR_CREDENTIAL_KEYRING_FILE=/run/secrets/gophishfr-credential-keyring \
+    --env DB_FILE_PATH=/data/gophish.db \
+    "${image}" \
+    ./docker/run.sh \
+    --migrate-webhook-secrets
+if [ "$(sqlite3 "${workdir}/gophish.db" \
+    "SELECT secret_ciphertext FROM webhooks WHERE name = 'Container legacy webhook';")" != "${legacy_webhook_ciphertext}" ]; then
+    echo "idempotent container webhook migration changed ciphertext" >&2
     exit 1
 fi
 
@@ -413,6 +519,187 @@ fi
 sqlite3 "${workdir}/gophish.db" \
     "UPDATE smtp SET password_ciphertext = '${rotated_ciphertext}' WHERE id = ${api_smtp_id};"
 
+# Exercise webhook fresh secret/no-secret writes, response secrecy, exact
+# preserve/replace/clear semantics, and the unchanged HMAC-SHA256 wire format.
+webhook_response="$(curl --silent --show-error --fail-with-body \
+    --request POST \
+    --header "Authorization: Bearer ${api_key}" \
+    --header "Content-Type: application/json" \
+    --data '{"name":"Container API webhook","url":"http://127.0.0.1:2526/runtime","secret":"synthetic-container-webhook-api","is_active":true}' \
+    "${api_url}/api/webhooks/")"
+api_webhook_id="$(printf '%s' "${webhook_response}" | jq -er '.id')"
+if printf '%s' "${webhook_response}" |
+   grep -Eq 'secret|secret_ciphertext|gophishfr-cred:|container-test-key'; then
+    echo "container webhook create response exposed credential material" >&2
+    exit 1
+fi
+api_webhook_ciphertext="$(sqlite3 "${workdir}/gophish.db" \
+    "SELECT secret_ciphertext FROM webhooks WHERE id = ${api_webhook_id};")"
+if [ -z "${api_webhook_ciphertext}" ] ||
+   [ "$(sqlite3 "${workdir}/gophish.db" \
+       "SELECT secret = '' AND instr(secret_ciphertext, 'synthetic-container-webhook-api') = 0 FROM webhooks WHERE id = ${api_webhook_id};")" != "1" ]; then
+    echo "container webhook fresh write did not store only opaque ciphertext" >&2
+    exit 1
+fi
+
+curl --silent --show-error --fail-with-body \
+    --request POST \
+    --header "Authorization: Bearer ${api_key}" \
+    --header "Content-Type: application/json" \
+    --data '{"name":"Container API no-secret webhook","url":"http://127.0.0.1:2526/no-secret-runtime","is_active":false}' \
+    "${api_url}/api/webhooks/" >/dev/null
+if [ "$(sqlite3 "${workdir}/gophish.db" \
+    "SELECT COUNT(*) FROM webhooks WHERE name = 'Container API no-secret webhook' AND COALESCE(secret, '') = '' AND secret_ciphertext = '';")" != "1" ]; then
+    echo "container webhook no-secret write invented credential data" >&2
+    exit 1
+fi
+
+curl --silent --show-error --fail-with-body \
+    --request PUT \
+    --header "Authorization: Bearer ${api_key}" \
+    --header "Content-Type: application/json" \
+    --data '{"name":"Container API webhook preserved","url":"http://127.0.0.1:2526/runtime","is_active":true}' \
+    "${api_url}/api/webhooks/${api_webhook_id}" >/dev/null
+if [ "$(sqlite3 "${workdir}/gophish.db" \
+    "SELECT secret_ciphertext FROM webhooks WHERE id = ${api_webhook_id};")" != "${api_webhook_ciphertext}" ]; then
+    echo "container webhook absent-secret update did not preserve ciphertext" >&2
+    exit 1
+fi
+
+start_webhook_probe "${workdir}/webhook-preserve.json" 1 "synthetic-container-webhook-api"
+curl --silent --show-error --fail-with-body \
+    --request POST \
+    --header "Authorization: Bearer ${api_key}" \
+    --header "Content-Type: application/json" \
+    --data '{}' \
+    "${api_url}/api/webhooks/${api_webhook_id}/validate" >/dev/null
+assert_webhook_probe "${workdir}/webhook-preserve.json" 1
+
+curl --silent --show-error --fail-with-body \
+    --request PUT \
+    --header "Authorization: Bearer ${api_key}" \
+    --header "Content-Type: application/json" \
+    --data '{"name":"Container API webhook replaced","url":"http://127.0.0.1:2526/runtime","secret":"synthetic-container-webhook-replaced","is_active":true}' \
+    "${api_url}/api/webhooks/${api_webhook_id}" >/dev/null
+replaced_webhook_ciphertext="$(sqlite3 "${workdir}/gophish.db" \
+    "SELECT secret_ciphertext FROM webhooks WHERE id = ${api_webhook_id};")"
+if [ -z "${replaced_webhook_ciphertext}" ] ||
+   [ "${replaced_webhook_ciphertext}" = "${api_webhook_ciphertext}" ]; then
+    echo "container webhook replacement did not rotate ciphertext" >&2
+    exit 1
+fi
+start_webhook_probe "${workdir}/webhook-replace.json" 1 "synthetic-container-webhook-replaced"
+curl --silent --show-error --fail-with-body \
+    --request POST \
+    --header "Authorization: Bearer ${api_key}" \
+    --header "Content-Type: application/json" \
+    --data '{}' \
+    "${api_url}/api/webhooks/${api_webhook_id}/validate" >/dev/null
+assert_webhook_probe "${workdir}/webhook-replace.json" 1
+
+# A copied envelope authenticates only for its original immutable webhook ID.
+sqlite3 "${workdir}/gophish.db" \
+    "UPDATE webhooks SET secret_ciphertext = '${legacy_webhook_ciphertext}' WHERE id = ${api_webhook_id};"
+start_webhook_probe "${workdir}/webhook-aad-failure.json" 0 ""
+aad_status="$(curl --silent --output "${workdir}/webhook-aad-response.json" \
+    --write-out '%{http_code}' \
+    --request POST \
+    --header "Authorization: Bearer ${api_key}" \
+    --header "Content-Type: application/json" \
+    --data '{}' \
+    "${api_url}/api/webhooks/${api_webhook_id}/validate")"
+assert_webhook_probe "${workdir}/webhook-aad-failure.json" 0
+if [ "${aad_status}" != "400" ]; then
+    echo "container webhook copied-AAD credential did not fail closed" >&2
+    exit 1
+fi
+
+# A tampered envelope also fails before http.Client.Do.
+sqlite3 "${workdir}/gophish.db" \
+    "UPDATE webhooks SET secret_ciphertext = '${replaced_webhook_ciphertext}A' WHERE id = ${api_webhook_id};"
+start_webhook_probe "${workdir}/webhook-tamper-failure.json" 0 ""
+tamper_status="$(curl --silent --output "${workdir}/webhook-tamper-response.json" \
+    --write-out '%{http_code}' \
+    --request POST \
+    --header "Authorization: Bearer ${api_key}" \
+    --header "Content-Type: application/json" \
+    --data '{}' \
+    "${api_url}/api/webhooks/${api_webhook_id}/validate")"
+assert_webhook_probe "${workdir}/webhook-tamper-failure.json" 0
+if [ "${tamper_status}" != "400" ]; then
+    echo "container webhook tamper did not fail closed" >&2
+    exit 1
+fi
+
+sqlite3 "${workdir}/gophish.db" \
+    "UPDATE webhooks SET secret_ciphertext = '${replaced_webhook_ciphertext}' WHERE id = ${api_webhook_id};"
+curl --silent --show-error --fail-with-body \
+    --request PUT \
+    --header "Authorization: Bearer ${api_key}" \
+    --header "Content-Type: application/json" \
+    --data '{"name":"Container API webhook cleared","url":"http://127.0.0.1:2526/runtime","secret":"","is_active":true}' \
+    "${api_url}/api/webhooks/${api_webhook_id}" >/dev/null
+if [ "$(sqlite3 "${workdir}/gophish.db" \
+    "SELECT COALESCE(secret, '') = '' AND secret_ciphertext = '' FROM webhooks WHERE id = ${api_webhook_id};")" != "1" ]; then
+    echo "container webhook explicit clear did not remove ciphertext" >&2
+    exit 1
+fi
+start_webhook_probe "${workdir}/webhook-empty-key.json" 1 ""
+curl --silent --show-error --fail-with-body \
+    --request POST \
+    --header "Authorization: Bearer ${api_key}" \
+    --header "Content-Type: application/json" \
+    --data '{}' \
+    "${api_url}/api/webhooks/${api_webhook_id}/validate" >/dev/null
+assert_webhook_probe "${workdir}/webhook-empty-key.json" 1
+
+docker rm --force "${container_id}" >/dev/null
+container_id=""
+
+# The same persisted envelope must fail before HTTP when the running image has
+# a keyring with the right ID but different key bytes.
+container_id="$(docker run --detach \
+    --network host \
+    --mount "type=bind,src=${workdir}/wrong-keyring.json,dst=/run/secrets/gophishfr-credential-keyring,readonly" \
+    --mount "type=bind,src=${workdir},dst=/data" \
+    --env GOPHISHFR_CREDENTIAL_KEYRING_FILE=/run/secrets/gophishfr-credential-keyring \
+    --env DB_FILE_PATH=/data/gophish.db \
+    --env ADMIN_LISTEN_URL=127.0.0.1:3333 \
+    --env ADMIN_USE_TLS=false \
+    --env PHISH_LISTEN_URL=127.0.0.1:8081 \
+    "${image}" \
+    ./docker/run.sh \
+    --mode admin)"
+ready=0
+for _ in $(seq 1 30); do
+    if curl --silent --fail \
+        --header "Authorization: Bearer ${api_key}" \
+        "${api_url}/api/webhooks/" >/dev/null; then
+        ready=1
+        break
+    fi
+    sleep 1
+done
+if [ "${ready}" -ne 1 ]; then
+    docker logs "${container_id}" >&2
+    echo "wrong-key container API did not become ready" >&2
+    exit 1
+fi
+legacy_webhook_id="$(sqlite3 "${workdir}/gophish.db" \
+    "SELECT id FROM webhooks WHERE name = 'Container legacy webhook';")"
+start_webhook_probe "${workdir}/webhook-wrong-key-failure.json" 0 ""
+wrong_key_status="$(curl --silent --output "${workdir}/webhook-wrong-key-response.json" \
+    --write-out '%{http_code}' \
+    --request POST \
+    --header "Authorization: Bearer ${api_key}" \
+    --header "Content-Type: application/json" \
+    --data '{}' \
+    "${api_url}/api/webhooks/${legacy_webhook_id}/validate")"
+assert_webhook_probe "${workdir}/webhook-wrong-key-failure.json" 0
+if [ "${wrong_key_status}" != "400" ]; then
+    echo "container webhook wrong key did not fail before HTTP" >&2
+    exit 1
+fi
 docker rm --force "${container_id}" >/dev/null
 container_id=""
 
@@ -430,6 +717,23 @@ fi
 if [ "$(sqlite3 "${workdir}/gophish.db" \
     "SELECT password_ciphertext FROM smtp WHERE name = 'Container encrypted SMTP';")" != "${smtp_ciphertext}" ]; then
     echo "wrong-key container rollback changed SMTP ciphertext" >&2
+    exit 1
+fi
+
+if docker run --rm \
+    --mount "type=bind,src=${workdir}/wrong-keyring.json,dst=/run/secrets/gophishfr-credential-keyring,readonly" \
+    --mount "type=bind,src=${workdir},dst=/data" \
+    --env GOPHISHFR_CREDENTIAL_KEYRING_FILE=/run/secrets/gophishfr-credential-keyring \
+    --env DB_FILE_PATH=/data/gophish.db \
+    "${image}" \
+    ./docker/run.sh \
+    --rollback-webhook-secrets; then
+    echo "container webhook rollback unexpectedly accepted a wrong key" >&2
+    exit 1
+fi
+if [ "$(sqlite3 "${workdir}/gophish.db" \
+    "SELECT secret_ciphertext FROM webhooks WHERE name = 'Container legacy webhook';")" != "${legacy_webhook_ciphertext}" ]; then
+    echo "wrong-key container rollback changed webhook ciphertext" >&2
     exit 1
 fi
 
@@ -464,11 +768,33 @@ if [ "${smtp_rollback_state}" != "2|2" ]; then
     exit 1
 fi
 
+docker run --rm \
+    --mount "type=bind,src=${workdir}/keyring.json,dst=/run/secrets/gophishfr-credential-keyring,readonly" \
+    --mount "type=bind,src=${workdir},dst=/data" \
+    --env GOPHISHFR_CREDENTIAL_KEYRING_FILE=/run/secrets/gophishfr-credential-keyring \
+    --env DB_FILE_PATH=/data/gophish.db \
+    "${image}" \
+    ./docker/run.sh \
+    --rollback-webhook-secrets
+webhook_rollback_state="$(sqlite3 "${workdir}/gophish.db" \
+    "SELECT SUM(secret <> '' AND secret_ciphertext = ''), SUM(secret = '' AND secret_ciphertext = '') FROM webhooks;")"
+if [ "${webhook_rollback_state}" != "1|3" ]; then
+    echo "container webhook rollback did not restore legacy/no-secret states" >&2
+    exit 1
+fi
+
 if docker run --rm \
     "${image}" \
     ./docker/run.sh \
     --migrate-imap-credentials; then
     echo "offline migration unexpectedly accepted a missing keyring" >&2
+    exit 1
+fi
+if docker run --rm \
+    "${image}" \
+    ./docker/run.sh \
+    --migrate-webhook-secrets; then
+    echo "offline webhook migration unexpectedly accepted a missing keyring" >&2
     exit 1
 fi
 if docker run --rm \

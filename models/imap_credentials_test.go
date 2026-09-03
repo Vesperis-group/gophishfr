@@ -446,8 +446,13 @@ func TestSQLiteIMAPSchemaMigrationGuardsDuplicatesAndCiphertext(t *testing.T) {
 	if err := goose.Up(sqlDB, migrationsPath); err != nil {
 		t.Fatalf("apply schema after duplicate resolution: %v", err)
 	}
-	if err := goose.Down(sqlDB, migrationsPath); err != nil {
-		t.Fatalf("remove later SMTP credential migration: %v", err)
+	// Roll back to exactly the IMAP credential migration's own version,
+	// regardless of how many later migrations (SMTP, webhook, and any future
+	// addition) now sit on top of it. The rest of this test exercises IMAP's
+	// own Down guard in isolation; a fixed single Down call would instead
+	// remove only whichever migration happens to be newest.
+	if err := goose.DownTo(sqlDB, migrationsPath, 20260903000000); err != nil {
+		t.Fatalf("remove later credential migrations: %v", err)
 	}
 	if _, err := sqlDB.Exec("INSERT INTO imap (user_id, password) VALUES (91, ?)", testIMAPSecret); err == nil {
 		t.Fatal("unique IMAP user constraint was not enforced")
@@ -515,8 +520,12 @@ func TestMySQLIMAPCredentialLifecycle(t *testing.T) {
 	if err := goose.SetDialect("mysql"); err != nil {
 		t.Fatalf("set mysql dialect: %v", err)
 	}
-	if err := goose.Down(db.DB(), conf.MigrationsPath); err != nil {
-		t.Fatalf("remove later SMTP credential migration: %v", err)
+	// Roll back to exactly the pre-IMAP-encryption legacy schema, regardless
+	// of how many later migrations (SMTP, webhook, and any future addition)
+	// now sit on top of it. A fixed count of blind Down calls would instead
+	// stop wherever the newest migration happens to be.
+	if err := goose.DownTo(db.DB(), conf.MigrationsPath, 20220321133237); err != nil {
+		t.Fatalf("prepare legacy mysql schema: %v", err)
 	}
 	t.Cleanup(func() {
 		_ = goose.SetDialect("mysql")
@@ -524,9 +533,6 @@ func TestMySQLIMAPCredentialLifecycle(t *testing.T) {
 		_ = db.Exec("DELETE FROM imap").Error
 		_ = database.Close()
 	})
-	if err := goose.Down(db.DB(), conf.MigrationsPath); err != nil {
-		t.Fatalf("prepare legacy mysql schema: %v", err)
-	}
 	if err := db.Exec(
 		"INSERT INTO imap (user_id, password) VALUES (101, ?), (101, ?)",
 		testIMAPSecret,
@@ -550,8 +556,10 @@ func TestMySQLIMAPCredentialLifecycle(t *testing.T) {
 	if err := goose.Up(db.DB(), conf.MigrationsPath); err != nil {
 		t.Fatalf("apply mysql credential schema: %v", err)
 	}
-	if err := goose.Down(db.DB(), conf.MigrationsPath); err != nil {
-		t.Fatalf("remove later SMTP credential migration: %v", err)
+	// Land exactly on the IMAP encryption migration's own version so its
+	// unique constraint is active but nothing newer (SMTP, webhook, ...) is.
+	if err := goose.DownTo(db.DB(), conf.MigrationsPath, 20260903000000); err != nil {
+		t.Fatalf("remove later credential migrations: %v", err)
 	}
 	if err := db.Exec("INSERT INTO imap (user_id, password) VALUES (101, ?)", testIMAPSecret).Error; err == nil {
 		t.Fatal("mysql unique IMAP user constraint was not enforced")

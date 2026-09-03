@@ -1,0 +1,60 @@
+{
+  "goal_id": "encrypt-webhook-secrets",
+  "status": "completed",
+  "iteration": 2,
+  "builder_model": "Claude:Sonnet-4.6",
+  "inspector_model": "Claude:Haiku-4.5",
+  "initial_sha": "aa842b799004f369733444467712e4acd9b62cdc",
+  "created_at": "2026-09-03T06:12:00+02:00",
+  "history": [
+    {
+      "iteration": 1,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-03T07:45:09+02:00",
+      "summary": "Encrypted webhooks.secret at rest with internal/credentials (AES-256-GCM, AAD bound to the immutable webhook ID), removed all API/frontend plaintext exposure, implemented the confirmed absent/null=preserve, empty=clear, non-empty=replace tri-state, added paired SQLite/MySQL schema migrations plus offline --migrate-webhook-secrets/--rollback-webhook-secrets actions, moved decryption to the HMAC delivery boundary with zero-outbound-on-credential-failure, and along the way fixed two pre-existing IMAP/SMTP test fragilities (fixed-count goose.Down assumptions) that the new migration exposed. Full local gates, real MySQL, real-backend browser coverage, and the production-image webhook container lifecycle all pass; docs, self-review, and a backlog issue for webhook URL secrets are included."
+    },
+    {
+      "iteration": 1,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-03T08:07:28+02:00",
+      "summary": "All acceptance criteria verified with comprehensive evidence: cryptographic boundary intact (shared keyring, ID-bound AAD, record-copy failure), transaction safety proven (read-back verification, plaintext-insert trigger test, concurrent-mutation detection), API isolation verified (tri-state decoder, write-only responses, PermissionModifySystem enforcement), frontend never leaks secrets (no prefill, explicit controls, browser test confirmation), zero-outbound guarantee tested (credential failures excluded before http.Client.Do, multiple failure modes covered), lifecycle operations complete (migration idempotence, rollback atomicity, schema Down guarded), comprehensive test coverage (764+ new lines, SQLite/MySQL/API/browser/Docker verified), documentation thorough (threat model, matrices, prerequisites, key loss handling). IMAP/SMTP regression fixed (goose.DownTo instead of assumed version). No issues requiring fixes."
+    },
+    {
+      "iteration": 1,
+      "role": "security-review",
+      "result": "fail",
+      "completed_at": "2026-09-03T08:14:00+02:00",
+      "summary": "NULL legacy secret rows can report successful metadata updates without changing the row, and rollback rejects valid NULL+ciphertext states."
+    },
+    {
+      "iteration": 2,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-03T15:25:00+02:00",
+      "summary": "Made runtime and rollback predicates NULL-aware, added exact in-transaction verification of metadata and concrete credential storage, proved NULL preserve/clear/replace/deactivation/migration/rollback/no-op/conflict behavior on SQLite and real MySQL, and broadened CI to run every MySQL webhook credential test. Full verification, browser, Docker lifecycle, fuzzing, dependency audits, and security scanners completed without a new finding."
+    },
+    {
+      "iteration": 2,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-03T15:36:12+02:00",
+      "summary": "Security finding resolved: NULL legacy secrets now handled identically to empty strings in all predicates (PostWebhook, PutWebhook, rollback); full-row storage verification with metadata fields ensures metadata-bundled updates persist and are observable in delivery selection; MySQL changed-row semantics handled correctly; all valid/ambiguous/concurrent states tested on SQLite and real MySQL 8.4.11; 6 comprehensive test functions prove preserve/clear/replace/deactivate/no-op/concurrent/rollback behavior; CI broadened to run all MySQL webhook credential tests. No issues requiring fixes; all iteration-1 acceptance criteria remain satisfied."
+    },
+    {
+      "iteration": 2,
+      "role": "security-review",
+      "result": "pass",
+      "completed_at": "2026-09-03T15:41:00+02:00",
+      "summary": "Independent specialist re-review confirmed the NULL data-integrity finding closed and found no remaining high-confidence security issue."
+    },
+    {
+      "iteration": 2,
+      "role": "code-review",
+      "result": "pass",
+      "completed_at": "2026-09-03T15:42:00+02:00",
+      "summary": "Final complete-diff review found no high-confidence correctness, security, migration, concurrency, or compatibility defect."
+    }
+  ]
+}
