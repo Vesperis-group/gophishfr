@@ -48,8 +48,6 @@ hash must provide FILE or ENV once; a failed recovery leaves that row unchanged.
 The initial administrator API token setting remains independent of the password
 source.
 
-## Deliberate follow-ups
-
-The configured application log file retains its historical mode behavior.
-**LOG FILE MODE HARDENING: SEPARATE BACKLOG.** The Docker runtime configuration
-dump is also unchanged and belongs to a separate change.
+Application log-file permissions and their threat boundary are documented in
+[Application log-file security](LOG_FILE_SECURITY.md). This does not change the
+bootstrap password handling described above.
