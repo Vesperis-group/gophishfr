@@ -34,6 +34,13 @@
       "result": "completed",
       "completed_at": "2026-09-03T17:19:00+02:00",
       "summary": "Moved the empty bootstrap value from high-precedence role vars to role defaults so inventory, play, and Vault overrides reach the protected input-file and systemd tasks; retained no_log, service-user ownership, mode 0400, and safe unset behavior; added an executable structural regression to the full verification gate. Full repository/race, real container lifecycle, YAML parsing, dependency, and security checks preserve all iteration-1 guarantees."
+    },
+    {
+      "iteration": 2,
+      "role": "inspector",
+      "result": "passed",
+      "completed_at": "2026-09-03T17:19:38+02:00",
+      "summary": "Ansible precedence correction verified: empty default moved to role defaults (low precedence) allowing inventory/play/Vault overrides; structural test proves override reaches secret-file provisioning and service environment; no_log retained on both tasks; file mode 0400 and service-user ownership correct; guard conditions prevent provisioning when unset; all iteration-1 guarantees preserved with zero product code changes; YAML syntax validated."
     }
   ]
 }
