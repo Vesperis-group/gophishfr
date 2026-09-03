@@ -24,7 +24,14 @@ This is an intentional security-breaking API change:
 - Ciphertext, key IDs, envelope markers, masks, and `has_password` indicators
   are never returned.
 - An empty or omitted password on update preserves an existing encrypted
-  password byte-for-byte. A non-empty value replaces it.
+  password byte-for-byte only while the SMTP interface, host/port, username,
+  and certificate-verification policy remain unchanged. Changing any of those
+  authentication-routing fields requires a non-empty replacement password, so
+  a stored credential cannot be redirected to another connection context.
+- SMTP passwords are limited to 255 valid UTF-8 bytes. This byte limit is
+  enforced consistently even where MySQL counts `VARCHAR` characters or
+  SQLite does not enforce the declaration. The limit also applies to
+  request-only test-email passwords.
 - `password: null` is rejected. There is no password-clearing action in this
   release.
 - Editing and copying a profile always opens an empty password field.
@@ -91,6 +98,10 @@ The paired SQLite/MySQL Goose migration
 `20260903010000_encrypt_smtp_credentials.sql` retains the legacy `password`
 column temporarily and adds `password_ciphertext VARCHAR(2048)`. It does not
 add a uniqueness constraint: multiple sending profiles per user remain valid.
+The application derives a 464-byte maximum accepted envelope from the
+255-byte plaintext limit, fixed v1 fields, 64-byte maximum key ID, 12-byte
+nonce, and 16-byte AES-GCM tag after base64 encoding. The 2048-character
+column therefore retains a large safety margin for the ASCII envelope.
 
 With writers stopped and both backups complete, run:
 
@@ -105,8 +116,11 @@ before writing. For each legacy plaintext row it:
 
 1. encrypts with AAD `smtp-password / smtp / password / user_id / smtp.id`;
 2. immediately decrypts and compares the value in memory;
-3. writes the envelope and clears the legacy column; and
-4. commits only after every row succeeds.
+3. writes the envelope while retaining plaintext and reads both columns back
+   byte-for-byte inside the transaction;
+4. clears plaintext only after that persisted-value check and verifies the
+   final column state; and
+5. commits only after every row succeeds.
 
 Already-encrypted rows are authenticated and left byte-identical. Rows with
 both secret columns empty remain unchanged. Rows with both columns populated,
@@ -143,12 +157,16 @@ export GOPHISHFR_CREDENTIAL_KEYRING_FILE=/etc/gophishfr/credential-keyring.json
 
 The legacy column is never a runtime fallback. GophishFR decrypts only while
 constructing the SMTP dialer for a campaign or test email. A malformed,
-tampered, moved, wrong-key, or unknown-key envelope fails before any SMTP
+oversized, tampered, moved, wrong-key, or unknown-key envelope, or an envelope
+whose plaintext exceeds the storage-safe limit, fails before any SMTP
 connection is attempted.
 
 For an existing authorized profile, test email uses its stored envelope when
-the browser's password field is empty. A newly entered test password is used
-only in memory and is neither persisted nor echoed.
+the browser's password field is empty. In that case it also uses the complete
+stored connection context, ignoring request-supplied host, username, interface,
+TLS policy, sender, and headers. A newly entered test password explicitly uses
+the request connection context only in memory and is neither persisted nor
+echoed.
 
 ## Docker
 
@@ -193,8 +211,11 @@ Do not downgrade the schema first.
    version first and never loop over multiple downs.
 
 The data rollback is transactional, idempotent, and never invokes schema Down.
-The Down migration refuses to remove the ciphertext column while any envelope
-remains. After data rollback and that single Down, old binaries can read the
-restored password column. If any step fails, keep writers stopped and restore
-the matching database and keyring backups rather than deleting ciphertext or
-forcing the schema change.
+It validates the 255-byte plaintext limit, writes plaintext while retaining
+ciphertext, reads both columns back byte-for-byte, and only then clears and
+rechecks ciphertext. This detects silent non-strict MySQL truncation before the
+only encrypted copy can be committed as cleared. The Down migration refuses to
+remove the ciphertext column while any envelope remains. After data rollback
+and that single Down, old binaries can read the restored password column. If
+any step fails, keep writers stopped and restore the matching database and
+keyring backups rather than deleting ciphertext or forcing the schema change.

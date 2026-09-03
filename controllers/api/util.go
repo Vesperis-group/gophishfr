@@ -107,6 +107,10 @@ func (as *Server) SendTestEmail(w http.ResponseWriter, r *http.Request) {
 
 	incomingPassword := s.SMTP.Password
 	s.SMTP.Password = ""
+	if err := models.ValidateSMTPPassword(incomingPassword); err != nil {
+		JSONResponse(w, models.Response{Success: false, Message: err.Error()}, http.StatusBadRequest)
+		return
+	}
 	if s.SMTP.Id != 0 {
 		stored, lookupErr := models.GetSMTP(s.SMTP.Id, s.UserId)
 		if lookupErr != nil {
@@ -114,8 +118,12 @@ func (as *Server) SendTestEmail(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if incomingPassword == "" {
-			s.SMTP.PasswordCiphertext = stored.PasswordCiphertext
+			// A stored secret is inseparable from its authorized connection
+			// context. Never combine it with request-controlled routing fields.
+			s.SMTP = stored
+		} else {
 			s.SMTP.UserId = stored.UserId
+			s.SMTP.PasswordCiphertext = ""
 		}
 	}
 	// If a complete sending profile is provided use it.

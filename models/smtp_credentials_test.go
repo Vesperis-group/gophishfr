@@ -96,9 +96,8 @@ func TestSMTPCredentialRuntimeLifecycle(t *testing.T) {
 	originalCiphertext := stored.PasswordCiphertext
 	update := stored
 	update.Password = ""
-	update.Host = "localhost:2526"
-	update.Username = "renamed-user"
 	update.Name = "Updated SMTP"
+	update.FromAddress = "updated@example.test"
 	update.Headers = []Header{{Key: "X-Synthetic", Value: "updated"}}
 	if err := PutSMTP(&update, oldCipher); err != nil {
 		t.Fatalf("preserve encrypted SMTP password: %v", err)
@@ -110,11 +109,34 @@ func TestSMTPCredentialRuntimeLifecycle(t *testing.T) {
 	if plaintext, err := DecryptSMTPPassword(stored, oldCipher); err != nil || plaintext != testSMTPSecret {
 		t.Fatalf("decrypt preserved password: matched=%t err=%v", plaintext == testSMTPSecret, err)
 	}
+	for name, mutate := range map[string]func(*SMTP){
+		"interface": func(profile *SMTP) { profile.Interface = "SMTPS" },
+		"host":      func(profile *SMTP) { profile.Host = "localhost:2526" },
+		"username":  func(profile *SMTP) { profile.Username = "redirected-user" },
+		"TLS policy": func(profile *SMTP) {
+			profile.IgnoreCertErrors = !profile.IgnoreCertErrors
+		},
+	} {
+		redirect := stored
+		redirect.Password = ""
+		mutate(&redirect)
+		if err := PutSMTP(&redirect, oldCipher); !errors.Is(err, ErrSMTPCredentialContextChange) {
+			t.Fatalf("%s redirect error = %v, want credential-context rejection", name, err)
+		}
+		unchanged := loadOnlySMTP(t, profile.Id, profile.UserId)
+		if unchanged.PasswordCiphertext != originalCiphertext ||
+			!sameSMTPCredentialRouting(unchanged, stored) {
+			t.Fatalf("rejected %s redirect changed the stored profile", name)
+		}
+	}
 
 	rotatedCipher := testCredentialCipher(t, "smtp-key-new", map[string][]byte{
 		"smtp-key-old": bytes.Repeat([]byte{0x21}, 32),
 		"smtp-key-new": bytes.Repeat([]byte{0x72}, 32),
 	})
+	update.Host = "localhost:2526"
+	update.Username = "renamed-user"
+	update.IgnoreCertErrors = true
 	update.Password = testSMTPReplacement
 	if err := PutSMTP(&update, rotatedCipher); err != nil {
 		t.Fatalf("rotate SMTP password: %v", err)
@@ -182,6 +204,17 @@ func TestSMTPNoSecretAndTransactionalWrites(t *testing.T) {
 	if _, err := stored.GetDialer(nil); err != nil {
 		t.Fatalf("construct no-auth dialer without keyring: %v", err)
 	}
+	noAuth.Name = "Updated no-auth SMTP"
+	noAuth.Host = "localhost:2526"
+	noAuth.IgnoreCertErrors = true
+	if err := PutSMTP(&noAuth, nil); err != nil {
+		t.Fatalf("update no-auth routing without a password: %v", err)
+	}
+	stored = loadOnlySMTP(t, noAuth.Id, noAuth.UserId)
+	if stored.Password != "" || stored.PasswordCiphertext != "" ||
+		stored.Host != noAuth.Host || stored.IgnoreCertErrors != noAuth.IgnoreCertErrors {
+		t.Fatal("no-auth routing update invented a credential or lost profile changes")
+	}
 
 	emptyAuth := validModelSMTP("")
 	emptyAuth.Name = "Empty password AUTH"
@@ -226,6 +259,261 @@ func TestSMTPNoSecretAndTransactionalWrites(t *testing.T) {
 	}
 	if count != 0 {
 		t.Fatal("header failure left a partially-created SMTP row")
+	}
+}
+
+func TestSMTPPasswordByteBoundsAndPersistedVerification(t *testing.T) {
+	setupIMAPCredentialDatabase(t)
+	cipher := testCredentialCipher(t, "smtp-key", map[string][]byte{
+		"smtp-key": bytes.Repeat([]byte{0x34}, 32),
+	})
+	maxPassword := strings.Repeat("é", 127) + "a"
+	overPassword := strings.Repeat("é", 128)
+	if len(maxPassword) != smtpPasswordMaxBytes || len(overPassword) != smtpPasswordMaxBytes+1 {
+		t.Fatal("test password fixtures do not exercise UTF-8 byte boundaries")
+	}
+	maxKeyID := strings.Repeat("k", 64)
+	maxKeyCipher := testCredentialCipher(t, maxKeyID, map[string][]byte{
+		maxKeyID: bytes.Repeat([]byte{0x36}, 32),
+	})
+	maxEnvelope, err := encryptSMTPPassword(maxKeyCipher, 1, 1, maxPassword)
+	if err != nil {
+		t.Fatalf("encrypt maximum envelope fixture: %v", err)
+	}
+	if len(maxEnvelope) != smtpPasswordEnvelopeMaxBytes ||
+		len(maxEnvelope) > smtpPasswordCiphertextColumnBytes {
+		t.Fatalf(
+			"maximum envelope length = %d, derived=%d column=%d",
+			len(maxEnvelope),
+			smtpPasswordEnvelopeMaxBytes,
+			smtpPasswordCiphertextColumnBytes,
+		)
+	}
+
+	profile := validModelSMTP(maxPassword)
+	profile.Name = "Maximum password"
+	if err := PostSMTP(&profile, cipher); err != nil {
+		t.Fatalf("create maximum-byte password: %v", err)
+	}
+	stored := loadOnlySMTP(t, profile.Id, profile.UserId)
+	if len(stored.PasswordCiphertext) > smtpPasswordCiphertextColumnBytes {
+		t.Fatal("generated envelope exceeds the declared ciphertext capacity")
+	}
+	if plaintext, err := DecryptSMTPPassword(stored, cipher); err != nil || plaintext != maxPassword {
+		t.Fatalf("round-trip maximum-byte password: matched=%t err=%v", plaintext == maxPassword, err)
+	}
+
+	rejected := stored
+	rejected.Password = overPassword
+	rejected.Host = "localhost:2526"
+	if err := PutSMTP(&rejected, cipher); !errors.Is(err, ErrSMTPCredentialTooLong) {
+		t.Fatalf("over-limit update error = %v, want too long", err)
+	}
+	unchanged := loadOnlySMTP(t, profile.Id, profile.UserId)
+	if unchanged.PasswordCiphertext != stored.PasswordCiphertext || unchanged.Host != stored.Host {
+		t.Fatal("rejected over-limit update changed the prior row")
+	}
+
+	for name, password := range map[string]string{
+		"over-limit":   overPassword,
+		"invalid-UTF8": string([]byte{0xff}),
+	} {
+		candidate := validModelSMTP(password)
+		candidate.Name = name
+		err := PostSMTP(&candidate, cipher)
+		if name == "over-limit" && !errors.Is(err, ErrSMTPCredentialTooLong) {
+			t.Fatalf("over-limit create error = %v, want too long", err)
+		}
+		if name == "invalid-UTF8" && !errors.Is(err, ErrSMTPCredentialInvalidEncoding) {
+			t.Fatalf("invalid UTF-8 create error = %v, want invalid encoding", err)
+		}
+		var count int
+		if queryErr := db.Model(&SMTP{}).Where("name = ?", name).Count(&count).Error; queryErr != nil || count != 0 {
+			t.Fatalf("rejected %s create left rows: count=%d err=%v", name, count, queryErr)
+		}
+	}
+
+	if err := db.Exec(`
+		CREATE TRIGGER truncate_smtp_ciphertext
+		AFTER UPDATE OF password_ciphertext ON smtp
+		WHEN NEW.name LIKE 'Truncated%'
+		BEGIN
+			UPDATE smtp
+			SET password_ciphertext = substr(NEW.password_ciphertext, 1, 64)
+			WHERE id = NEW.id;
+		END
+	`).Error; err != nil {
+		t.Fatalf("create ciphertext truncation trigger: %v", err)
+	}
+	truncatedCreate := validModelSMTP(testSMTPSecret)
+	truncatedCreate.Name = "Truncated create"
+	if err := PostSMTP(&truncatedCreate, cipher); !errors.Is(err, ErrSMTPCredentialStorageMismatch) {
+		t.Fatalf("silently truncated create error = %v, want storage mismatch", err)
+	}
+	var count int
+	if err := db.Model(&SMTP{}).Where("name = ?", truncatedCreate.Name).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("truncated create was not rolled back: count=%d err=%v", count, err)
+	}
+
+	rotation := stored
+	rotation.Name = "Truncated rotation"
+	rotation.Password = testSMTPReplacement
+	if err := PutSMTP(&rotation, cipher); !errors.Is(err, ErrSMTPCredentialStorageMismatch) {
+		t.Fatalf("silently truncated rotation error = %v, want storage mismatch", err)
+	}
+	unchanged = loadOnlySMTP(t, profile.Id, profile.UserId)
+	if unchanged.PasswordCiphertext != stored.PasswordCiphertext || unchanged.Name != stored.Name {
+		t.Fatal("truncated rotation did not roll back the prior profile and ciphertext")
+	}
+}
+
+func TestSMTPMigrationRollbackBoundsAndPersistedVerification(t *testing.T) {
+	setupIMAPCredentialDatabase(t)
+	cipher := testCredentialCipher(t, "smtp-key", map[string][]byte{
+		"smtp-key": bytes.Repeat([]byte{0x35}, 32),
+	})
+	maxPassword := strings.Repeat("é", 127) + "a"
+	overPassword := strings.Repeat("é", 128)
+
+	if err := db.Exec(`
+		INSERT INTO smtp (user_id, name, host, username, password, password_ciphertext, from_address)
+		VALUES (1, 'Maximum legacy', 'localhost:25', 'legacy-user', ?, '', 'sender@example.test')
+	`, maxPassword).Error; err != nil {
+		t.Fatalf("seed maximum legacy password: %v", err)
+	}
+	if result, err := MigrateSMTPCredentials(cipher); err != nil || result.Updated != 1 {
+		t.Fatalf("migrate maximum legacy password: result=%+v err=%v", result, err)
+	}
+	migrated, err := GetSMTPByName("Maximum legacy", 1)
+	if err != nil {
+		t.Fatalf("load maximum migrated profile: %v", err)
+	}
+	if plaintext, err := DecryptSMTPPassword(migrated, cipher); err != nil || plaintext != maxPassword {
+		t.Fatalf("decrypt maximum migrated password: matched=%t err=%v", plaintext == maxPassword, err)
+	}
+	if result, err := RollbackSMTPCredentials(cipher); err != nil || result.Updated != 1 {
+		t.Fatalf("rollback maximum password: result=%+v err=%v", result, err)
+	}
+	var restored string
+	if err := db.Raw("SELECT password FROM smtp WHERE id = ?", migrated.Id).Row().Scan(&restored); err != nil || restored != maxPassword {
+		t.Fatalf("maximum rollback did not restore exact bytes: matched=%t err=%v", restored == maxPassword, err)
+	}
+
+	if err := db.Exec(`
+		INSERT INTO smtp (user_id, name, host, username, password, password_ciphertext, from_address)
+		VALUES (1, 'Oversized legacy', 'localhost:25', 'legacy-user', ?, '', 'sender@example.test')
+	`, overPassword).Error; err != nil {
+		t.Fatalf("seed oversized legacy password: %v", err)
+	}
+	if _, err := MigrateSMTPCredentials(cipher); !errors.Is(err, ErrSMTPCredentialTooLong) {
+		t.Fatalf("oversized migration error = %v, want too long", err)
+	}
+	var oversized storedSMTPCredential
+	if err := db.Raw(`
+		SELECT id, user_id, password, password_ciphertext
+		FROM smtp WHERE name = 'Oversized legacy'
+	`).Scan(&oversized).Error; err != nil {
+		t.Fatalf("read rejected oversized migration row: %v", err)
+	}
+	if oversized.Password != overPassword || oversized.PasswordCiphertext != "" {
+		t.Fatal("rejected oversized migration changed the legacy row")
+	}
+
+	if err := db.Exec("DELETE FROM smtp").Error; err != nil {
+		t.Fatalf("reset SMTP rows: %v", err)
+	}
+	oversizedEncrypted := validModelSMTP("")
+	oversizedEncrypted.Name = "Oversized encrypted"
+	if err := db.Omit("Headers").Create(&oversizedEncrypted).Error; err != nil {
+		t.Fatalf("seed oversized encrypted profile: %v", err)
+	}
+	envelope, err := cipher.Encrypt(
+		smtpCredentialContext(oversizedEncrypted.UserId, oversizedEncrypted.Id),
+		[]byte(overPassword),
+	)
+	if err != nil {
+		t.Fatalf("create oversized test envelope: %v", err)
+	}
+	if err := db.Model(&SMTP{}).
+		Where("id = ?", oversizedEncrypted.Id).
+		Update("password_ciphertext", string(envelope)).Error; err != nil {
+		t.Fatalf("store oversized test envelope: %v", err)
+	}
+	if _, err := RollbackSMTPCredentials(cipher); !errors.Is(err, ErrSMTPCredentialTooLong) {
+		t.Fatalf("oversized rollback error = %v, want too long", err)
+	}
+	oversized = storedSMTPCredential{}
+	if err := db.Raw(`
+		SELECT id, user_id, password, password_ciphertext
+		FROM smtp WHERE id = ?
+	`, oversizedEncrypted.Id).Scan(&oversized).Error; err != nil {
+		t.Fatalf("read rejected oversized rollback row: %v", err)
+	}
+	if oversized.Password != "" || oversized.PasswordCiphertext != string(envelope) {
+		t.Fatal("rejected oversized rollback cleared or changed ciphertext")
+	}
+
+	if err := db.Exec("DELETE FROM smtp").Error; err != nil {
+		t.Fatalf("reset SMTP rows for write verification: %v", err)
+	}
+	if err := db.Exec(`
+		INSERT INTO smtp (user_id, name, host, username, password, password_ciphertext, from_address)
+		VALUES (1, 'Truncated migration', 'localhost:25', 'legacy-user', ?, '', 'sender@example.test')
+	`, testSMTPSecret).Error; err != nil {
+		t.Fatalf("seed truncation migration row: %v", err)
+	}
+	if err := db.Exec(`
+		CREATE TRIGGER truncate_smtp_migration
+		AFTER UPDATE OF password_ciphertext ON smtp
+		WHEN NEW.name = 'Truncated migration' AND NEW.password <> ''
+		BEGIN
+			UPDATE smtp SET password_ciphertext = substr(NEW.password_ciphertext, 1, 64)
+			WHERE id = NEW.id;
+		END
+	`).Error; err != nil {
+		t.Fatalf("create migration truncation trigger: %v", err)
+	}
+	if _, err := MigrateSMTPCredentials(cipher); !errors.Is(err, ErrSMTPCredentialStorageMismatch) {
+		t.Fatalf("truncated migration error = %v, want storage mismatch", err)
+	}
+	var legacyPassword, legacyCiphertext string
+	if err := db.Raw(`
+		SELECT password, password_ciphertext FROM smtp WHERE name = 'Truncated migration'
+	`).Row().Scan(&legacyPassword, &legacyCiphertext); err != nil {
+		t.Fatalf("read rolled-back migration row: %v", err)
+	}
+	if legacyPassword != testSMTPSecret || legacyCiphertext != "" {
+		t.Fatal("migration verification failure did not retain the only plaintext copy")
+	}
+	if err := db.Exec("DROP TRIGGER truncate_smtp_migration").Error; err != nil {
+		t.Fatalf("drop migration truncation trigger: %v", err)
+	}
+
+	if err := db.Exec("DELETE FROM smtp").Error; err != nil {
+		t.Fatalf("reset SMTP rows for rollback verification: %v", err)
+	}
+	rollbackProfile := validModelSMTP(testSMTPSecret)
+	rollbackProfile.Name = "Truncated rollback"
+	if err := PostSMTP(&rollbackProfile, cipher); err != nil {
+		t.Fatalf("seed rollback verification profile: %v", err)
+	}
+	rollbackCiphertext := rollbackProfile.PasswordCiphertext
+	if err := db.Exec(`
+		CREATE TRIGGER truncate_smtp_rollback
+		AFTER UPDATE OF password ON smtp
+		WHEN NEW.name = 'Truncated rollback' AND NEW.password <> ''
+		BEGIN
+			UPDATE smtp SET password = substr(NEW.password, 1, 5) WHERE id = NEW.id;
+		END
+	`).Error; err != nil {
+		t.Fatalf("create rollback truncation trigger: %v", err)
+	}
+	if _, err := RollbackSMTPCredentials(cipher); !errors.Is(err, ErrSMTPCredentialStorageMismatch) {
+		t.Fatalf("truncated rollback error = %v, want storage mismatch", err)
+	}
+	rollbackStored := loadOnlySMTP(t, rollbackProfile.Id, rollbackProfile.UserId)
+	if rollbackStored.Password != "" || rollbackStored.PasswordCiphertext != rollbackCiphertext {
+		t.Fatal("rollback verification failure cleared the only ciphertext copy")
 	}
 }
 
@@ -409,6 +697,14 @@ func TestSMTPCredentialStateAndBackendValidation(t *testing.T) {
 	cipher := testCredentialCipher(t, "smtp-key", map[string][]byte{
 		"smtp-key": bytes.Repeat([]byte{0x77}, 32),
 	})
+	oversizedCiphertext := SMTP{
+		Id:                 1,
+		UserId:             1,
+		PasswordCiphertext: strings.Repeat("A", smtpPasswordEnvelopeMaxBytes+1),
+	}
+	if _, err := oversizedCiphertext.GetDialer(cipher); !errors.Is(err, ErrSMTPCredentialInvalidState) {
+		t.Fatalf("oversized runtime ciphertext error = %v, want invalid state", err)
+	}
 	if err := db.Exec(`
 		INSERT INTO smtp (user_id, name, host, password, password_ciphertext, from_address)
 		VALUES (1, 'Ambiguous SMTP', 'localhost:25', ?, 'malformed', 'sender@example.test')
@@ -565,5 +861,186 @@ func TestMySQLSMTPCredentialLifecycle(t *testing.T) {
 	}
 	if profiles != 2 {
 		t.Fatalf("MySQL schema Down preserved %d profiles, want 2", profiles)
+	}
+}
+
+func TestMySQLSMTPCredentialStorageBoundsNonStrict(t *testing.T) {
+	connectionString := testingMySQLDSN(t)
+	if connectionString == "" {
+		return
+	}
+	database, err := openDatabase("mysql", connectionString)
+	if err != nil {
+		t.Fatalf("open MySQL database: %v", err)
+	}
+	db = database
+	db.LogMode(false)
+	db.DB().SetMaxOpenConns(1)
+	db.DB().SetMaxIdleConns(1)
+	conf = &config.Config{
+		DBName:         "mysql",
+		DBPath:         connectionString,
+		MigrationsPath: "../db/db_mysql/migrations",
+	}
+	if err := migrateDatabase(db.DB(), conf.DBName, conf.MigrationsPath); err != nil {
+		t.Fatalf("migrate MySQL database: %v", err)
+	}
+	for _, table := range []string{"imap", "headers", "smtp"} {
+		if err := db.Exec("DELETE FROM " + table).Error; err != nil {
+			t.Fatalf("clear MySQL %s rows: %v", table, err)
+		}
+	}
+	var originalSQLMode string
+	if err := db.Raw("SELECT @@SESSION.sql_mode").Row().Scan(&originalSQLMode); err != nil {
+		t.Fatalf("read MySQL session SQL mode: %v", err)
+	}
+	if err := db.Exec("SET SESSION sql_mode = ''").Error; err != nil {
+		t.Fatalf("disable MySQL strict mode: %v", err)
+	}
+	var nonStrictSQLMode string
+	if err := db.Raw("SELECT @@SESSION.sql_mode").Row().Scan(&nonStrictSQLMode); err != nil {
+		t.Fatalf("verify MySQL session SQL mode: %v", err)
+	}
+	if nonStrictSQLMode != "" {
+		t.Fatalf("MySQL test requires non-strict mode, got %q", nonStrictSQLMode)
+	}
+	t.Cleanup(func() {
+		_ = db.Exec("ALTER TABLE smtp MODIFY password VARCHAR(255)").Error
+		_ = db.Exec("ALTER TABLE smtp MODIFY password_ciphertext VARCHAR(2048) NOT NULL DEFAULT ''").Error
+		_ = db.Exec("SET SESSION sql_mode = ?", originalSQLMode).Error
+		_ = db.Exec("DELETE FROM headers").Error
+		_ = db.Exec("DELETE FROM smtp").Error
+		_ = database.Close()
+	})
+
+	cipher := testCredentialCipher(t, "smtp-key", map[string][]byte{
+		"smtp-key": bytes.Repeat([]byte{0x79}, 32),
+	})
+	maxPassword := strings.Repeat("é", 127) + "a"
+	overPassword := strings.Repeat("é", 128)
+	profile := validModelSMTP(maxPassword)
+	profile.Name = "MySQL maximum"
+	if err := PostSMTP(&profile, cipher); err != nil {
+		t.Fatalf("create maximum-byte MySQL password: %v", err)
+	}
+	stored := loadOnlySMTP(t, profile.Id, profile.UserId)
+	if plaintext, err := DecryptSMTPPassword(stored, cipher); err != nil || plaintext != maxPassword {
+		t.Fatalf("round-trip maximum MySQL password: matched=%t err=%v", plaintext == maxPassword, err)
+	}
+
+	rejectedUpdate := stored
+	rejectedUpdate.Password = overPassword
+	rejectedUpdate.Host = "localhost:2526"
+	if err := PutSMTP(&rejectedUpdate, cipher); !errors.Is(err, ErrSMTPCredentialTooLong) {
+		t.Fatalf("over-limit MySQL update error = %v, want too long", err)
+	}
+	unchanged := loadOnlySMTP(t, profile.Id, profile.UserId)
+	if unchanged.PasswordCiphertext != stored.PasswordCiphertext || unchanged.Host != stored.Host {
+		t.Fatal("rejected MySQL update changed the prior row")
+	}
+	rejectedCreate := validModelSMTP(overPassword)
+	rejectedCreate.Name = "MySQL oversized"
+	if err := PostSMTP(&rejectedCreate, cipher); !errors.Is(err, ErrSMTPCredentialTooLong) {
+		t.Fatalf("over-limit MySQL create error = %v, want too long", err)
+	}
+	var count int
+	if err := db.Model(&SMTP{}).Where("name = ?", rejectedCreate.Name).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("rejected MySQL create left rows: count=%d err=%v", count, err)
+	}
+
+	if result, err := RollbackSMTPCredentials(cipher); err != nil || result.Updated != 1 {
+		t.Fatalf("rollback maximum MySQL password: result=%+v err=%v", result, err)
+	}
+	var restored string
+	var restoredBytes int
+	if err := db.Raw(`
+		SELECT password, OCTET_LENGTH(password)
+		FROM smtp WHERE id = ?
+	`, profile.Id).Row().Scan(&restored, &restoredBytes); err != nil {
+		t.Fatalf("read maximum MySQL rollback: %v", err)
+	}
+	if restored != maxPassword || restoredBytes != smtpPasswordMaxBytes {
+		t.Fatalf("maximum MySQL rollback mismatch: bytes=%d matched=%t", restoredBytes, restored == maxPassword)
+	}
+	if result, err := MigrateSMTPCredentials(cipher); err != nil || result.Updated != 1 {
+		t.Fatalf("re-migrate maximum MySQL password: result=%+v err=%v", result, err)
+	}
+	remigrated := loadOnlySMTP(t, profile.Id, profile.UserId)
+	if plaintext, err := DecryptSMTPPassword(remigrated, cipher); err != nil || plaintext != maxPassword {
+		t.Fatalf("re-migrated maximum MySQL password mismatch: matched=%t err=%v", plaintext == maxPassword, err)
+	}
+
+	if err := db.Exec("DELETE FROM smtp").Error; err != nil {
+		t.Fatalf("reset MySQL rows: %v", err)
+	}
+	oversizedEncrypted := validModelSMTP("")
+	oversizedEncrypted.Name = "MySQL oversized encrypted"
+	if err := PostSMTP(&oversizedEncrypted, nil); err != nil {
+		t.Fatalf("seed MySQL oversized encrypted profile: %v", err)
+	}
+	envelope, err := cipher.Encrypt(
+		smtpCredentialContext(oversizedEncrypted.UserId, oversizedEncrypted.Id),
+		[]byte(overPassword),
+	)
+	if err != nil {
+		t.Fatalf("create oversized MySQL envelope: %v", err)
+	}
+	if err := db.Model(&SMTP{}).
+		Where("id = ?", oversizedEncrypted.Id).
+		Update("password_ciphertext", string(envelope)).Error; err != nil {
+		t.Fatalf("store oversized MySQL envelope: %v", err)
+	}
+	if _, err := RollbackSMTPCredentials(cipher); !errors.Is(err, ErrSMTPCredentialTooLong) {
+		t.Fatalf("oversized MySQL rollback error = %v, want too long", err)
+	}
+	var rejectedPassword, retainedCiphertext string
+	if err := db.Raw(`
+		SELECT password, password_ciphertext FROM smtp WHERE id = ?
+	`, oversizedEncrypted.Id).Row().Scan(&rejectedPassword, &retainedCiphertext); err != nil {
+		t.Fatalf("read rejected MySQL rollback: %v", err)
+	}
+	if rejectedPassword != "" || retainedCiphertext != string(envelope) {
+		t.Fatal("rejected MySQL rollback cleared or changed ciphertext")
+	}
+
+	if err := db.Exec("DELETE FROM smtp").Error; err != nil {
+		t.Fatalf("reset MySQL rows for ciphertext truncation: %v", err)
+	}
+	if err := db.Exec(`
+		ALTER TABLE smtp
+		MODIFY password_ciphertext VARCHAR(100) NOT NULL DEFAULT ''
+	`).Error; err != nil {
+		t.Fatalf("reduce MySQL ciphertext capacity: %v", err)
+	}
+	truncatedCreate := validModelSMTP(testSMTPSecret)
+	truncatedCreate.Name = "MySQL truncated ciphertext"
+	if err := PostSMTP(&truncatedCreate, cipher); !errors.Is(err, ErrSMTPCredentialStorageMismatch) {
+		t.Fatalf("non-strict ciphertext truncation error = %v, want storage mismatch", err)
+	}
+	if err := db.Model(&SMTP{}).Where("name = ?", truncatedCreate.Name).Count(&count).Error; err != nil || count != 0 {
+		t.Fatalf("truncated MySQL create was not rolled back: count=%d err=%v", count, err)
+	}
+	if err := db.Exec(`
+		ALTER TABLE smtp
+		MODIFY password_ciphertext VARCHAR(2048) NOT NULL DEFAULT ''
+	`).Error; err != nil {
+		t.Fatalf("restore MySQL ciphertext capacity: %v", err)
+	}
+
+	rollbackProfile := validModelSMTP("twenty-byte-password")
+	rollbackProfile.Name = "MySQL truncated rollback"
+	if err := PostSMTP(&rollbackProfile, cipher); err != nil {
+		t.Fatalf("seed MySQL rollback truncation profile: %v", err)
+	}
+	rollbackCiphertext := rollbackProfile.PasswordCiphertext
+	if err := db.Exec("ALTER TABLE smtp MODIFY password VARCHAR(10)").Error; err != nil {
+		t.Fatalf("reduce MySQL plaintext capacity: %v", err)
+	}
+	if _, err := RollbackSMTPCredentials(cipher); !errors.Is(err, ErrSMTPCredentialStorageMismatch) {
+		t.Fatalf("non-strict plaintext truncation error = %v, want storage mismatch", err)
+	}
+	rollbackStored := loadOnlySMTP(t, rollbackProfile.Id, rollbackProfile.UserId)
+	if rollbackStored.Password != "" || rollbackStored.PasswordCiphertext != rollbackCiphertext {
+		t.Fatal("MySQL rollback verification failure cleared the only ciphertext copy")
 	}
 }

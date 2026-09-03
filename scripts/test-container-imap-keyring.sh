@@ -288,11 +288,27 @@ if [ "$(sqlite3 "${workdir}/gophish.db" \
     exit 1
 fi
 
+redirect_status="$(curl --silent --show-error \
+    --output "${workdir}/smtp-redirect-response.json" \
+    --write-out '%{http_code}' \
+    --request PUT \
+    --header "Authorization: Bearer ${api_key}" \
+    --header "Content-Type: application/json" \
+    --data "{\"id\":${api_smtp_id},\"interface_type\":\"SMTP\",\"name\":\"Container API SMTP\",\"host\":\"127.0.0.1:65534\",\"username\":\"redirected-user\",\"password\":\"\",\"from_address\":\"sender@example.test\",\"ignore_cert_errors\":true,\"headers\":[]}" \
+    "${api_url}/api/smtp/${api_smtp_id}")"
+if [ "${redirect_status}" != "400" ] ||
+   [ "$(sqlite3 "${workdir}/gophish.db" \
+       "SELECT host = '127.0.0.1:2525' AND username = 'container-api-user' AND ignore_cert_errors = 0 AND password_ciphertext = '${api_ciphertext}' FROM smtp WHERE id = ${api_smtp_id};")" != "1" ]; then
+    echo "container API allowed a preserved credential context redirect" >&2
+    cat "${workdir}/smtp-redirect-response.json" >&2
+    exit 1
+fi
+
 api_response="$(curl --silent --show-error --fail-with-body \
     --request PUT \
     --header "Authorization: Bearer ${api_key}" \
     --header "Content-Type: application/json" \
-    --data "{\"id\":${api_smtp_id},\"interface_type\":\"SMTP\",\"name\":\"Container API SMTP\",\"host\":\"127.0.0.1:2525\",\"username\":\"container-api-user\",\"password\":\"synthetic-container-rotated-password\",\"from_address\":\"sender@example.test\",\"ignore_cert_errors\":false,\"headers\":[]}" \
+    --data "{\"id\":${api_smtp_id},\"interface_type\":\"SMTP\",\"name\":\"Container API SMTP\",\"host\":\"127.0.0.1:2525\",\"username\":\"container-rotated-user\",\"password\":\"synthetic-container-rotated-password\",\"from_address\":\"sender@example.test\",\"ignore_cert_errors\":true,\"headers\":[]}" \
     "${api_url}/api/smtp/${api_smtp_id}")"
 rotated_ciphertext="$(sqlite3 "${workdir}/gophish.db" \
     "SELECT password_ciphertext FROM smtp WHERE id = ${api_smtp_id};")"
@@ -319,14 +335,14 @@ api_response="$(curl --silent --show-error --fail-with-body \
     --request POST \
     --header "Authorization: Bearer ${api_key}" \
     --header "Content-Type: application/json" \
-    --data "{\"email\":\"recipient@example.test\",\"smtp\":{\"id\":${api_smtp_id},\"interface_type\":\"SMTP\",\"name\":\"Container API SMTP\",\"host\":\"127.0.0.1:2525\",\"username\":\"container-api-user\",\"password\":\"\",\"from_address\":\"sender@example.test\",\"ignore_cert_errors\":false,\"headers\":[]}}" \
+    --data "{\"email\":\"recipient@example.test\",\"smtp\":{\"id\":${api_smtp_id},\"interface_type\":\"SMTPS\",\"name\":\"Redirected request\",\"host\":\"127.0.0.1:65534\",\"username\":\"redirected-user\",\"password\":\"\",\"from_address\":\"attacker@example.test\",\"ignore_cert_errors\":true,\"headers\":[{\"key\":\"X-Redirected\",\"value\":\"true\"}]}}" \
     "${api_url}/api/util/send_test_email")"
 wait "${smtp_pid}"
 smtp_pid=""
 if [ "$(python3 - "${workdir}/smtp-auth.txt" <<'PY'
 import sys
 value = open(sys.argv[1], "rb").read()
-print(int(value == b"\0container-api-user\0synthetic-container-rotated-password"))
+print(int(value == b"\0container-rotated-user\0synthetic-container-rotated-password"))
 PY
 )" != "1" ]; then
     echo "container test-email boundary did not use the decrypted rotated password" >&2

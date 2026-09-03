@@ -153,7 +153,8 @@ func TestSMTPAPICredentialLifecycleAndSecrecy(t *testing.T) {
 	originalCiphertext := stored.PasswordCiphertext
 	payload["id"] = stored.Id
 	payload["name"] = "Preserved SMTP API"
-	payload["host"] = "localhost:2526"
+	payload["from_address"] = "updated@example.test"
+	payload["headers"] = []map[string]string{{"key": "X-Synthetic", "value": "preserved"}}
 	payload["password"] = ""
 	response = performSMTPRequest(
 		t,
@@ -192,6 +193,43 @@ func TestSMTPAPICredentialLifecycleAndSecrecy(t *testing.T) {
 		t.Fatal("absent API update did not preserve ciphertext byte-for-byte")
 	}
 
+	for name, change := range map[string]interface{}{
+		"host":               "localhost:2526",
+		"username":           "redirected-user",
+		"ignore_cert_errors": true,
+		"interface_type":     "SMTPS",
+	} {
+		redirect := make(map[string]interface{}, len(payload)+1)
+		for key, value := range payload {
+			redirect[key] = value
+		}
+		redirect[name] = change
+		redirect["password"] = ""
+		response = performSMTPRequest(
+			t,
+			testCtx,
+			http.MethodPut,
+			fmt.Sprintf("/api/smtp/%d", stored.Id),
+			marshalSMTPPayload(t, redirect),
+			testCtx.apiKey,
+		)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("%s redirect status = %d, want 400; body=%s", name, response.Code, response.Body.String())
+		}
+		unchanged, loadErr := models.GetSMTP(stored.Id, testCtx.admin.Id)
+		if loadErr != nil ||
+			unchanged.PasswordCiphertext != originalCiphertext ||
+			unchanged.Host != absentPreserved.Host ||
+			unchanged.Username != absentPreserved.Username ||
+			unchanged.IgnoreCertErrors != absentPreserved.IgnoreCertErrors ||
+			unchanged.Interface != absentPreserved.Interface {
+			t.Fatalf("rejected %s redirect changed the stored profile: err=%v", name, loadErr)
+		}
+	}
+
+	payload["host"] = "localhost:2526"
+	payload["username"] = "rotated-user"
+	payload["ignore_cert_errors"] = true
 	payload["password"] = replacementSMTPPassword
 	response = performSMTPRequest(
 		t,
@@ -234,6 +272,27 @@ func TestSMTPAPINoAuthNullAndCrossUser(t *testing.T) {
 		t.Fatal("no-auth API create persisted credential data")
 	}
 	assertSMTPResponseSecretFree(t, response.Body.Bytes(), "")
+
+	oversizedPassword := strings.Repeat("é", 128)
+	for _, method := range []string{http.MethodPost, http.MethodPut} {
+		oversizedPayload := validSMTPPayload("Oversized SMTP", oversizedPassword)
+		path := "/api/smtp/"
+		if method == http.MethodPut {
+			oversizedPayload["id"] = profiles[0].Id
+			path = fmt.Sprintf("/api/smtp/%d", profiles[0].Id)
+		}
+		response = performSMTPRequest(
+			t,
+			testCtx,
+			method,
+			path,
+			marshalSMTPPayload(t, oversizedPayload),
+			testCtx.apiKey,
+		)
+		if response.Code != http.StatusBadRequest {
+			t.Fatalf("%s oversized-password status = %d, want 400", method, response.Code)
+		}
+	}
 
 	for _, method := range []string{http.MethodPost, http.MethodPut} {
 		nullPayload := validSMTPPayload("Null SMTP", "")
@@ -338,15 +397,37 @@ func TestSendTestEmailUsesStoredOrInlineCredentialWithoutEcho(t *testing.T) {
 	if response.Code != http.StatusBadRequest {
 		t.Fatalf("test-email null-password status = %d, want 400", response.Code)
 	}
+	overLimitBody := map[string]interface{}{
+		"email": "recipient@example.test",
+		"smtp": map[string]interface{}{
+			"name":         "Oversized password test profile",
+			"host":         "127.0.0.1:2525",
+			"from_address": "sender@example.test",
+			"password":     strings.Repeat("é", 128),
+		},
+	}
+	response = performSMTPRequest(
+		t,
+		testCtx,
+		http.MethodPost,
+		"/api/util/send_test_email",
+		marshalSMTPPayload(t, overLimitBody),
+		testCtx.apiKey,
+	)
+	if response.Code != http.StatusBadRequest {
+		t.Fatalf("test-email oversized-password status = %d, want 400", response.Code)
+	}
 
 	profile := models.SMTP{
-		UserId:      testCtx.admin.Id,
-		Interface:   "SMTP",
-		Name:        "Stored test profile",
-		Host:        "127.0.0.1:2525",
-		Username:    "smtp-user",
-		Password:    storedSMTPPassword,
-		FromAddress: "sender@example.test",
+		UserId:           testCtx.admin.Id,
+		Interface:        "SMTP",
+		Name:             "Stored test profile",
+		Host:             "127.0.0.1:2525",
+		Username:         "smtp-user",
+		Password:         storedSMTPPassword,
+		FromAddress:      "sender@example.test",
+		IgnoreCertErrors: false,
+		Headers:          []models.Header{{Key: "X-Stored", Value: "authorized"}},
 	}
 	if err := models.PostSMTP(&profile, testCtx.credentialCipher); err != nil {
 		t.Fatalf("store encrypted SMTP profile: %v", err)
@@ -357,22 +438,57 @@ func TestSendTestEmailUsesStoredOrInlineCredentialWithoutEcho(t *testing.T) {
 	body := map[string]interface{}{
 		"email": "recipient@example.test",
 		"smtp": map[string]interface{}{
-			"id":           profile.Id,
-			"name":         profile.Name,
-			"from_address": profile.FromAddress,
-			"host":         profile.Host,
-			"username":     profile.Username,
-			"password":     "",
+			"id":                 profile.Id,
+			"interface_type":     "SMTPS",
+			"name":               "Attacker-controlled profile",
+			"from_address":       "attacker@example.test",
+			"host":               "127.0.0.1:65534",
+			"username":           "redirected-user",
+			"ignore_cert_errors": true,
+			"headers": []map[string]string{{
+				"key": "X-Redirected", "value": "true",
+			}},
+			"password": "",
 		},
 	}
+	for _, passwordMode := range []string{"empty", "absent"} {
+		if passwordMode == "empty" {
+			body["smtp"].(map[string]interface{})["password"] = ""
+		} else {
+			delete(body["smtp"].(map[string]interface{}), "password")
+		}
+		response = performSMTPRequest(t, testCtx, http.MethodPost, "/api/util/send_test_email", marshalSMTPPayload(t, body), testCtx.apiKey)
+		if response.Code != http.StatusOK {
+			t.Fatalf("stored test-email (%s) status = %d, body=%s", passwordMode, response.Code, response.Body.String())
+		}
+		if worker.password != storedSMTPPassword || worker.request.SMTP.Password != "" {
+			t.Fatalf("stored test email (%s) did not decrypt only at the dialer boundary", passwordMode)
+		}
+		if worker.request.SMTP.Host != profile.Host ||
+			worker.request.SMTP.Username != profile.Username ||
+			worker.request.SMTP.IgnoreCertErrors != profile.IgnoreCertErrors ||
+			worker.request.SMTP.Interface != profile.Interface ||
+			worker.request.SMTP.FromAddress != profile.FromAddress ||
+			len(worker.request.SMTP.Headers) != 1 ||
+			worker.request.SMTP.Headers[0].Key != "X-Stored" {
+			t.Fatalf("stored test email (%s) combined ciphertext with request-controlled connection context", passwordMode)
+		}
+		assertSMTPResponseSecretFree(t, response.Body.Bytes(), profile.PasswordCiphertext)
+	}
+
+	body["smtp"].(map[string]interface{})["password"] = replacementSMTPPassword
 	response = performSMTPRequest(t, testCtx, http.MethodPost, "/api/util/send_test_email", marshalSMTPPayload(t, body), testCtx.apiKey)
 	if response.Code != http.StatusOK {
-		t.Fatalf("stored test-email status = %d, body=%s", response.Code, response.Body.String())
+		t.Fatalf("replacement test-email status = %d, body=%s", response.Code, response.Body.String())
 	}
-	if worker.password != storedSMTPPassword || worker.request.SMTP.Password != "" {
-		t.Fatal("stored test email did not decrypt only at the dialer boundary")
+	if worker.password != replacementSMTPPassword ||
+		worker.request.SMTP.Host != "127.0.0.1:65534" ||
+		worker.request.SMTP.Username != "redirected-user" ||
+		!worker.request.SMTP.IgnoreCertErrors ||
+		worker.request.SMTP.Password != "" ||
+		worker.request.SMTP.PasswordCiphertext != "" {
+		t.Fatal("replacement test email did not use only the explicit request context and password")
 	}
-	assertSMTPResponseSecretFree(t, response.Body.Bytes(), profile.PasswordCiphertext)
 
 	body["smtp"].(map[string]interface{})["id"] = 0
 	body["smtp"].(map[string]interface{})["name"] = "Inline test profile"

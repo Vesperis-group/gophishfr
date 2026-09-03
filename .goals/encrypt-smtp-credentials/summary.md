@@ -2,7 +2,9 @@
 
 ## Outcome
 
-The goal passed independent inspection in one Builder/Inspector iteration.
+The initial implementation passed the Goal Inspector but failed a subsequent
+independent security-specialist review. Iteration 2 corrects both findings and
+is ready for independent reinspection.
 SMTP sending-profile passwords are now write-only at the HTTP/browser boundary,
 encrypted at rest with the existing AES-256-GCM credential foundation, bound to
 the authenticated owner and immutable profile ID, and decrypted only at the SMTP
@@ -16,9 +18,20 @@ dialer boundary.
   add a guarded ciphertext column; PostgreSQL migration is rejected.
 - Create obtains the generated profile ID inside one transaction before
   encryption, while profile/header mutations are atomic and owner-scoped.
-- Empty or absent updates preserve an existing ciphertext byte-for-byte;
-  non-empty updates rotate it; unauthenticated profiles remain valid with both
-  secret columns empty.
+- Empty or absent updates preserve an existing ciphertext byte-for-byte only
+  when interface, host/port, username, and TLS verification policy are
+  unchanged. Routing changes require a non-empty replacement, while
+  unauthenticated profiles remain freely editable with both secret columns
+  empty.
+- Stored-password test email ignores request-controlled SMTP context and uses
+  the complete owner-authorized stored profile. An explicit non-empty password
+  uses the request context only in memory.
+- Plaintext is limited to 255 valid UTF-8 bytes and v1 ciphertext to its derived
+  464-byte maximum within the 2048-character column. Create, rotate, migration,
+  and rollback re-read and compare secret columns byte-for-byte in the same
+  transaction.
+- Migration stages verified ciphertext before clearing plaintext; rollback
+  stages and verifies full plaintext before clearing the only ciphertext copy.
 - SMTP, campaign, and test-email API responses expose neither plaintext nor
   ciphertext metadata, and the frontend never prefills stored passwords.
 - Campaign and test-email sends decrypt only at the use boundary and fail before
@@ -38,14 +51,35 @@ dialer boundary.
 2. Inspector independently checked every immutable criterion and returned PASS
    with no product-code findings in commit
    `15a73468cbd213dbecd0ef192ca58b1c5cb3586a`.
+3. A security specialist identified credential-context redirection and
+   non-strict MySQL truncation risks.
+4. Builder iteration 2 bound preserved credentials to their stored context,
+   enforced byte-safe limits and staged verification, and added cross-layer
+   regression coverage.
 
 ## Inspector Findings
 
-No code-level defect remained. The Inspector confirmed the intentional API
-breaking change and security-safe replacement of the legacy full-overwrite
-password behavior. Operational requirements remain deliberate: operators must
-retain the external keyring and backup, stop writers during offline transforms,
-and complete data rollback before schema Down.
+Both security findings are corrected. PUT rejects preserved-password changes to
+host, username, TLS policy, or equivalent routing fields; blank/absent
+stored-profile test-email requests use the complete stored profile. Explicit
+replacement passwords still permit context changes. UTF-8 byte bounds,
+conservative envelope sizing, staged migration/rollback, and transactional
+readback checks prevent silent storage truncation from committing.
+
+## Iteration 2 validation
+
+- `./scripts/verify.sh`: PASS with Go 1.25.13 and Node 24.19.0.
+- Full unit, race, vet, build, format, module verification, and lint gates: PASS.
+- Browser suite: PASS.
+- Real MySQL 8.4 driver, IMAP, SMTP lifecycle, and SMTP non-strict storage-bound
+  tests: PASS.
+- Docker build and credential lifecycle, including redirect rejection and
+  stored-context test-email delivery: PASS.
+- Both credential fuzz targets completed bounded 10-second runs.
+- `govulncheck`, Gitleaks, actionlint, zizmor, Yarn audit, and Retire.js: PASS.
+- Gosec reports the same 14 documented pre-existing findings and no finding in
+  the new credential-bound/storage-verification code.
+- Dependency manifests, lockfiles, and generated frontend assets are unchanged.
 
 ## Recommendations
 

@@ -65,6 +65,12 @@ func newSMTPResponse(profile models.SMTP) smtpResponse {
 	}
 }
 
+func isInvalidSMTPCredentialRequest(err error) bool {
+	return errors.Is(err, models.ErrSMTPCredentialTooLong) ||
+		errors.Is(err, models.ErrSMTPCredentialInvalidEncoding) ||
+		errors.Is(err, models.ErrSMTPCredentialContextChange)
+}
+
 // SendingProfiles handles requests for the /api/smtp/ endpoint
 func (as *Server) SendingProfiles(w http.ResponseWriter, r *http.Request) {
 	switch {
@@ -96,7 +102,11 @@ func (as *Server) SendingProfiles(w http.ResponseWriter, r *http.Request) {
 		s.UserId = ctx.Get(r, "user_id").(int64)
 		err = models.PostSMTP(&s, as.credentialCipher)
 		if err != nil {
-			JSONResponse(w, models.Response{Success: false, Message: err.Error()}, http.StatusInternalServerError)
+			status := http.StatusInternalServerError
+			if isInvalidSMTPCredentialRequest(err) {
+				status = http.StatusBadRequest
+			}
+			JSONResponse(w, models.Response{Success: false, Message: err.Error()}, status)
 			return
 		}
 		JSONResponse(w, newSMTPResponse(s), http.StatusCreated)
@@ -142,6 +152,10 @@ func (as *Server) SendingProfile(w http.ResponseWriter, r *http.Request) {
 		s.UserId = ctx.Get(r, "user_id").(int64)
 		err = models.PutSMTP(&s, as.credentialCipher)
 		if err != nil {
+			if isInvalidSMTPCredentialRequest(err) {
+				JSONResponse(w, models.Response{Success: false, Message: err.Error()}, http.StatusBadRequest)
+				return
+			}
 			JSONResponse(w, models.Response{Success: false, Message: "Error updating page"}, http.StatusInternalServerError)
 			return
 		}

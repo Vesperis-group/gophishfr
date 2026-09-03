@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strconv"
+	"unicode/utf8"
 
 	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	"github.com/jinzhu/gorm"
@@ -14,6 +15,17 @@ const (
 	smtpCredentialKind   = "smtp-password"
 	smtpCredentialTable  = "smtp"
 	smtpCredentialColumn = "password"
+
+	// Byte limits are deliberately independent of database character-count
+	// semantics. Keep this conservative derivation aligned with the immutable
+	// v1 format: magic, separators, version, max key ID, nonce, ciphertext, and
+	// GCM tag. The resulting 464-byte maximum leaves ample room in VARCHAR(2048).
+	smtpPasswordMaxBytes         = 255
+	smtpPasswordEnvelopeMaxBytes = len("gophishfr-cred") + 4 + len("v1") + 64 +
+		((12 + 2) / 3 * 4) +
+		((smtpPasswordMaxBytes + 16 + 2) / 3 * 4)
+	smtpPasswordCiphertextColumnBytes = 2048
+	_                                 = uint(smtpPasswordCiphertextColumnBytes - smtpPasswordEnvelopeMaxBytes)
 )
 
 var (
@@ -23,6 +35,9 @@ var (
 	ErrSMTPCredentialNotMigrated     = errors.New("SMTP credential plaintext migration is required")
 	ErrInvalidSMTPCredentialIdentity = errors.New("SMTP credential has an invalid record or owner ID")
 	ErrUnsupportedSMTPCredentialDB   = errors.New("SMTP credential migration is unsupported for this database")
+	ErrSMTPCredentialTooLong         = errors.New("SMTP password exceeds the storage-safe limit")
+	ErrSMTPCredentialInvalidEncoding = errors.New("SMTP password is not valid UTF-8")
+	ErrSMTPCredentialStorageMismatch = errors.New("SMTP credential storage verification failed")
 )
 
 // SMTPCredentialMigrationResult reports non-secret row counts for an offline
@@ -42,7 +57,31 @@ func smtpCredentialContext(userID, recordID int64) credentials.Context {
 	}
 }
 
+// ValidateSMTPPassword applies the same UTF-8 byte limit to every SMTP
+// password entry point, including request-only test-email credentials.
+func ValidateSMTPPassword(password string) error {
+	if !utf8.ValidString(password) {
+		return ErrSMTPCredentialInvalidEncoding
+	}
+	if len(password) > smtpPasswordMaxBytes {
+		return ErrSMTPCredentialTooLong
+	}
+	return nil
+}
+
+func validateSMTPCiphertext(ciphertext string) error {
+	if !utf8.ValidString(ciphertext) ||
+		len(ciphertext) > smtpPasswordEnvelopeMaxBytes ||
+		len(ciphertext) > smtpPasswordCiphertextColumnBytes {
+		return ErrSMTPCredentialInvalidState
+	}
+	return nil
+}
+
 func encryptSMTPPassword(credentialCipher *credentials.Cipher, userID, recordID int64, password string) (string, error) {
+	if err := ValidateSMTPPassword(password); err != nil {
+		return "", err
+	}
 	if credentialCipher == nil {
 		return "", ErrSMTPCredentialKeyringRequired
 	}
@@ -66,7 +105,11 @@ func encryptSMTPPassword(credentialCipher *credentials.Cipher, userID, recordID 
 	if err != nil || !bytes.Equal(verified, []byte(password)) {
 		return "", ErrSMTPCredentialUnavailable
 	}
-	return string(envelope), nil
+	ciphertext := string(envelope)
+	if err := validateSMTPCiphertext(ciphertext); err != nil {
+		return "", err
+	}
+	return ciphertext, nil
 }
 
 func validateSMTPSecretColumns(s SMTP) error {
@@ -74,7 +117,12 @@ func validateSMTPSecretColumns(s SMTP) error {
 	case s.Password != "" && s.PasswordCiphertext != "":
 		return ErrSMTPCredentialInvalidState
 	case s.Password != "":
+		if err := ValidateSMTPPassword(s.Password); err != nil {
+			return err
+		}
 		return ErrSMTPCredentialNotMigrated
+	case s.PasswordCiphertext != "":
+		return validateSMTPCiphertext(s.PasswordCiphertext)
 	default:
 		return nil
 	}
@@ -95,6 +143,9 @@ func DecryptSMTPPassword(s SMTP, credentialCipher *credentials.Cipher) (string, 
 	if credentialCipher == nil {
 		return "", ErrSMTPCredentialKeyringRequired
 	}
+	if err := validateSMTPCiphertext(s.PasswordCiphertext); err != nil {
+		return "", err
+	}
 	plaintext, err := credentialCipher.Decrypt(
 		smtpCredentialContext(s.UserId, s.Id),
 		credentials.Envelope(s.PasswordCiphertext),
@@ -102,7 +153,11 @@ func DecryptSMTPPassword(s SMTP, credentialCipher *credentials.Cipher) (string, 
 	if err != nil || len(plaintext) == 0 {
 		return "", ErrSMTPCredentialUnavailable
 	}
-	return string(plaintext), nil
+	password := string(plaintext)
+	if err := ValidateSMTPPassword(password); err != nil {
+		return "", err
+	}
+	return password, nil
 }
 
 // ValidateSMTPCredentialBackend rejects PostgreSQL and every backend for which
@@ -121,6 +176,40 @@ type storedSMTPCredential struct {
 	UserID             int64  `gorm:"column:user_id"`
 	Password           string `gorm:"column:password"`
 	PasswordCiphertext string `gorm:"column:password_ciphertext"`
+}
+
+func readSMTPCredentialStorage(transaction *gorm.DB, id, userID int64) (storedSMTPCredential, error) {
+	var stored storedSMTPCredential
+	if err := transaction.Raw(`
+		SELECT
+			id,
+			user_id,
+			COALESCE(password, '') AS password,
+			COALESCE(password_ciphertext, '') AS password_ciphertext
+		FROM smtp
+		WHERE id = ? AND user_id = ?
+	`, id, userID).Scan(&stored).Error; err != nil {
+		return storedSMTPCredential{}, err
+	}
+	if stored.ID != id || stored.UserID != userID {
+		return storedSMTPCredential{}, gorm.ErrRecordNotFound
+	}
+	return stored, nil
+}
+
+func verifySMTPCredentialStorage(
+	transaction *gorm.DB,
+	id, userID int64,
+	password, ciphertext string,
+) error {
+	stored, err := readSMTPCredentialStorage(transaction, id, userID)
+	if err != nil {
+		return err
+	}
+	if stored.Password != password || stored.PasswordCiphertext != ciphertext {
+		return ErrSMTPCredentialStorageMismatch
+	}
+	return nil
 }
 
 // MigrateSMTPCredentials performs the explicit offline plaintext-to-ciphertext
@@ -209,13 +298,21 @@ func preflightSMTPCredentials(credentialCipher *credentials.Cipher, rows []store
 		if row.Password != "" && row.PasswordCiphertext != "" {
 			return fmt.Errorf("%w for profile %d", ErrSMTPCredentialInvalidState, row.ID)
 		}
+		if row.Password != "" {
+			if err := ValidateSMTPPassword(row.Password); err != nil {
+				return fmt.Errorf("%w for profile %d", err, row.ID)
+			}
+		}
 		if row.PasswordCiphertext != "" {
-			plaintext, err := credentialCipher.Decrypt(
-				smtpCredentialContext(row.UserID, row.ID),
-				credentials.Envelope(row.PasswordCiphertext),
-			)
-			if err != nil || len(plaintext) == 0 {
-				return fmt.Errorf("%w for profile %d", ErrSMTPCredentialUnavailable, row.ID)
+			if err := validateSMTPCiphertext(row.PasswordCiphertext); err != nil {
+				return fmt.Errorf("%w for profile %d", err, row.ID)
+			}
+			if _, err := DecryptSMTPPassword(SMTP{
+				Id:                 row.ID,
+				UserId:             row.UserID,
+				PasswordCiphertext: row.PasswordCiphertext,
+			}, credentialCipher); err != nil {
+				return fmt.Errorf("%w for profile %d", err, row.ID)
 			}
 		}
 	}
@@ -238,7 +335,7 @@ func migrateSMTPCredentialRow(
 	}
 	update := transaction.Exec(`
 		UPDATE smtp
-		SET password = '', password_ciphertext = ?
+		SET password_ciphertext = ?
 		WHERE id = ? AND user_id = ? AND password = ? AND password_ciphertext = ''
 	`, envelope, row.ID, row.UserID, row.Password)
 	if update.Error != nil {
@@ -246,6 +343,35 @@ func migrateSMTPCredentialRow(
 	}
 	if update.RowsAffected != 1 {
 		return fmt.Errorf("SMTP credential row changed during migration for profile %d", row.ID)
+	}
+	if err := verifySMTPCredentialStorage(
+		transaction,
+		row.ID,
+		row.UserID,
+		row.Password,
+		envelope,
+	); err != nil {
+		return fmt.Errorf("%w for profile %d", err, row.ID)
+	}
+	update = transaction.Exec(`
+		UPDATE smtp
+		SET password = ''
+		WHERE id = ? AND user_id = ? AND password = ? AND password_ciphertext = ?
+	`, row.ID, row.UserID, row.Password, envelope)
+	if update.Error != nil {
+		return update.Error
+	}
+	if update.RowsAffected != 1 {
+		return fmt.Errorf("SMTP credential row changed during migration for profile %d", row.ID)
+	}
+	if err := verifySMTPCredentialStorage(
+		transaction,
+		row.ID,
+		row.UserID,
+		"",
+		envelope,
+	); err != nil {
+		return fmt.Errorf("%w for profile %d", err, row.ID)
 	}
 	result.Updated++
 	return nil
@@ -261,23 +387,53 @@ func rollbackSMTPCredentialRow(
 		result.Unchanged++
 		return nil
 	}
-	plaintext, err := credentialCipher.Decrypt(
-		smtpCredentialContext(row.UserID, row.ID),
-		credentials.Envelope(row.PasswordCiphertext),
-	)
-	if err != nil || len(plaintext) == 0 {
-		return fmt.Errorf("%w for profile %d", ErrSMTPCredentialUnavailable, row.ID)
+	plaintext, err := DecryptSMTPPassword(SMTP{
+		Id:                 row.ID,
+		UserId:             row.UserID,
+		PasswordCiphertext: row.PasswordCiphertext,
+	}, credentialCipher)
+	if err != nil {
+		return fmt.Errorf("%w for profile %d", err, row.ID)
 	}
 	update := transaction.Exec(`
 		UPDATE smtp
-		SET password = ?, password_ciphertext = ''
+		SET password = ?
 		WHERE id = ? AND user_id = ? AND password = '' AND password_ciphertext = ?
-	`, string(plaintext), row.ID, row.UserID, row.PasswordCiphertext)
+	`, plaintext, row.ID, row.UserID, row.PasswordCiphertext)
 	if update.Error != nil {
 		return update.Error
 	}
 	if update.RowsAffected != 1 {
 		return fmt.Errorf("SMTP credential row changed during rollback for profile %d", row.ID)
+	}
+	if err := verifySMTPCredentialStorage(
+		transaction,
+		row.ID,
+		row.UserID,
+		plaintext,
+		row.PasswordCiphertext,
+	); err != nil {
+		return fmt.Errorf("%w for profile %d", err, row.ID)
+	}
+	update = transaction.Exec(`
+		UPDATE smtp
+		SET password_ciphertext = ''
+		WHERE id = ? AND user_id = ? AND password = ? AND password_ciphertext = ?
+	`, row.ID, row.UserID, plaintext, row.PasswordCiphertext)
+	if update.Error != nil {
+		return update.Error
+	}
+	if update.RowsAffected != 1 {
+		return fmt.Errorf("SMTP credential row changed during rollback for profile %d", row.ID)
+	}
+	if err := verifySMTPCredentialStorage(
+		transaction,
+		row.ID,
+		row.UserID,
+		plaintext,
+		"",
+	); err != nil {
+		return fmt.Errorf("%w for profile %d", err, row.ID)
 	}
 	result.Updated++
 	return nil

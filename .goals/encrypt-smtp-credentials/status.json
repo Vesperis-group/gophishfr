@@ -1,7 +1,7 @@
 {
   "goal_id": "encrypt-smtp-credentials",
-  "status": "completed",
-  "iteration": 1,
+  "status": "inspecting",
+  "iteration": 2,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "eadca8c679eb785adda5ec0ab110340d4c2baae6",
@@ -18,6 +18,20 @@
       "role": "inspector",
       "result": "pass",
       "completed_at": "2026-09-03T03:47:09+02:00"
+    },
+    {
+      "iteration": 1,
+      "role": "security-review",
+      "result": "fail",
+      "completed_at": "2026-09-03T03:56:00+02:00",
+      "summary": "Stored SMTP secrets can be redirected to client-controlled connection fields; MySQL storage bounds can truncate rollback data."
+    },
+    {
+      "iteration": 2,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-03T04:20:27+02:00",
+      "summary": "Bound preserved credentials to stored routing context and added storage-safe byte limits with transactional readback verification, including non-strict MySQL coverage."
     }
   ]
 }

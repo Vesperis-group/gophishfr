@@ -72,6 +72,10 @@ var ErrHostNotSpecified = errors.New("No SMTP Host specified")
 // ErrInvalidHost indicates that the SMTP server string is invalid
 var ErrInvalidHost = errors.New("Invalid SMTP server address")
 
+// ErrSMTPCredentialContextChange prevents an existing stored password from
+// being silently redirected to a different authentication endpoint.
+var ErrSMTPCredentialContextChange = errors.New("a new SMTP password is required when changing credential routing")
+
 // TableName specifies the database tablename for Gorm to use
 func (s SMTP) TableName() string {
 	return "smtp"
@@ -211,6 +215,9 @@ func PostSMTP(s *SMTP, credentialCipher ...*credentials.Cipher) error {
 		log.Error(err)
 		return err
 	}
+	if err := ValidateSMTPPassword(s.Password); err != nil {
+		return err
+	}
 	if s.UserId <= 0 {
 		return ErrInvalidSMTPCredentialIdentity
 	}
@@ -251,6 +258,15 @@ func PostSMTP(s *SMTP, credentialCipher ...*credentials.Cipher) error {
 		}
 		s.PasswordCiphertext = ciphertext
 	}
+	if err := verifySMTPCredentialStorage(
+		transaction,
+		s.Id,
+		s.UserId,
+		"",
+		s.PasswordCiphertext,
+	); err != nil {
+		return err
+	}
 	if err := saveSMTPHeaders(transaction, s); err != nil {
 		return err
 	}
@@ -266,6 +282,9 @@ func PostSMTP(s *SMTP, credentialCipher ...*credentials.Cipher) error {
 func PutSMTP(s *SMTP, credentialCipher ...*credentials.Cipher) error {
 	if err := s.Validate(); err != nil {
 		log.Error(err)
+		return err
+	}
+	if err := ValidateSMTPPassword(s.Password); err != nil {
 		return err
 	}
 	if s.Id <= 0 || s.UserId <= 0 {
@@ -293,7 +312,11 @@ func PutSMTP(s *SMTP, credentialCipher ...*credentials.Cipher) error {
 	if err := validateSMTPSecretColumns(existing); err != nil {
 		return err
 	}
-	if s.Password == "" {
+	preserveCredential := s.Password == ""
+	if preserveCredential {
+		if existing.PasswordCiphertext != "" && !sameSMTPCredentialRouting(existing, *s) {
+			return ErrSMTPCredentialContextChange
+		}
 		s.PasswordCiphertext = existing.PasswordCiphertext
 	} else {
 		ciphertext, err := encryptSMTPPassword(cipher, s.UserId, s.Id, s.Password)
@@ -304,24 +327,49 @@ func PutSMTP(s *SMTP, credentialCipher ...*credentials.Cipher) error {
 	}
 	s.Password = ""
 
-	update := transaction.Model(&SMTP{}).
-		Where("id = ? AND user_id = ?", s.Id, s.UserId).
-		Updates(map[string]interface{}{
-			"interface_type":      s.Interface,
-			"name":                s.Name,
-			"host":                s.Host,
-			"username":            s.Username,
-			"password":            "",
-			"password_ciphertext": s.PasswordCiphertext,
-			"from_address":        s.FromAddress,
-			"modified_date":       s.ModifiedDate,
-			"ignore_cert_errors":  s.IgnoreCertErrors,
-		})
+	updateQuery := transaction.Model(&SMTP{}).
+		Where("id = ? AND user_id = ?", s.Id, s.UserId)
+	if preserveCredential && existing.PasswordCiphertext != "" {
+		updateQuery = updateQuery.Where(`
+			password = '' AND
+			password_ciphertext = ? AND
+			interface_type = ? AND
+			host = ? AND
+			username = ? AND
+			ignore_cert_errors = ?
+		`,
+			existing.PasswordCiphertext,
+			existing.Interface,
+			existing.Host,
+			existing.Username,
+			existing.IgnoreCertErrors,
+		)
+	}
+	update := updateQuery.Updates(map[string]interface{}{
+		"interface_type":      s.Interface,
+		"name":                s.Name,
+		"host":                s.Host,
+		"username":            s.Username,
+		"password":            "",
+		"password_ciphertext": s.PasswordCiphertext,
+		"from_address":        s.FromAddress,
+		"modified_date":       s.ModifiedDate,
+		"ignore_cert_errors":  s.IgnoreCertErrors,
+	})
 	if update.Error != nil {
 		return update.Error
 	}
 	if update.RowsAffected != 1 {
 		return gorm.ErrRecordNotFound
+	}
+	if err := verifySMTPCredentialStorage(
+		transaction,
+		s.Id,
+		s.UserId,
+		"",
+		s.PasswordCiphertext,
+	); err != nil {
+		return err
 	}
 	deleteHeaders := transaction.Exec(`
 		DELETE FROM headers
@@ -339,6 +387,13 @@ func PutSMTP(s *SMTP, credentialCipher ...*credentials.Cipher) error {
 	}
 	committed = true
 	return nil
+}
+
+func sameSMTPCredentialRouting(existing, update SMTP) bool {
+	return existing.Interface == update.Interface &&
+		existing.Host == update.Host &&
+		existing.Username == update.Username &&
+		existing.IgnoreCertErrors == update.IgnoreCertErrors
 }
 
 func saveSMTPHeaders(transaction *gorm.DB, s *SMTP) error {
