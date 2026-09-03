@@ -12,7 +12,16 @@
       "role": "inspector",
       "verdict": "fail",
       "reason": "Critical Windows portability failure: code uses os.OpenRoot() without build tags, will not compile on Windows. Violates acceptance criterion 10.3-10.4 requiring platform-specific isolation for Unix-only assertions.",
-      "timestamp": "2026-09-03T18:52:00+02:00"
+      "timestamp": "2026-09-03T18:52:00+02:00",
+      "retracted": true,
+      "retraction_reason": "Invalid finding. os.OpenRoot() is cross-platform in Go 1.22+. Iteration 1 verdict was based on factual error about API portability. Verified with pinned Go 1.26.1 toolchain: cross-compilation succeeds, Windows tests pass, PE32+ executable builds."
+    },
+    {
+      "iteration": 2,
+      "role": "inspector",
+      "verdict": "pass",
+      "reason": "All acceptance criteria met. Implementation correctly hardens permissions, prevents TOCTOU races, isolates Unix tests with build tags, and builds cross-platform. Iteration 1 finding rescinded.",
+      "timestamp": "2026-09-03T18:58:00+02:00"
     }
   ]
 }
