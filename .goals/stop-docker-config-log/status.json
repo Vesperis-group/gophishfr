@@ -1,10 +1,19 @@
 {
   "goal_id": "stop-docker-config-log",
-  "status": "inspecting",
+  "status": "pass",
   "iteration": 1,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "9514749938338b1464e21abe04dba9205b09c7b8",
   "created_at": "2026-09-03T18:00:00+02:00",
-  "history": []
+  "history": [
+    {
+      "iteration": 1,
+      "builder": "completed",
+      "builder_commit": "cd1d410e02001c8493ead61c4c74beea68a98a3d",
+      "inspector": "pass",
+      "inspector_commit": "cf24e14d503d9abe8a8a5c015d09e5c6ccda3c90",
+      "timestamp": "2026-09-03T18:14:43+02:00"
+    }
+  ]
 }
