@@ -1,7 +1,7 @@
 {
   "goal_id": "api-key-verifier",
-  "status": "inspecting",
-  "iteration": 1,
+  "status": "completed",
+  "iteration": 2,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "a28fcca62aa94d2b3b90e50e0d19f0ad87d210ef",
@@ -20,6 +20,20 @@
       "result": "pass",
       "completed_at": "2026-09-03T23:30:00+02:00",
       "summary": "All 62 acceptance criteria independently verified. Comprehensive code inspection of verifier protocol (HMAC-SHA-256 framing), keyring isolation (separate environment variable, no fallback), schema migrations (SQLite rebuild preserving sequence, MySQL BINARY, composite index), runtime authentication (indexed lookup, no plaintext fallback), offline migration (atomic, guarded Down, idempotent), lazy upgrade (CAS, concurrent safety), reveal-once DTOs and browser lifecycle, Docker separation, comprehensive test coverage (unit/race/fuzz/browser/container), and documentation. No security vulnerabilities, logic errors, or specification violations detected. Production-ready for merge."
+    },
+    {
+      "iteration": 1,
+      "role": "security-review",
+      "result": "fail",
+      "completed_at": "2026-09-03T23:39:00+02:00",
+      "summary": "Verifier lookup authenticates controlled BOTH rows because it does not require legacy api_key to be NULL."
+    },
+    {
+      "iteration": 2,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T00:12:37+02:00",
+      "summary": "Enforced verifier-only runtime state on initial indexed lookup, verifier-write validation, lazy-rekey CAS, and conflict reread without selecting or comparing plaintext. Added SQLite and real-MySQL coverage for BOTH/LEGACY/all-absent rejection, verified migration clearing, concurrent transition rejection, normal lazy upgrade, and reset invalidation; all required regression, browser, container, race, fuzz, reproducibility, and scanner gates were rerun."
     }
   ]
 }

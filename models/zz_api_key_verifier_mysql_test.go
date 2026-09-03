@@ -2,6 +2,7 @@ package models
 
 import (
 	"database/sql"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -10,11 +11,161 @@ import (
 	"github.com/pressly/goose/v3"
 )
 
-func TestMySQLZZAPIKeyVerifierLifecycle(t *testing.T) {
+func mysqlAPIKeyTestDSN(t *testing.T) string {
+	t.Helper()
 	connectionString := os.Getenv("GOPHISHFR_MYSQL_TEST_DSN")
 	if connectionString == "" {
 		t.Skip("GOPHISHFR_MYSQL_TEST_DSN is not set")
 	}
+	return connectionString
+}
+
+func TestMySQLZZRuntimeRequiresVerifierOnlyState(t *testing.T) {
+	connectionString := mysqlAPIKeyTestDSN(t)
+	database, err := openDatabase("mysql", connectionString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db = database
+	db.LogMode(false)
+	conf = &config.Config{
+		DBName: "mysql", DBPath: connectionString,
+		MigrationsPath: "../db/db_mysql/migrations",
+	}
+	if err := migrateDatabase(db.DB(), conf.DBName, conf.MigrationsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("DELETE FROM users").Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = db.Exec("DELETE FROM users").Error
+		_ = database.Close()
+	})
+
+	service := testAPIKeyService(t, "mysql-active", "mysql-active", "mysql-old")
+	SetAPIKeyVerifier(service)
+	const activeToken = "synthetic-mysql-matching-both-token"
+	activeVerifier, _ := service.Compute("mysql-active", []byte(activeToken))
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key, api_key_verifier, api_key_verifier_key_id) "+
+			"VALUES (?, ?, ?, ?, ?)",
+		"mysql-matching-both", "synthetic-hash", activeToken, activeVerifier[:], "mysql-active",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey(activeToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("MySQL matching controlled BOTH state authenticated: %v", err)
+	}
+	migration, err := MigrateAPIKeys(service)
+	if err != nil || migration.Updated != 1 {
+		t.Fatalf("clear MySQL controlled BOTH state: result=%+v err=%v", migration, err)
+	}
+	activeUser, err := GetUserByAPIKey(activeToken)
+	if err != nil {
+		t.Fatalf("cleared MySQL verifier-only state did not authenticate: %v", err)
+	}
+	resetToken, err := ResetUserAPIKey(activeUser.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey(activeToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatal("MySQL reset did not invalidate the old token")
+	}
+	if _, err := GetUserByAPIKey(resetToken); err != nil {
+		t.Fatalf("MySQL reset token did not authenticate: %v", err)
+	}
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key) VALUES (?, ?, ?)",
+		"mysql-legacy-runtime", "synthetic-hash", "synthetic-mysql-runtime-legacy-token",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey("synthetic-mysql-runtime-legacy-token"); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("MySQL LEGACY state authenticated at runtime: %v", err)
+	}
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key) VALUES (?, ?, NULL)",
+		"mysql-absent-runtime", "synthetic-hash",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey("synthetic-mysql-runtime-absent-token"); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("MySQL all-absent state authenticated at runtime: %v", err)
+	}
+
+	const oldBothToken = "synthetic-mysql-old-both-token"
+	oldBothVerifier, _ := service.Compute("mysql-old", []byte(oldBothToken))
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key, api_key_verifier, api_key_verifier_key_id) "+
+			"VALUES (?, ?, ?, ?, ?)",
+		"mysql-old-both", "synthetic-hash", oldBothToken, oldBothVerifier[:], "mysql-old",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey(oldBothToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("MySQL old-key controlled BOTH state authenticated: %v", err)
+	}
+	var keyID string
+	if err := db.Raw(
+		"SELECT api_key_verifier_key_id FROM users WHERE username = ?", "mysql-old-both",
+	).Row().Scan(&keyID); err != nil {
+		t.Fatal(err)
+	}
+	if keyID != "mysql-old" {
+		t.Fatal("MySQL rejected old-key BOTH state was lazily rekeyed")
+	}
+
+	const lazyToken = "synthetic-mysql-normal-lazy-token"
+	lazyVerifier, _ := service.Compute("mysql-old", []byte(lazyToken))
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key, api_key_verifier, api_key_verifier_key_id) "+
+			"VALUES (?, ?, NULL, ?, ?)",
+		"mysql-normal-lazy", "synthetic-hash", lazyVerifier[:], "mysql-old",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	lazyUser, err := GetUserByAPIKey(lazyToken)
+	if err != nil {
+		t.Fatalf("MySQL verifier-only old-key state did not authenticate: %v", err)
+	}
+	if current, err := GetUser(lazyUser.Id); err != nil || current.APIKeyVerifierKeyID != "mysql-active" {
+		t.Fatalf("MySQL normal lazy rekey failed: %v", err)
+	}
+
+	const transitionToken = "synthetic-mysql-reread-both-token"
+	transitionVerifier, _ := service.Compute("mysql-old", []byte(transitionToken))
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key, api_key_verifier, api_key_verifier_key_id) "+
+			"VALUES (?, ?, NULL, ?, ?)",
+		"mysql-reread-both", "synthetic-hash", transitionVerifier[:], "mysql-old",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	snapshot, err := GetUserByUsername("mysql-reread-both")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(
+		"UPDATE users SET api_key = ? WHERE id = ?", transitionToken, snapshot.Id,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := lazyUpgradeAPIKeyVerifier(&snapshot, []byte(transitionToken), service); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("MySQL lazy CAS reread accepted transition to BOTH: %v", err)
+	}
+	if err := db.Raw(
+		"SELECT api_key_verifier_key_id FROM users WHERE id = ?", snapshot.Id,
+	).Row().Scan(&keyID); err != nil {
+		t.Fatal(err)
+	}
+	if keyID != "mysql-old" {
+		t.Fatal("MySQL transition to BOTH was lazily rekeyed")
+	}
+}
+
+func TestMySQLZZAPIKeyVerifierLifecycle(t *testing.T) {
+	connectionString := mysqlAPIKeyTestDSN(t)
 	database, err := openDatabase("mysql", connectionString)
 	if err != nil {
 		t.Fatal(err)

@@ -96,6 +96,7 @@ func GetUserByAPIKey(token string) (User, error) {
 	query, arguments := candidateWhere(candidates)
 	users := make([]User, 0, 2)
 	err = db.Select(runtimeUserColumns).Preload("Role").
+		Where("api_key IS NULL").
 		Where(query, arguments...).Limit(2).Find(&users).Error
 	if err != nil {
 		return User{}, err
@@ -319,7 +320,8 @@ func verifyAPIKeyWrite(transaction *gorm.DB, id int64, keyID string, verifier []
 		VerifierKeyID *string `gorm:"column:api_key_verifier_key_id"`
 	}
 	if err := transaction.Raw(
-		"SELECT api_key_verifier, api_key_verifier_key_id FROM users WHERE id = ?", id,
+		"SELECT api_key_verifier, api_key_verifier_key_id FROM users "+
+			"WHERE id = ? AND api_key IS NULL", id,
 	).Scan(&stored).Error; err != nil {
 		return err
 	}
@@ -364,7 +366,8 @@ func lazyUpgradeAPIKeyVerifier(user *User, token []byte, verifier *apikey.Servic
 		VerifierKeyID *string `gorm:"column:api_key_verifier_key_id"`
 	}
 	if err := db.Raw(
-		"SELECT api_key_verifier, api_key_verifier_key_id FROM users WHERE id = ?", user.Id,
+		"SELECT api_key_verifier, api_key_verifier_key_id FROM users "+
+			"WHERE id = ? AND api_key IS NULL", user.Id,
 	).Scan(&current).Error; err != nil {
 		return ErrInvalidAPICredential
 	}

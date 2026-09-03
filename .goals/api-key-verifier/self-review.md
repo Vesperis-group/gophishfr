@@ -10,8 +10,9 @@
   immutable after load, and has no default, generated, database, or credential
   keyring fallback.
 - Runtime authentication performs one bounded indexed lookup across retained
-  peppers, rejects zero/ambiguous/malformed matches, and never selects or
-  searches the legacy plaintext column.
+  peppers, rejects zero/ambiguous/malformed matches, and uses the legacy column
+  only for an `api_key IS NULL` state predicate. It never selects or compares
+  plaintext.
 
 ## Data lifecycle
 
@@ -52,10 +53,13 @@
 - Container suites: API verifier lifecycle, API/session auth, config no-log,
   credential keyring, and secure bootstrap pass. Test resources were removed.
 - Verifier and keyring fuzzers: pass for 10 seconds each.
-- Security tools: govulncheck found no called vulnerabilities; Yarn audit found
-  zero vulnerabilities; Gitleaks found no working-tree leak; actionlint and
-  zizmor passed. Gosec reported only the 12 pre-existing findings outside this
-  change. Retire.js passed; GitHub dependency review was unavailable locally.
+- Security tools: govulncheck (binary built with patched Go 1.25.13) found no
+  called vulnerabilities; Yarn audit found zero vulnerabilities; Gitleaks found
+  no source-tree leak after excluding goal-review prose (one generic-key false
+  positive there); actionlint passed. Zizmor reported two existing low-severity
+  release-workflow findings. Gosec reported only the 12 pre-existing findings
+  outside this change. Retire.js passed; GitHub dependency review was
+  unavailable locally.
 - `go.mod`, `go.sum`, `package.json`, and `yarn.lock` are byte-unchanged from
   the initial SHA. Repeated canonical frontend builds produced identical hashes.
 
@@ -68,6 +72,22 @@ SELECT/compare operations exist only in `models/api_key_migration.go`.
 Schema occurrences provide legacy compatibility. Remaining occurrences are
 tests, documentation, and local lifecycle scripts. Production runtime
 plaintext reads and authentication fallbacks are zero.
+
+## Iteration 2 runtime-state correction
+
+- The initial indexed verifier query, verifier-write readback, lazy-rekey CAS,
+  and its zero-row conflict reread all require `api_key IS NULL`. LEGACY, BOTH,
+  and all-absent rows therefore fail closed without selecting or comparing
+  plaintext; BOTH remains migrator-only.
+- SQLite and real MySQL tests reject matching active-key and old-key BOTH rows,
+  accept the same active row only after verified migration clearing, and prove
+  that a concurrent transition to BOTH between lookup and lazy CAS cannot
+  authenticate or rekey. Normal migrated authentication, lazy upgrade, and
+  immediate reset invalidation remain covered.
+- The complete Go/race, real-MySQL, browser, API-verifier, API/session-auth,
+  config-no-log, credential-keyring, secure-bootstrap, migration, Docker, fuzz,
+  scanner, and reproducible-frontend gates were rerun. Dependency manifests
+  remain unchanged.
 
 ## Limitations
 

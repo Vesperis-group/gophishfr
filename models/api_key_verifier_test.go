@@ -150,6 +150,104 @@ func TestFreshBootstrapMissingVerifierIsAtomic(t *testing.T) {
 	SetAPIKeyVerifier(testAPIKeyService(t, "restored", "restored"))
 }
 
+func TestRuntimeRequiresVerifierOnlyState(t *testing.T) {
+	service := testAPIKeyService(t, "active", "active", "old")
+	setupAPIKeyDatabase(t, service)
+
+	const activeToken = "synthetic-lifecycle-admin-token"
+	if err := db.Exec("UPDATE users SET api_key = ? WHERE id = 1", activeToken).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey(activeToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("matching controlled BOTH state authenticated before migration: %v", err)
+	}
+	result, err := MigrateAPIKeys(service)
+	if err != nil || result.Updated != 1 {
+		t.Fatalf("clear matching controlled BOTH state: result=%+v err=%v", result, err)
+	}
+	if user, err := GetUserByAPIKey(activeToken); err != nil || user.Id != 1 {
+		t.Fatalf("verified-and-cleared state did not authenticate: %v", err)
+	}
+
+	role, err := GetRoleBySlug(RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key, role_id) VALUES (?, ?, ?, ?)",
+		"legacy-runtime-user", "synthetic-hash", "synthetic-runtime-legacy-token", role.ID,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey("synthetic-runtime-legacy-token"); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("LEGACY state authenticated at runtime: %v", err)
+	}
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key, role_id) VALUES (?, ?, NULL, ?)",
+		"absent-runtime-user", "synthetic-hash", role.ID,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey("synthetic-runtime-absent-token"); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("all-absent state authenticated at runtime: %v", err)
+	}
+
+	const oldBothToken = "synthetic-old-both-token"
+	oldBothVerifier, _ := service.Compute("old", []byte(oldBothToken))
+	insert := db.Exec(
+		"INSERT INTO users (username, hash, api_key, role_id, api_key_verifier, api_key_verifier_key_id) "+
+			"VALUES (?, ?, ?, ?, ?, ?)",
+		"old-both-user", "synthetic-hash", oldBothToken, role.ID, oldBothVerifier[:], "old",
+	)
+	if insert.Error != nil {
+		t.Fatal(insert.Error)
+	}
+	if _, err := GetUserByAPIKey(oldBothToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("old-key controlled BOTH state authenticated: %v", err)
+	}
+	var oldBothKeyID string
+	if err := db.Raw(
+		"SELECT api_key_verifier_key_id FROM users WHERE username = ?", "old-both-user",
+	).Row().Scan(&oldBothKeyID); err != nil {
+		t.Fatal(err)
+	}
+	if oldBothKeyID != "old" {
+		t.Fatal("rejected old-key controlled BOTH state was lazily rekeyed")
+	}
+
+	const transitionToken = "synthetic-reread-both-token"
+	transitionVerifier, _ := service.Compute("old", []byte(transitionToken))
+	insert = db.Exec(
+		"INSERT INTO users (username, hash, api_key, role_id, api_key_verifier, api_key_verifier_key_id) "+
+			"VALUES (?, ?, NULL, ?, ?, ?)",
+		"reread-both-user", "synthetic-hash", role.ID, transitionVerifier[:], "old",
+	)
+	if insert.Error != nil {
+		t.Fatal(insert.Error)
+	}
+	snapshot, err := GetUserByUsername("reread-both-user")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(
+		"UPDATE users SET api_key = ? WHERE id = ?", transitionToken, snapshot.Id,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := lazyUpgradeAPIKeyVerifier(&snapshot, []byte(transitionToken), service); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("lazy CAS reread accepted transition to controlled BOTH: %v", err)
+	}
+	var transitionKeyID string
+	if err := db.Raw(
+		"SELECT api_key_verifier_key_id FROM users WHERE id = ?", snapshot.Id,
+	).Row().Scan(&transitionKeyID); err != nil {
+		t.Fatal(err)
+	}
+	if transitionKeyID != "old" {
+		t.Fatal("transition to controlled BOTH was lazily rekeyed")
+	}
+}
+
 func TestOfflineAPIKeyMigrationAtomicIdempotentAndIrreversible(t *testing.T) {
 	service := testAPIKeyService(t, "active", "active", "old")
 	setupAPIKeyDatabase(t, service)
