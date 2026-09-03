@@ -1,6 +1,6 @@
 {
   "goal_id": "encrypt-webhook-secrets",
-  "status": "building",
+  "status": "inspecting",
   "iteration": 1,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
@@ -13,6 +13,13 @@
       "result": "completed",
       "completed_at": "2026-09-03T07:45:09+02:00",
       "summary": "Encrypted webhooks.secret at rest with internal/credentials (AES-256-GCM, AAD bound to the immutable webhook ID), removed all API/frontend plaintext exposure, implemented the confirmed absent/null=preserve, empty=clear, non-empty=replace tri-state, added paired SQLite/MySQL schema migrations plus offline --migrate-webhook-secrets/--rollback-webhook-secrets actions, moved decryption to the HMAC delivery boundary with zero-outbound-on-credential-failure, and along the way fixed two pre-existing IMAP/SMTP test fragilities (fixed-count goose.Down assumptions) that the new migration exposed. Full local gates, real MySQL, real-backend browser coverage, and the production-image webhook container lifecycle all pass; docs, self-review, and a backlog issue for webhook URL secrets are included."
+    },
+    {
+      "iteration": 1,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-03T08:07:28+02:00",
+      "summary": "All acceptance criteria verified with comprehensive evidence: cryptographic boundary intact (shared keyring, ID-bound AAD, record-copy failure), transaction safety proven (read-back verification, plaintext-insert trigger test, concurrent-mutation detection), API isolation verified (tri-state decoder, write-only responses, PermissionModifySystem enforcement), frontend never leaks secrets (no prefill, explicit controls, browser test confirmation), zero-outbound guarantee tested (credential failures excluded before http.Client.Do, multiple failure modes covered), lifecycle operations complete (migration idempotence, rollback atomicity, schema Down guarded), comprehensive test coverage (764+ new lines, SQLite/MySQL/API/browser/Docker verified), documentation thorough (threat model, matrices, prerequisites, key loss handling). IMAP/SMTP regression fixed (goose.DownTo instead of assumed version). No issues requiring fixes."
     }
   ]
 }
