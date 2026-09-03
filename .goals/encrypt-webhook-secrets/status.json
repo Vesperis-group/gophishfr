@@ -34,6 +34,13 @@
       "result": "completed",
       "completed_at": "2026-09-03T15:25:00+02:00",
       "summary": "Made runtime and rollback predicates NULL-aware, added exact in-transaction verification of metadata and concrete credential storage, proved NULL preserve/clear/replace/deactivation/migration/rollback/no-op/conflict behavior on SQLite and real MySQL, and broadened CI to run every MySQL webhook credential test. Full verification, browser, Docker lifecycle, fuzzing, dependency audits, and security scanners completed without a new finding."
+    },
+    {
+      "iteration": 2,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-03T15:36:12+02:00",
+      "summary": "Security finding resolved: NULL legacy secrets now handled identically to empty strings in all predicates (PostWebhook, PutWebhook, rollback); full-row storage verification with metadata fields ensures metadata-bundled updates persist and are observable in delivery selection; MySQL changed-row semantics handled correctly; all valid/ambiguous/concurrent states tested on SQLite and real MySQL 8.4.11; 6 comprehensive test functions prove preserve/clear/replace/deactivate/no-op/concurrent/rollback behavior; CI broadened to run all MySQL webhook credential tests. No issues requiring fixes; all iteration-1 acceptance criteria remain satisfied."
     }
   ]
 }
