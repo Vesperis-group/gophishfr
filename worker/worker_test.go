@@ -2,11 +2,13 @@ package worker
 
 import (
 	"context"
+	"crypto/rand"
 	"fmt"
 	"testing"
 	"time"
 
 	"github.com/Vesperis-group/gophishfr/config"
+	"github.com/Vesperis-group/gophishfr/internal/apikey"
 	"github.com/Vesperis-group/gophishfr/mailer"
 	"github.com/Vesperis-group/gophishfr/models"
 )
@@ -28,12 +30,26 @@ type testContext struct {
 
 func setupTest(t *testing.T) *testContext {
 	t.Setenv(models.InitialAdminPassword, "synthetic-worker-test-password")
+	t.Setenv(models.InitialAdminApiToken, "synthetic-worker-api-token")
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	keyring, err := apikey.NewKeyring("test-active", map[string][]byte{"test-active": key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := apikey.New(keyring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models.SetAPIKeyVerifier(verifier)
 	conf := &config.Config{
 		DBName:         "sqlite3",
 		DBPath:         ":memory:",
 		MigrationsPath: "../db/db_sqlite3/migrations/",
 	}
-	err := models.Setup(conf)
+	err = models.Setup(conf)
 	if err != nil {
 		t.Fatalf("Failed creating database: %v", err)
 	}

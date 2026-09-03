@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/Vesperis-group/gophishfr/auth"
 	ctx "github.com/Vesperis-group/gophishfr/context"
@@ -34,6 +35,28 @@ type userRequest struct {
 	Role                   string `json:"role"`
 	PasswordChangeRequired bool   `json:"password_change_required"`
 	AccountLocked          bool   `json:"account_locked"`
+}
+
+type userResponse struct {
+	ID                     int64       `json:"id"`
+	Username               string      `json:"username"`
+	Role                   models.Role `json:"role"`
+	PasswordChangeRequired bool        `json:"password_change_required"`
+	AccountLocked          bool        `json:"account_locked"`
+	LastLogin              time.Time   `json:"last_login"`
+}
+
+type userCreationResponse struct {
+	User   userResponse `json:"user"`
+	APIKey string       `json:"api_key"`
+}
+
+func newUserResponse(user models.User) userResponse {
+	return userResponse{
+		ID: user.Id, Username: user.Username, Role: user.Role,
+		PasswordChangeRequired: user.PasswordChangeRequired,
+		AccountLocked:          user.AccountLocked, LastLogin: user.LastLogin,
+	}
 }
 
 func (ur *userRequest) Validate(existingUser *models.User) error {
@@ -73,7 +96,11 @@ func (as *Server) Users(w http.ResponseWriter, r *http.Request) {
 			JSONResponse(w, models.Response{Success: false, Message: err.Error()}, http.StatusInternalServerError)
 			return
 		}
-		JSONResponse(w, us, http.StatusOK)
+		responses := make([]userResponse, len(us))
+		for index := range us {
+			responses[index] = newUserResponse(us[index])
+		}
+		JSONResponse(w, responses, http.StatusOK)
 		return
 	case r.Method == "POST":
 		ur := &userRequest{}
@@ -105,18 +132,23 @@ func (as *Server) Users(w http.ResponseWriter, r *http.Request) {
 		user := models.User{
 			Username:               ur.Username,
 			Hash:                   hash,
-			ApiKey:                 auth.GenerateSecureKey(auth.APIKeyLength),
 			Role:                   role,
 			RoleID:                 role.ID,
 			PasswordChangeRequired: ur.PasswordChangeRequired,
 			AccountLocked:          ur.AccountLocked,
 		}
-		err = models.PutUser(&user)
+		apiKey, err := models.CreateUserWithAPIKey(&user)
 		if err != nil {
-			JSONResponse(w, models.Response{Success: false, Message: err.Error()}, http.StatusInternalServerError)
+			status := http.StatusInternalServerError
+			message := "Unable to create user"
+			if errors.Is(err, models.ErrAPIKeyVerifierUnavailable) {
+				status = http.StatusServiceUnavailable
+				message = "API verifier key unavailable"
+			}
+			JSONResponse(w, models.Response{Success: false, Message: message}, status)
 			return
 		}
-		JSONResponse(w, user, http.StatusOK)
+		JSONResponse(w, userCreationResponse{User: newUserResponse(user), APIKey: apiKey}, http.StatusOK)
 		return
 	}
 }
@@ -146,7 +178,7 @@ func (as *Server) User(w http.ResponseWriter, r *http.Request) {
 	}
 	switch {
 	case r.Method == "GET":
-		JSONResponse(w, existingUser, http.StatusOK)
+		JSONResponse(w, newUserResponse(existingUser), http.StatusOK)
 	case r.Method == "DELETE":
 		err = models.DeleteUser(id)
 		if err != nil {
@@ -222,6 +254,6 @@ func (as *Server) User(w http.ResponseWriter, r *http.Request) {
 			JSONResponse(w, models.Response{Success: false, Message: err.Error()}, http.StatusInternalServerError)
 			return
 		}
-		JSONResponse(w, existingUser, http.StatusOK)
+		JSONResponse(w, newUserResponse(existingUser), http.StatusOK)
 	}
 }

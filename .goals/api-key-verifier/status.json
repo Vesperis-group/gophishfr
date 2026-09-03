@@ -1,0 +1,18 @@
+{
+  "goal_id": "api-key-verifier",
+  "status": "completed",
+  "iteration": 1,
+  "builder_model": "Claude:Sonnet-4.6",
+  "inspector_model": "Claude:Haiku-4.5",
+  "initial_sha": "a28fcca62aa94d2b3b90e50e0d19f0ad87d210ef",
+  "created_at": "2026-09-03T21:55:00+02:00",
+  "history": [
+    {
+      "iteration": 1,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-03T23:25:00+02:00",
+      "summary": "Replaced recoverable API-key storage with a dedicated HMAC-SHA-256 verifier/keyring protocol, irreversible transactional SQLite/MySQL migration, bounded indexed multi-pepper authentication and race-safe lazy rekey, verifier-only bootstrap/create/reset, reveal-once DTOs and browser UI, guarded schema rollback, and comprehensive backend/browser/container/fuzz/documentation evidence. Full local quality gates and real MySQL passed; dependencies are unchanged."
+    }
+  ]
+}

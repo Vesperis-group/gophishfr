@@ -48,7 +48,9 @@ docker run --rm -it \
   -p 3333:3333 \
   -p 8080:80 \
   --mount type=bind,src=/secure/path/admin-password,dst=/run/secrets/gophishfr_admin_password,readonly \
+  --mount type=bind,src=/secure/path/api-verifier-keyring.json,dst=/run/secrets/gophishfr_api_verifier_keyring,readonly \
   -e GOPHISH_INITIAL_ADMIN_PASSWORD_FILE=/run/secrets/gophishfr_admin_password \
+  -e GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE=/run/secrets/gophishfr_api_verifier_keyring \
   gophishfr
 ```
 
@@ -58,6 +60,9 @@ database, and log storage according to your environment before using the image
 beyond local evaluation.
 Configuration file contents are not printed at startup because values may
 contain credentials; static startup messages remain available in container logs.
+The API verifier keyring is a separate external secret from the credential
+encryption keyring. Read [`docs/API_KEY_VERIFIER.md`](docs/API_KEY_VERIFIER.md)
+before fresh bootstrap or irreversible legacy-token migration.
 
 ## Development
 

@@ -1,20 +1,75 @@
 package models
 
 import (
+	"crypto/rand"
+	"fmt"
 	"os"
 	"testing"
 
 	"github.com/Vesperis-group/gophishfr/config"
+	"github.com/Vesperis-group/gophishfr/internal/apikey"
 	"gopkg.in/check.v1"
 )
+
+const modelsSuiteAPIKey = "synthetic-model-suite-api-token"
+
+func TestMain(m *testing.M) {
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		panic(err)
+	}
+
+	keyring, err := apikey.NewKeyring("test-active", map[string][]byte{"test-active": key})
+	if err != nil {
+		panic(err)
+	}
+	verifier, err := apikey.New(keyring)
+	if err != nil {
+		panic(err)
+	}
+	SetAPIKeyVerifier(verifier)
+	os.Exit(m.Run())
+}
+
+func restoreTestUsersForAPIVerifierDown(t *testing.T) {
+	t.Helper()
+	rows, err := db.DB().Query("SELECT id FROM users ORDER BY id")
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			_ = rows.Close()
+			t.Fatal(err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Close(); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range ids {
+		if _, err := db.DB().Exec(
+			"UPDATE users SET api_key = ?, api_key_verifier = NULL, api_key_verifier_key_id = NULL WHERE id = ?",
+			fmt.Sprintf("synthetic-schema-down-%d", id), id,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+}
 
 // Hook up gocheck into the "go test" runner.
 func Test(t *testing.T) {
 	if err := os.Setenv(InitialAdminPassword, "synthetic-model-test-password"); err != nil {
 		t.Fatal(err)
 	}
+	if err := os.Setenv(InitialAdminApiToken, modelsSuiteAPIKey); err != nil {
+		t.Fatal(err)
+	}
 	defer func() {
 		_ = os.Unsetenv(InitialAdminPassword)
+		_ = os.Unsetenv(InitialAdminApiToken)
 	}()
 	check.TestingT(t)
 }

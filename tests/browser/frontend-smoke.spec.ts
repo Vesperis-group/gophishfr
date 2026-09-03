@@ -2101,6 +2101,12 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await page.locator("#modal #modalSubmit").click();
     await expect(page.locator("#modal")).not.toBeVisible();
     await expect.poll(() => userRequests.length).toBe(1);
+    await expect(page.locator("#apiKeyRevealModal")).toBeVisible();
+    const createdAPIKey = await page.locator("#apiKeyRevealValue").textContent();
+    expect(createdAPIKey).toMatch(/^[0-9a-f]{64}$/);
+    await page.locator("#closeApiKeyReveal").click();
+    await expect(page.locator("#apiKeyRevealModal")).not.toBeVisible();
+    await expect(page.locator("body")).not.toContainText(createdAPIKey ?? "");
     const created = JSON.parse(userRequests[0]) as {
       username: string;
       role: string;
@@ -4374,11 +4380,10 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expectJQueryGlobalsAbsent(page);
   });
 
-  await test.step("settings retains only its dedicated key exposure", async () => {
+  await test.step("settings reveals a replacement only for the reset lifecycle", async () => {
     await page.goto("/settings");
-    await expect(page.locator("#api_key")).toHaveValue(
-      "browser-test-api-token-not-a-secret",
-    );
+    await expect(page.locator("body")).not.toContainText("browser-test-api-token-not-a-secret");
+    await expect(page.locator("#apiKeyReveal")).toBeHidden();
     expect(
       await page.evaluate(() => {
         const browserUser = (window as unknown as {
@@ -4387,6 +4392,21 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
         return browserUser ? Object.hasOwn(browserUser, "api_key") : false;
       }),
     ).toBe(false);
+    await page.locator("#apiResetForm button").click();
+    await expect(page.locator("#apiKeyReveal")).toBeVisible();
+    const revealed = await page.locator("#apiKeyRevealValue").textContent();
+    expect(revealed).toMatch(/^[0-9a-f]{64}$/);
+    await page.locator("#closeApiKeyReveal").click();
+    await expect(page.locator("#apiKeyReveal")).toBeHidden();
+    await expect(page.locator("body")).not.toContainText(revealed ?? "");
+    const storage = await page.evaluate(() => ({
+      local: Object.values(localStorage),
+      session: Object.values(sessionStorage),
+      cookie: document.cookie,
+    }));
+    expect(JSON.stringify(storage)).not.toContain(revealed);
+    await page.reload();
+    await expect(page.locator("body")).not.toContainText(revealed ?? "");
   });
 
   expect(firstPartyAPIRequests.length).toBeGreaterThan(0);

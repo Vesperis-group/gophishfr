@@ -168,12 +168,9 @@ func TestAPIAuthenticationMechanismSelection(t *testing.T) {
 	sessionUser.PasswordChangeRequired = false
 	apiUser := models.User{
 		Username: "api-identity-test-user",
-		ApiKey:   "distinctive-api-identity-test-value",
 		RoleID:   sessionUser.RoleID,
 	}
-	if err := models.PutUser(&apiUser); err != nil {
-		t.Fatal(err)
-	}
+	apiUserKey := createTestUserWithAPIKey(t, &apiUser)
 
 	identityHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := ctx.Get(r, "user").(models.User)
@@ -207,7 +204,7 @@ func TestAPIAuthenticationMechanismSelection(t *testing.T) {
 		{
 			name:         "valid key with different session selects key identity",
 			target:       "/api/test",
-			header:       stringPointer(apiUser.ApiKey),
+			header:       stringPointer(apiUserKey),
 			session:      sessionUser,
 			wantStatus:   http.StatusOK,
 			wantIdentity: apiUser.Username,
@@ -273,7 +270,7 @@ func TestAPIAuthenticationMechanismSelection(t *testing.T) {
 		{
 			name:       "conflict with valid session cannot fall back",
 			target:     "/api/test?api_key=" + url.QueryEscape(testCtx.apiKey),
-			header:     stringPointer(apiUser.ApiKey),
+			header:     stringPointer(apiUserKey),
 			session:    sessionUser,
 			wantStatus: http.StatusUnauthorized,
 		},
@@ -460,7 +457,7 @@ func TestSessionPasswordChangeRequired(t *testing.T) {
 }
 
 func TestSessionAndAPIKeyRBACParity(t *testing.T) {
-	setupTest(t)
+	testCtx := setupTest(t)
 	admin, err := models.GetUser(1)
 	if err != nil {
 		t.Fatal(err)
@@ -468,12 +465,9 @@ func TestSessionAndAPIKeyRBACParity(t *testing.T) {
 	admin.PasswordChangeRequired = false
 	viewOnly := models.User{
 		Username: "view-only-auth-parity-user",
-		ApiKey:   "distinctive-view-only-test-value",
 		RoleID:   999999,
 	}
-	if err := models.PutUser(&viewOnly); err != nil {
-		t.Fatal(err)
-	}
+	viewOnlyKey := createTestUserWithAPIKey(t, &viewOnly)
 
 	for _, mechanism := range []string{"session", "api-key"} {
 		t.Run(mechanism+" view-only mutation denied", func(t *testing.T) {
@@ -481,7 +475,7 @@ func TestSessionAndAPIKeyRBACParity(t *testing.T) {
 			if mechanism == "session" {
 				request = ctx.Set(request, "user", viewOnly)
 			} else {
-				request.Header.Set("Authorization", viewOnly.ApiKey)
+				request.Header.Set("Authorization", viewOnlyKey)
 			}
 			response := httptest.NewRecorder()
 			RequireAPIKey(EnforceViewOnly(successHandler)).ServeHTTP(response, request)
@@ -495,7 +489,7 @@ func TestSessionAndAPIKeyRBACParity(t *testing.T) {
 			if mechanism == "session" {
 				request = ctx.Set(request, "user", viewOnly)
 			} else {
-				request.Header.Set("Authorization", viewOnly.ApiKey)
+				request.Header.Set("Authorization", viewOnlyKey)
 			}
 			response := httptest.NewRecorder()
 			handler := RequireAPIKey(RequirePermission(models.PermissionModifySystem)(successHandler))
@@ -510,7 +504,7 @@ func TestSessionAndAPIKeyRBACParity(t *testing.T) {
 			if mechanism == "session" {
 				request = ctx.Set(request, "user", admin)
 			} else {
-				request.Header.Set("Authorization", admin.ApiKey)
+				request.Header.Set("Authorization", testCtx.apiKey)
 			}
 			response := httptest.NewRecorder()
 			RequireAPIKey(EnforceViewOnly(successHandler)).ServeHTTP(response, request)

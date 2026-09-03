@@ -2,6 +2,7 @@ package models
 
 import (
 	"bytes"
+	"database/sql"
 	"io"
 	"os"
 	"path/filepath"
@@ -275,8 +276,15 @@ func TestFreshBootstrapIsAtomicAndDoesNotLogSecret(t *testing.T) {
 	if !admin.PasswordChangeRequired {
 		t.Fatal("forced first password change was not preserved")
 	}
-	if admin.ApiKey != "synthetic-api-token-value" {
-		t.Fatal("initial API token behavior changed")
+	if _, err := GetUserByAPIKey("synthetic-api-token-value"); err != nil {
+		t.Fatal("initial API token no longer authenticates unchanged")
+	}
+	var plaintext sql.NullString
+	if err := db.Raw("SELECT api_key FROM users WHERE id = ?", admin.Id).Row().Scan(&plaintext); err != nil {
+		t.Fatal(err)
+	}
+	if plaintext.Valid {
+		t.Fatal("initial API token was stored in plaintext")
 	}
 	if strings.Contains(output.String(), syntheticBootstrapPassword) {
 		t.Fatal("bootstrap secret reached logger output")
@@ -321,12 +329,11 @@ func TestHistoricalEmptyHashRecovery(t *testing.T) {
 	}
 	partial := User{
 		Username:               DefaultAdminUsername,
-		ApiKey:                 "synthetic-partial-api-token",
 		Role:                   role,
 		RoleID:                 role.ID,
 		PasswordChangeRequired: true,
 	}
-	if err := db.Create(&partial).Error; err != nil {
+	if err := createUserWithToken(&partial, []byte("synthetic-partial-api-token")); err != nil {
 		t.Fatal(err)
 	}
 	closeBootstrapDB(t)

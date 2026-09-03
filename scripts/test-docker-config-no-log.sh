@@ -15,6 +15,15 @@ sqlite_marker="sqlite-path-${suffix}"
 mysql_dsn="${db_user}:${db_password}@tcp(127.0.0.1:1)/gophish?token=${dsn_marker}"
 postgres_dsn="postgres://${db_user}:${db_password}@127.0.0.1:1/gophish?application_name=${dsn_marker}"
 
+python3 - "${workdir}/api-verifier-keyring.json" <<'PY'
+import base64, json, os, sys
+with open(sys.argv[1], "w", encoding="utf-8") as output:
+    json.dump({"version": 1, "active_key_id": "container-api",
+               "keys": [{"id": "container-api",
+                         "key": base64.b64encode(os.urandom(32)).decode("ascii")}]}, output)
+PY
+chmod 0444 "${workdir}/api-verifier-keyring.json"
+
 cleanup() {
     set +e
     for container in "${containers[@]}"; do
@@ -129,9 +138,11 @@ containers+=("${sqlite_container}")
 docker create \
     --name "${sqlite_container}" \
     --mount "type=bind,src=${workdir}/state,dst=/state" \
+    --mount "type=bind,src=${workdir}/api-verifier-keyring.json,dst=/run/secrets/gophishfr-api-verifier,readonly" \
     --env "DB_FILE_PATH=/state/${sqlite_marker}.db" \
     --env "CONTACT_ADDRESS=${config_marker}" \
     --env "GOPHISH_INITIAL_ADMIN_PASSWORD=${bootstrap_marker}" \
+    --env GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE=/run/secrets/gophishfr-api-verifier \
     --env ADMIN_USE_TLS=false \
     "${image}" >/dev/null
 docker start "${sqlite_container}" >/dev/null

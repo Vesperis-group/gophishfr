@@ -1,6 +1,7 @@
 package middleware
 
 import (
+	"crypto/rand"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/Vesperis-group/gophishfr/config"
 	ctx "github.com/Vesperis-group/gophishfr/context"
+	"github.com/Vesperis-group/gophishfr/internal/apikey"
 	"github.com/Vesperis-group/gophishfr/models"
 )
 
@@ -21,6 +23,8 @@ type testContext struct {
 
 func setupTest(t *testing.T) *testContext {
 	t.Setenv(models.InitialAdminPassword, "synthetic-middleware-test-password")
+	t.Setenv(models.InitialAdminApiToken, "synthetic-middleware-api-token")
+	installTestAPIKeyVerifier(t)
 	conf := &config.Config{
 		DBName:         "sqlite3",
 		DBPath:         ":memory:",
@@ -30,14 +34,35 @@ func setupTest(t *testing.T) *testContext {
 	if err != nil {
 		t.Fatalf("Failed creating database: %v", err)
 	}
-	// Get the API key to use for these tests
-	u, err := models.GetUser(1)
-	if err != nil {
-		t.Fatalf("error getting user: %v", err)
-	}
 	ctx := &testContext{}
-	ctx.apiKey = u.ApiKey
+	ctx.apiKey = "synthetic-middleware-api-token"
 	return ctx
+}
+
+func installTestAPIKeyVerifier(t *testing.T) {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	keyring, err := apikey.NewKeyring("test-active", map[string][]byte{"test-active": key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := apikey.New(keyring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models.SetAPIKeyVerifier(verifier)
+}
+
+func createTestUserWithAPIKey(t *testing.T, user *models.User) string {
+	t.Helper()
+	token, err := models.CreateUserWithAPIKey(user)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return token
 }
 
 // MiddlewarePermissionTest maps an expected HTTP Method to an expected HTTP

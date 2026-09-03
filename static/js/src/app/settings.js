@@ -84,6 +84,18 @@ function postSettingsForm(form) {
 // fired yet.
 document.addEventListener('DOMContentLoaded', function () {
     bsInitTooltips();
+    let revealedAPIKey = ""
+    const clearAPIKeyReveal = function () {
+        revealedAPIKey = ""
+        document.getElementById("apiKeyRevealValue").replaceChildren()
+        document.getElementById("apiKeyReveal").classList.add("d-none")
+    }
+    document.getElementById("closeApiKeyReveal").addEventListener("click", clearAPIKeyReveal)
+    document.getElementById("copyApiKey").addEventListener("click", function () {
+        if (revealedAPIKey && navigator.clipboard) {
+            navigator.clipboard.writeText(revealedAPIKey)
+        }
+    })
     document.getElementById("apiResetForm").addEventListener("submit", function (e) {
         // The previous handler returned false, which cancelled the browser's
         // own submission as well as further propagation.
@@ -92,7 +104,9 @@ document.addEventListener('DOMContentLoaded', function () {
         api.reset()
             .then(function (response) {
                 successFlash(response.message)
-                document.getElementById("api_key").value = response.data
+                revealedAPIKey = response.data.api_key
+                document.getElementById("apiKeyRevealValue").textContent = revealedAPIKey
+                document.getElementById("apiKeyReveal").classList.remove("d-none")
             }, function (error) {
                 errorFlash(requestErrorMessage(error))
             })

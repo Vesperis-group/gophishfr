@@ -10,6 +10,15 @@ if [ -n "${GOPHISHFR_CREDENTIAL_KEYRING_FILE:-}" ] &&
     exit 1
 fi
 
+# API-token HMAC verifiers use a wholly separate mounted secret and key
+# lifecycle. There is intentionally no fallback to the credential-encryption
+# keyring above.
+if [ -n "${GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE:-}" ] &&
+   [ ! -r "${GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE}" ]; then
+    echo "GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE is not readable" >&2
+    exit 1
+fi
+
 # set config for admin_server
 if [ -n "${ADMIN_LISTEN_URL+set}" ] ; then
     jq -r \

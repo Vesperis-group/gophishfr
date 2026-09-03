@@ -124,8 +124,26 @@ document = {
 with open(sys.argv[1], "w", encoding="utf-8") as keyring:
     json.dump(document, keyring)
 PY
+python3 - "${workdir}/api-verifier-keyring.json" <<'PY'
+import base64
+import json
+import os
+import sys
+
+document = {
+    "version": 1,
+    "active_key_id": "container-api-key",
+    "keys": [{
+        "id": "container-api-key",
+        "key": base64.b64encode(os.urandom(32)).decode("ascii"),
+    }],
+}
+with open(sys.argv[1], "w", encoding="utf-8") as keyring:
+    json.dump(document, keyring)
+PY
 chmod 0400 "${workdir}/keyring.json"
 chmod 0400 "${workdir}/wrong-keyring.json"
+chmod 0444 "${workdir}/api-verifier-keyring.json"
 chmod 0777 "${workdir}"
 touch "${workdir}/gophish.db"
 chmod 0666 "${workdir}/gophish.db"
@@ -162,9 +180,12 @@ fi
 
 docker run --rm \
     --mount "type=bind,src=${workdir}/keyring.json,dst=/run/secrets/gophishfr-credential-keyring,readonly" \
+    --mount "type=bind,src=${workdir}/api-verifier-keyring.json,dst=/run/secrets/gophishfr-api-verifier,readonly" \
     --mount "type=bind,src=${workdir},dst=/data" \
     --env GOPHISHFR_CREDENTIAL_KEYRING_FILE=/run/secrets/gophishfr-credential-keyring \
+    --env GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE=/run/secrets/gophishfr-api-verifier \
     --env GOPHISH_INITIAL_ADMIN_PASSWORD=synthetic-container-admin-password \
+    --env GOPHISH_INITIAL_ADMIN_API_TOKEN=synthetic-container-admin-api-token \
     --env DB_FILE_PATH=/data/gophish.db \
     "${image}" \
     ./docker/run.sh \
@@ -261,12 +282,7 @@ fi
 
 # Exercise fresh writes, preservation, rotation, response secrecy, and the
 # decrypt-at-use boundary through the application running in the built image.
-api_key="$(sqlite3 "${workdir}/gophish.db" \
-    "SELECT api_key FROM users WHERE username = 'admin' LIMIT 1;")"
-if [ -z "${api_key}" ]; then
-    echo "container test could not load the synthetic admin API key" >&2
-    exit 1
-fi
+api_key="synthetic-container-admin-api-token"
 
 python3 - "${workdir}/smtp-auth.txt" "${workdir}/smtp-message.txt" <<'PY' &
 import base64
@@ -326,8 +342,10 @@ smtp_pid=$!
 container_id="$(docker run --detach \
     --network host \
     --mount "type=bind,src=${workdir}/keyring.json,dst=/run/secrets/gophishfr-credential-keyring,readonly" \
+    --mount "type=bind,src=${workdir}/api-verifier-keyring.json,dst=/run/secrets/gophishfr-api-verifier,readonly" \
     --mount "type=bind,src=${workdir},dst=/data" \
     --env GOPHISHFR_CREDENTIAL_KEYRING_FILE=/run/secrets/gophishfr-credential-keyring \
+    --env GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE=/run/secrets/gophishfr-api-verifier \
     --env GOPHISH_INITIAL_ADMIN_PASSWORD=synthetic-container-admin-password \
     --env DB_FILE_PATH=/data/gophish.db \
     --env ADMIN_LISTEN_URL=127.0.0.1:3333 \
@@ -661,8 +679,10 @@ container_id=""
 container_id="$(docker run --detach \
     --network host \
     --mount "type=bind,src=${workdir}/wrong-keyring.json,dst=/run/secrets/gophishfr-credential-keyring,readonly" \
+    --mount "type=bind,src=${workdir}/api-verifier-keyring.json,dst=/run/secrets/gophishfr-api-verifier,readonly" \
     --mount "type=bind,src=${workdir},dst=/data" \
     --env GOPHISHFR_CREDENTIAL_KEYRING_FILE=/run/secrets/gophishfr-credential-keyring \
+    --env GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE=/run/secrets/gophishfr-api-verifier \
     --env DB_FILE_PATH=/data/gophish.db \
     --env ADMIN_LISTEN_URL=127.0.0.1:3333 \
     --env ADMIN_USE_TLS=false \
@@ -810,7 +830,9 @@ docker run --rm --entrypoint /bin/sh "${image}" -c \
 
 container_id="$(docker run --detach \
     --mount "type=bind,src=${workdir},dst=/data" \
+    --mount "type=bind,src=${workdir}/api-verifier-keyring.json,dst=/run/secrets/gophishfr-api-verifier,readonly" \
     --env DB_FILE_PATH=/data/gophish.db \
+    --env GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE=/run/secrets/gophishfr-api-verifier \
     --env GOPHISH_INITIAL_ADMIN_PASSWORD=synthetic-container-admin-password \
     "${image}")"
 failed_closed=0

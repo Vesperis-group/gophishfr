@@ -2,6 +2,7 @@ package api
 
 import (
 	"bytes"
+	"crypto/rand"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -9,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/Vesperis-group/gophishfr/config"
+	"github.com/Vesperis-group/gophishfr/internal/apikey"
 	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	"github.com/Vesperis-group/gophishfr/models"
 )
@@ -23,6 +25,8 @@ type testContext struct {
 
 func setupTest(t *testing.T) *testContext {
 	t.Setenv(models.InitialAdminPassword, "synthetic-api-test-password")
+	t.Setenv(models.InitialAdminApiToken, "synthetic-api-suite-token")
+	installTestAPIKeyVerifier(t)
 	conf := &config.Config{
 		DBName:         "sqlite3",
 		DBPath:         ":memory:",
@@ -50,10 +54,27 @@ func setupTest(t *testing.T) *testContext {
 	if err != nil {
 		t.Fatalf("error getting admin user: %v", err)
 	}
-	ctx.apiKey = u.ApiKey
+	ctx.apiKey = "synthetic-api-suite-token"
 	ctx.admin = u
 	ctx.apiServer = NewServer(WithCredentialCipher(ctx.credentialCipher))
 	return ctx
+}
+
+func installTestAPIKeyVerifier(t *testing.T) {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	keyring, err := apikey.NewKeyring("test-active", map[string][]byte{"test-active": key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := apikey.New(keyring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models.SetAPIKeyVerifier(verifier)
 }
 
 func TestSiteImportBaseHref(t *testing.T) {
