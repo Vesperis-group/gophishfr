@@ -93,22 +93,12 @@ func openLogFile(path string) (*os.File, error) {
 	if err != nil {
 		return closeWithError(err)
 	}
-
-	// Remove every permission outside the owner's read/write set. In
-	// particular, do not add owner permissions to a more restrictive file.
-	hardenedMode := info.Mode().Perm() & 0600
-	if info.Mode().Perm() != hardenedMode {
-		if err := f.Chmod(hardenedMode); err != nil {
-			return closeWithError(fmt.Errorf("secure log file %q: %w", path, err))
-		}
-	}
-
-	info, err = validateLogFileIdentity(path, f)
-	if err != nil {
+	if err := secureLogFile(path, f, info); err != nil {
 		return closeWithError(err)
 	}
-	if info.Mode().Perm() != hardenedMode {
-		return closeWithError(fmt.Errorf("log file %q permissions could not be secured", path))
+
+	if _, err := validateLogFileIdentity(path, f); err != nil {
+		return closeWithError(err)
 	}
 	return f, nil
 }

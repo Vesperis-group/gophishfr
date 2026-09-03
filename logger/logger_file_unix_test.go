@@ -131,6 +131,37 @@ func TestOpenLogFileDoesNotWidenRestrictiveMode(t *testing.T) {
 	}
 }
 
+func TestOpenLogFileRejectsForeignOwnerWithoutModification(t *testing.T) {
+	if os.Geteuid() != 0 {
+		t.Skip("requires root to create a deterministic foreign-owned fixture")
+	}
+
+	path := filepath.Join(t.TempDir(), "gophish.log")
+	const marker = "foreign-owned marker"
+	if err := os.WriteFile(path, []byte(marker), 0666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(path, 0666); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chown(path, 65534, 65534); err != nil {
+		t.Fatal(err)
+	}
+
+	if _, err := openLogFile(path); err == nil ||
+		!strings.Contains(err.Error(), "not owned by the effective service user") {
+		t.Fatalf("expected foreign-owner error, got %v", err)
+	}
+	assertFileMode(t, path, 0666)
+	content, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(content) != marker {
+		t.Fatalf("foreign-owned file content changed: %q", content)
+	}
+}
+
 func TestOpenLogFileRejectsUnsafePaths(t *testing.T) {
 	t.Run("missing parent", func(t *testing.T) {
 		const secretContent = "secret marker content"
