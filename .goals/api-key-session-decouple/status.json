@@ -1,6 +1,6 @@
 {
   "goal_id": "api-key-session-decouple",
-  "status": "building",
+  "status": "completed",
   "iteration": 2,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
@@ -41,6 +41,20 @@
       "result": "passed",
       "completed_at": "2026-09-03T21:30:00+02:00",
       "summary": "Both security review findings independently verified fixed. Password-change requirement now blocks session API access with 403 JSON before handler/RBAC while API-key path unaffected. Campaign completion moved to POST with same-origin/CSRF/view-only enforcement; session GET rejected deterministically via non-forgeable auth-mechanism marker while explicit-key GET retained. All other API GET endpoints audited—campaign completion only mutating GET. Auth-mechanism marker correctly set only post-auth, cannot be forged. Full quality gates passed. Iteration 1 criteria preserved. No new issues."
+    },
+    {
+      "iteration": 2,
+      "role": "security-review",
+      "result": "pass",
+      "completed_at": "2026-09-03T21:32:00+02:00",
+      "summary": "Final specialist re-review found no remaining high-confidence authentication, CSRF, authorization, or exposure issue."
+    },
+    {
+      "iteration": 2,
+      "role": "code-review",
+      "result": "pass",
+      "completed_at": "2026-09-03T21:32:00+02:00",
+      "summary": "Final complete-diff review and focused auth/session/frontend/Docker tests found no significant issue."
     }
   ]
 }

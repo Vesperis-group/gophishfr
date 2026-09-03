@@ -91,4 +91,3 @@ No new issues introduced. Middleware ordering is correct. Auth-mechanism marker 
 ## Signatures
 
 **Inspector:** Verified independently with fresh context. All acceptance criteria checked against immutable goal.md. Security findings fixed correctly. No new issues identified. Ready to proceed.
-
