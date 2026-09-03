@@ -161,7 +161,6 @@ function requestJSON(endpoint, method, data) {
         credentials: "same-origin",
         headers: {
             "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Authorization": "Bearer " + user.api_key,
             "Content-Type": "application/json"
         }
     }

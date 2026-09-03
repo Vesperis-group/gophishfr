@@ -303,7 +303,7 @@ async function openGroupDropdown(page: Page): Promise<void> {
 }
 
 test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
-  test.setTimeout(180_000);
+  test.setTimeout(240_000);
 
   const sandboxServiceWorkerError =
     "Failed to read the 'serviceWorker' property from 'Navigator': Service worker is disabled because the context is sandboxed and lacks the 'allow-same-origin' flag.";
@@ -314,6 +314,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   const failedLocalResponses: string[] = [];
   const unexpectedExternalRequests: string[] = [];
   const loadedAssets = new Set<string>();
+  const firstPartyAPIRequests: Request[] = [];
 
   page.on("pageerror", (error) => {
     if (error.message === sandboxServiceWorkerError) {
@@ -333,6 +334,12 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       failedLocalRequests.push(
         `${request.method()} ${url.pathname}: ${request.failure()?.errorText}`,
       );
+    }
+  });
+  page.on("request", (request) => {
+    const url = new URL(request.url());
+    if (url.origin === localOrigin && url.pathname.startsWith("/api/")) {
+      firstPartyAPIRequests.push(request);
     }
   });
   page.on("response", (response) => {
@@ -469,6 +476,37 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
           background: navbarStyle.backgroundColor,
           brandColor: brandStyle.color,
         };
+      });
+
+      await test.step("standard pages receive no API key", async () => {
+        const syntheticAPIKey = "browser-test-api-token-not-a-secret";
+        for (const path of [
+          "/",
+          "/campaigns",
+          "/groups",
+          "/templates",
+          "/landing_pages",
+          "/sending_profiles",
+          "/webhooks",
+        ]) {
+          await page.goto(path);
+          expect(await page.content()).not.toContain(syntheticAPIKey);
+          expect(
+            await page.evaluate(() => {
+              const browserUser = (window as unknown as {
+                user?: Record<string, unknown>;
+              }).user;
+              return browserUser ? Object.hasOwn(browserUser, "api_key") : false;
+            }),
+          ).toBe(false);
+          expect(
+            await page.evaluate((key) => ({
+              local: Object.values(localStorage).includes(key),
+              session: Object.values(sessionStorage).includes(key),
+            }), syntheticAPIKey),
+          ).toEqual({ local: false, session: false });
+        }
+        await page.goto("/");
       });
     expect(navbarPresentation.background).not.toBe("rgba(0, 0, 0, 0)");
     expect(navbarPresentation.brandColor).not.toBe(
@@ -3304,14 +3342,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator("#modal")).not.toBeVisible();
 
     const templates = await page.evaluate(async () => {
-      const apiKey = (
-        window as Window & {
-          user: { api_key: string };
-        }
-      ).user.api_key;
-      const response = await fetch("/api/templates/", {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
+      const response = await fetch("/api/templates/");
       if (!response.ok) {
         throw new Error(`Template API returned ${response.status}`);
       }
@@ -3408,14 +3439,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expect(page.locator("#modal")).not.toBeVisible();
 
     const landingPages = await page.evaluate(async () => {
-      const apiKey = (
-        window as Window & {
-          user: { api_key: string };
-        }
-      ).user.api_key;
-      const response = await fetch("/api/pages/", {
-        headers: { Authorization: `Bearer ${apiKey}` },
-      });
+      const response = await fetch("/api/pages/");
       if (!response.ok) {
         throw new Error(`Landing page API returned ${response.status}`);
       }
@@ -3813,7 +3837,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
 
     for (const request of importRequests) {
       expect(request.method).toBe("POST");
-      expect(request.authorization).toMatch(/^Bearer .+$/);
+      expect(request.authorization).toBe("");
       expect(request.contentType).toMatch(/^multipart\/form-data;\s*boundary=/);
       expect(request.body).toContain('name="files[]"');
     }
@@ -4307,11 +4331,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
           template: { attachments: Array<{ name: string }>; name: string };
         }>((resolve, reject) => {
           window
-            .fetch("/api/campaigns/", {
-              headers: {
-                Authorization: `Bearer ${(window as unknown as { user: { api_key: string } }).user.api_key}`,
-              },
-            })
+            .fetch("/api/campaigns/")
             .then((response) => response.json())
             .then((campaigns: Array<{
               id: number;
@@ -4351,6 +4371,33 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
   await test.step("jQuery runtime globals remain absent", async () => {
     await expectJQueryGlobalsAbsent(page);
   });
+
+  await test.step("settings retains only its dedicated key exposure", async () => {
+    await page.goto("/settings");
+    await expect(page.locator("#api_key")).toHaveValue(
+      "browser-test-api-token-not-a-secret",
+    );
+    expect(
+      await page.evaluate(() => {
+        const browserUser = (window as unknown as {
+          user?: Record<string, unknown>;
+        }).user;
+        return browserUser ? Object.hasOwn(browserUser, "api_key") : false;
+      }),
+    ).toBe(false);
+  });
+
+  expect(firstPartyAPIRequests.length).toBeGreaterThan(0);
+  for (const request of firstPartyAPIRequests) {
+    const headers = await request.allHeaders();
+    const url = new URL(request.url());
+    expect(headers.authorization).toBeUndefined();
+    expect(url.searchParams.has("api_key")).toBe(false);
+    expect(request.postData() ?? "").not.toContain("api_key=");
+    expect(request.postData() ?? "").not.toContain(
+      "browser-test-api-token-not-a-secret",
+    );
+  }
 
   expect(pageErrors).toEqual([]);
   expect(consoleErrors).toEqual([]);

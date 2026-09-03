@@ -304,7 +304,7 @@ test("landing page mutations and site cloning preserve legacy contracts", async 
   );
   const expectedWrapperRequests: CapturedRequest[] = [
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: JSON.stringify(wrapperCreate),
       contentType: "application/json",
       method: "POST",
@@ -312,7 +312,7 @@ test("landing page mutations and site cloning preserve legacy contracts", async 
       search: "",
     },
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: JSON.stringify(wrapperUpdate),
       contentType: "application/json",
       method: "PUT",
@@ -320,7 +320,7 @@ test("landing page mutations and site cloning preserve legacy contracts", async 
       search: "",
     },
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: "{}",
       contentType: "application/json",
       method: "DELETE",
@@ -328,7 +328,7 @@ test("landing page mutations and site cloning preserve legacy contracts", async 
       search: "",
     },
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: JSON.stringify(wrapperClone),
       contentType: "application/json",
       method: "POST",
@@ -937,7 +937,7 @@ test("landing page mutations and site cloning preserve legacy contracts", async 
   expect(
     capturedMutations.every(
       (request) =>
-        request.authorizationIsBearer && request.contentType === "application/json",
+        !request.authorizationIsBearer && request.contentType === "application/json",
     ),
   ).toBe(true);
   expect(

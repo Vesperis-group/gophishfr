@@ -177,7 +177,7 @@ test("remaining async API wrappers preserve their request and settlement contrac
   );
 
   const expectedRequests = invocations.map(({ body, method, pathname }) => ({
-    authorizationIsBearer: true,
+    authorizationIsBearer: false,
     body: body === null ? null : JSON.stringify(body),
     contentType: "application/json",
     method,

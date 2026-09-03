@@ -1,0 +1,18 @@
+{
+  "goal_id": "api-key-session-decouple",
+  "status": "building",
+  "iteration": 1,
+  "builder_model": "Claude:Sonnet-4.6",
+  "inspector_model": "Claude:Haiku-4.5",
+  "initial_sha": "e2da27ae841b9c17fd07c69cfb65d8f08260e9e3",
+  "created_at": "2026-09-03T19:45:00+02:00",
+  "history": [
+    {
+      "iteration": 1,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-03T20:25:00+02:00",
+      "summary": "Added deterministic dual API-key/session authentication with explicit-credential conflict rejection, shared credential-aware CSRF selection, unchanged RBAC and JSON API behavior, and session-only first-party HTTP transport. Removed the API key from common browser state while retaining its dedicated settings and API management exposure, regenerated reproducible assets, and added exhaustive middleware, controller, browser, Docker, documentation, and regression evidence. Full verification, race, browser, production-container, dependency, and security scanner gates completed with no new finding."
+    }
+  ]
+}

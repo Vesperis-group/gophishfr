@@ -174,7 +174,8 @@ func (as *AdminServer) registerRoutes() {
 	// https only. That is what closes GO-2025-3884, in which trusting
 	// example.net also trusted http://example.net.
 	csrfHandler := csrf.Protect(csrfKey,
-		csrf.TrustedOrigins(as.config.TrustedOrigins))
+		csrf.TrustedOrigins(as.config.TrustedOrigins),
+		csrf.ErrorHandler(mid.CSRFFailureHandler))
 	adminHandler := csrfHandler(router)
 	adminHandler = mid.Use(adminHandler.ServeHTTP, mid.CSRFExceptions, mid.GetContext, mid.ApplySecurityHeaders)
 

@@ -225,7 +225,7 @@ test("group CRUD preserves legacy transport and UI contracts", async ({ page }) 
   ]);
   const expectedRequests: CapturedRequest[] = [
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: JSON.stringify(createGroup),
       contentType: "application/json",
       method: "POST",
@@ -233,7 +233,7 @@ test("group CRUD preserves legacy transport and UI contracts", async ({ page }) 
       search: "",
     },
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: null,
       contentType: "application/json",
       method: "GET",
@@ -241,7 +241,7 @@ test("group CRUD preserves legacy transport and UI contracts", async ({ page }) 
       search: "?{}",
     },
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: JSON.stringify(updateGroup),
       contentType: "application/json",
       method: "PUT",
@@ -249,7 +249,7 @@ test("group CRUD preserves legacy transport and UI contracts", async ({ page }) 
       search: "",
     },
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: "{}",
       contentType: "application/json",
       method: "DELETE",
@@ -783,7 +783,7 @@ test("group CRUD preserves legacy transport and UI contracts", async ({ page }) 
   expect(
     groupRequests.every(
       (request) =>
-        request.authorizationIsBearer && request.contentType === "application/json",
+        !request.authorizationIsBearer && request.contentType === "application/json",
     ),
   ).toBe(true);
   expect(
