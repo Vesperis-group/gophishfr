@@ -13,6 +13,13 @@
       "result": "completed",
       "completed_at": "2026-09-03T17:05:00+02:00",
       "summary": "Replaced generated/logged bootstrap passwords with an authoritative mounted FILE and validated ENV fallback, made fresh creation hash-before-insert and historical empty-hash recovery one-time, preserved forced reset and API-token behavior, removed Ansible log scraping, and added focused Go, native logging, container, operations, and self-review coverage. Full verification, race, real Docker lifecycle, dependency checks, and security scanners completed with no new finding."
+    },
+    {
+      "iteration": 1,
+      "role": "inspector",
+      "result": "passed",
+      "completed_at": "2026-09-03T17:05:06+02:00",
+      "summary": "All acceptance criteria verified: FILE > ENV precedence with fatal authoritative failures, bounded file read with UTF-8/NUL validation, fresh-install atomicity via hash-before-insert, historical empty-hash recovery exactly once, PasswordChangeRequired preserved, Ansible updated with no_log and 0400 file, comprehensive test coverage including container integration, zero plaintext logging."
     }
   ]
 }
