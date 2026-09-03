@@ -52,7 +52,19 @@
 
                 <label class="form-label" for="secret">Secret:</label>
                 <div class="mb-3">
-                    <input type="text" class="form-control" placeholder="Secret" id="secret" required />
+                    <input type="text" class="form-control" placeholder="Leave blank to keep the current secret unchanged" id="secret" autocomplete="off" />
+                    <div class="form-text">
+                        The stored secret is write-only and is never shown here. Leave this
+                        blank to keep it unchanged, or type a new value to replace it.
+                    </div>
+                </div>
+
+                <div class="checkbox checkbox-primary" id="clear_secret_row" style="display:none;">
+                    <input type="checkbox" id="clear_secret" value="true" />
+                    <label for="clear_secret">Remove the existing secret <i class="fa fa-question-circle"
+                            data-bs-toggle="tooltip" data-bs-placement="right"
+                            title="Deliberately deletes this webhook's authentication secret. Only takes effect when the field above is left blank."></i>
+                    </label>
                 </div>
 
                 <div class="checkbox checkbox-primary">

@@ -159,15 +159,12 @@ func AddEvent(e *Event, campaignID int64) error {
 	e.CampaignId = campaignID
 	e.Time = time.Now().UTC()
 
-	whs, err := GetActiveWebhooks()
+	// ActiveWebhookEndpoints decrypts each webhook's stored secret
+	// immediately before delivery and silently excludes (logging once) any
+	// webhook whose credential cannot be authenticated, so a bad ciphertext
+	// never reaches http.Client.Do and never blocks other active webhooks.
+	whEndPoints, err := ActiveWebhookEndpoints(webhookCredentialCipherForDelivery())
 	if err == nil {
-		whEndPoints := []webhook.EndPoint{}
-		for _, wh := range whs {
-			whEndPoints = append(whEndPoints, webhook.EndPoint{
-				URL:    wh.URL,
-				Secret: wh.Secret,
-			})
-		}
 		webhook.SendAll(whEndPoints, e)
 	} else {
 		log.Errorf("error getting active webhooks: %v", err)

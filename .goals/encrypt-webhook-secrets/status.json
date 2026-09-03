@@ -1,0 +1,18 @@
+{
+  "goal_id": "encrypt-webhook-secrets",
+  "status": "building",
+  "iteration": 1,
+  "builder_model": "Claude:Sonnet-4.6",
+  "inspector_model": "Claude:Haiku-4.5",
+  "initial_sha": "aa842b799004f369733444467712e4acd9b62cdc",
+  "created_at": "2026-09-03T06:12:00+02:00",
+  "history": [
+    {
+      "iteration": 1,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-03T07:45:09+02:00",
+      "summary": "Encrypted webhooks.secret at rest with internal/credentials (AES-256-GCM, AAD bound to the immutable webhook ID), removed all API/frontend plaintext exposure, implemented the confirmed absent/null=preserve, empty=clear, non-empty=replace tri-state, added paired SQLite/MySQL schema migrations plus offline --migrate-webhook-secrets/--rollback-webhook-secrets actions, moved decryption to the HMAC delivery boundary with zero-outbound-on-credential-failure, and along the way fixed two pre-existing IMAP/SMTP test fragilities (fixed-count goose.Down assumptions) that the new migration exposed. Full local gates, real MySQL, real-backend browser coverage, and the production-image webhook container lifecycle all pass; docs, self-review, and a backlog issue for webhook URL secrets are included."
+    }
+  ]
+}

@@ -916,6 +916,13 @@ func TestMySQLSMTPCredentialLifecycle(t *testing.T) {
 	if err := goose.SetDialect("mysql"); err != nil {
 		t.Fatalf("set MySQL dialect: %v", err)
 	}
+	// Land exactly on the SMTP encryption migration's own version first,
+	// regardless of how many later migrations (webhook, and any future
+	// addition) now sit on top of it, so the guarded Down attempted next
+	// actually targets SMTP's own migration instead of whichever is newest.
+	if err := goose.DownTo(db.DB(), conf.MigrationsPath, 20260903010000); err != nil {
+		t.Fatalf("remove later credential migrations: %v", err)
+	}
 	if err := goose.Down(db.DB(), conf.MigrationsPath); err == nil {
 		t.Fatal("MySQL SMTP schema Down accepted ciphertext")
 	}

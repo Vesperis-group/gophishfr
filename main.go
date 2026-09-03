@@ -72,6 +72,14 @@ var (
 		"rollback-smtp-credentials",
 		"Offline: decrypt SMTP passwords before downgrading the schema or binary.",
 	).Bool()
+	migrateWebhookSecrets = kingpin.Flag(
+		"migrate-webhook-secrets",
+		"Offline: encrypt legacy webhook secrets after stopping all application writers.",
+	).Bool()
+	rollbackWebhookSecrets = kingpin.Flag(
+		"rollback-webhook-secrets",
+		"Offline: decrypt webhook secrets before downgrading the schema or binary.",
+	).Bool()
 	mode = kingpin.Flag("mode", fmt.Sprintf("Run the binary in one of the modes (%s, %s or %s)", modeAll, modeAdmin, modePhish)).
 		Default("all").Enum(modeAll, modeAdmin, modePhish)
 )
@@ -106,6 +114,8 @@ func main() {
 		*rollbackIMAPCredentials,
 		*migrateSMTPCredentials,
 		*rollbackSMTPCredentials,
+		*migrateWebhookSecrets,
+		*rollbackWebhookSecrets,
 	} {
 		if selected {
 			credentialActions++
@@ -121,6 +131,11 @@ func main() {
 	}
 	if *migrateSMTPCredentials || *rollbackSMTPCredentials {
 		if err := models.ValidateSMTPCredentialBackend(conf.DBName); err != nil {
+			log.Fatal(err)
+		}
+	}
+	if *migrateWebhookSecrets || *rollbackWebhookSecrets {
+		if err := models.ValidateWebhookCredentialBackend(conf.DBName); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -148,10 +163,14 @@ func main() {
 		log.Fatal(err)
 	}
 	if credentialActions != 0 && credentialCipher == nil {
-		if *migrateSMTPCredentials || *rollbackSMTPCredentials {
+		switch {
+		case *migrateSMTPCredentials || *rollbackSMTPCredentials:
 			log.Fatal(models.ErrSMTPCredentialKeyringRequired)
+		case *migrateWebhookSecrets || *rollbackWebhookSecrets:
+			log.Fatal(models.ErrWebhookCredentialKeyringRequired)
+		default:
+			log.Fatal(models.ErrIMAPCredentialKeyringRequired)
 		}
-		log.Fatal(models.ErrIMAPCredentialKeyringRequired)
 	}
 
 	// Provide the option to disable the built-in mailer
@@ -160,6 +179,11 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
+	// AddEvent (the campaign webhook delivery boundary) has no per-request or
+	// per-call cipher available, so it reads this package-level installation
+	// of the exact same shared cipher every other credential path receives
+	// explicitly.
+	models.SetWebhookCredentialCipher(credentialCipher)
 	if *migrateIMAPCredentials || *rollbackIMAPCredentials {
 		result, err := runIMAPCredentialAction(credentialCipher, *rollbackIMAPCredentials)
 		if err != nil {
@@ -182,6 +206,18 @@ func main() {
 			action = "rollback"
 		}
 		log.Infof("SMTP credential %s complete: %d rows updated, %d rows unchanged", action, result.Updated, result.Unchanged)
+		return
+	}
+	if *migrateWebhookSecrets || *rollbackWebhookSecrets {
+		result, err := runWebhookCredentialAction(credentialCipher, *rollbackWebhookSecrets)
+		if err != nil {
+			log.Fatal(err)
+		}
+		action := "migration"
+		if *rollbackWebhookSecrets {
+			action = "rollback"
+		}
+		log.Infof("Webhook credential %s complete: %d rows updated, %d rows unchanged", action, result.Updated, result.Unchanged)
 		return
 	}
 
@@ -277,4 +313,14 @@ func runIMAPCredentialAction(
 		return models.RollbackIMAPCredentials(credentialCipher)
 	}
 	return models.MigrateIMAPCredentials(credentialCipher)
+}
+
+func runWebhookCredentialAction(
+	credentialCipher *credentials.Cipher,
+	rollback bool,
+) (models.WebhookCredentialMigrationResult, error) {
+	if rollback {
+		return models.RollbackWebhookSecrets(credentialCipher)
+	}
+	return models.MigrateWebhookSecrets(credentialCipher)
 }
