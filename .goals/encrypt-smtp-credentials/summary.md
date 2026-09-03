@@ -2,9 +2,8 @@
 
 ## Outcome
 
-The security corrections passed independent inspection and specialist
-re-review. Builder iteration 3 corrected all three findings from the final code
-review and is ready for independent inspection.
+The goal passed independent inspection, code review, and security-specialist
+review after three Builder iterations.
 SMTP sending-profile passwords are now write-only at the HTTP/browser boundary,
 encrypted at rest with the existing AES-256-GCM credential foundation, bound to
 the authenticated owner and immutable profile ID, and decrypted only at the SMTP
@@ -67,6 +66,9 @@ dialer boundary.
 7. Builder iteration 3 preserved the SQLite SMTP ID high-water mark, composed
    test-email profiles from stored protected and submitted safe fields, and
    verified owner-scoped MySQL no-op updates inside the transaction.
+8. The Goal Inspector returned PASS in commit
+   `7b8d5b4e3874db9beab1ac5ae0f56a918c2d13b5`; final code and security
+   re-reviews both returned PASS with no remaining high-confidence finding.
 
 ## Inspector Findings
 
@@ -109,8 +111,7 @@ continue to prevent silent storage truncation from committing.
 - Gosec reports the same 14 documented pre-existing findings and no new finding.
 - Two clean frontend builds produced the same sending-profile asset hash;
   dependency manifests and lockfiles remain unchanged.
-- Independent high-confidence review of the uncommitted iteration-3 diff
-  reported no findings.
+- Independent final code and security reviews reported no findings.
 
 ## Recommendations
 
