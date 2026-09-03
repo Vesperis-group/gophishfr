@@ -1,11 +1,13 @@
 package models
 
 import (
+	"bytes"
 	"database/sql"
 	"errors"
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/Vesperis-group/gophishfr/config"
 	"github.com/pressly/goose/v3"
@@ -18,6 +20,137 @@ func mysqlAPIKeyTestDSN(t *testing.T) string {
 		t.Skip("GOPHISHFR_MYSQL_TEST_DSN is not set")
 	}
 	return connectionString
+}
+
+func TestMySQLZZPutUserIsolatesAPIKeyState(t *testing.T) {
+	connectionString := mysqlAPIKeyTestDSN(t)
+	database, err := openDatabase("mysql", connectionString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db = database
+	db.LogMode(false)
+	conf = &config.Config{
+		DBName: "mysql", DBPath: connectionString,
+		MigrationsPath: "../db/db_mysql/migrations",
+	}
+	if err := migrateDatabase(db.DB(), conf.DBName, conf.MigrationsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("DELETE FROM users").Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = db.Exec("DELETE FROM users").Error
+		_ = database.Close()
+	})
+
+	service := testAPIKeyService(t, "mysql-active", "mysql-active")
+	SetAPIKeyVerifier(service)
+	role, err := GetRoleBySlug(RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminRole, err := GetRoleBySlug(RoleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const legacyToken = "synthetic-mysql-put-user-legacy-token"
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key, role_id) VALUES (?, ?, ?, ?)",
+		"mysql-put-user-legacy", "legacy-hash", legacyToken, role.ID,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	user, err := GetUserByUsername("mysql-put-user-legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginTime := time.Date(2026, time.September, 3, 20, 15, 30, 0, time.UTC)
+	user.Username = "mysql-put-user-updated"
+	user.Hash = "updated-mysql-hash"
+	user.RoleID = adminRole.ID
+	user.PasswordChangeRequired = true
+	user.AccountLocked = true
+	user.LastLogin = loginTime
+	user.APIKeyVerifier = bytes.Repeat([]byte{0xa5}, 32)
+	user.APIKeyVerifierKeyID = "malicious-overwrite"
+	if err := PutUser(&user); err != nil {
+		t.Fatal(err)
+	}
+
+	var plaintext, keyID sql.NullString
+	var verifier []byte
+	if err := db.DB().QueryRow(
+		"SELECT api_key, api_key_verifier, api_key_verifier_key_id FROM users WHERE id = ?", user.Id,
+	).Scan(&plaintext, &verifier, &keyID); err != nil {
+		t.Fatal(err)
+	}
+	if !plaintext.Valid || plaintext.String != legacyToken || verifier != nil || keyID.Valid {
+		t.Fatal("ordinary MySQL user update changed byte/NULL-identical LEGACY state")
+	}
+	updated, err := GetUser(user.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Username != user.Username || updated.Hash != user.Hash ||
+		updated.RoleID != adminRole.ID || !updated.PasswordChangeRequired ||
+		!updated.AccountLocked || !updated.LastLogin.Equal(loginTime) {
+		t.Fatal("ordinary MySQL user fields did not persist")
+	}
+	migration, err := MigrateAPIKeys(service)
+	if err != nil || migration.Updated != 1 {
+		t.Fatalf("MySQL LEGACY row failed migration after PutUser: result=%+v err=%v", migration, err)
+	}
+	if authenticated, err := GetUserByAPIKey(legacyToken); err != nil || authenticated.Id != user.Id {
+		t.Fatalf("MySQL migrated token did not authenticate: %v", err)
+	}
+
+	migrated, err := GetUser(user.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalVerifier := append([]byte(nil), migrated.APIKeyVerifier...)
+	originalKeyID := migrated.APIKeyVerifierKeyID
+	migrated.Username = "mysql-migrated-profile-updated"
+	migrated.Hash = "updated-migrated-hash"
+	migrated.RoleID = role.ID
+	migrated.PasswordChangeRequired = false
+	migrated.AccountLocked = false
+	migrated.LastLogin = loginTime.Add(time.Minute)
+	migrated.APIKeyVerifier = bytes.Repeat([]byte{0x5a}, 32)
+	migrated.APIKeyVerifierKeyID = "malicious-overwrite"
+	if err := PutUser(&migrated); err != nil {
+		t.Fatal(err)
+	}
+	migrated, err = GetUser(user.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(migrated.APIKeyVerifier, originalVerifier) ||
+		migrated.APIKeyVerifierKeyID != originalKeyID {
+		t.Fatal("ordinary MySQL user update overwrote MIGRATED verifier state")
+	}
+	if migrated.Username != "mysql-migrated-profile-updated" ||
+		migrated.Hash != "updated-migrated-hash" || migrated.RoleID != role.ID ||
+		migrated.PasswordChangeRequired || migrated.AccountLocked ||
+		!migrated.LastLogin.Equal(loginTime.Add(time.Minute)) {
+		t.Fatal("ordinary MySQL MIGRATED user fields did not persist")
+	}
+	if err := PutUser(&migrated); err != nil {
+		t.Fatalf("no-op MySQL user update failed: %v", err)
+	}
+
+	resetToken, err := ResetUserAPIKey(migrated.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey(legacyToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatal("dedicated MySQL reset did not atomically invalidate the old token")
+	}
+	if authenticated, err := GetUserByAPIKey(resetToken); err != nil || authenticated.Id != migrated.Id {
+		t.Fatalf("dedicated MySQL reset token did not authenticate: %v", err)
+	}
 }
 
 func TestMySQLZZRuntimeRequiresVerifierOnlyState(t *testing.T) {

@@ -1,6 +1,7 @@
 package models
 
 import (
+	"bytes"
 	"crypto/rand"
 	"database/sql"
 	"encoding/hex"
@@ -9,6 +10,7 @@ import (
 	"path/filepath"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Vesperis-group/gophishfr/config"
 	"github.com/Vesperis-group/gophishfr/internal/apikey"
@@ -148,6 +150,114 @@ func TestFreshBootstrapMissingVerifierIsAtomic(t *testing.T) {
 	}
 	closeBootstrapDB(t)
 	SetAPIKeyVerifier(testAPIKeyService(t, "restored", "restored"))
+}
+
+func TestPutUserIsolatesAPIKeyStateSQLite(t *testing.T) {
+	service := testAPIKeyService(t, "active", "active")
+	setupAPIKeyDatabase(t, service)
+	role, err := GetRoleBySlug(RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	adminRole, err := GetRoleBySlug(RoleAdmin)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const legacyToken = "synthetic-put-user-legacy-token"
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key, role_id) VALUES (?, ?, ?, ?)",
+		"put-user-legacy", "legacy-hash", legacyToken, role.ID,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	legacy, err := GetUserByUsername("put-user-legacy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	loginTime := time.Date(2026, time.September, 3, 20, 15, 30, 0, time.UTC)
+	legacy.Username = "put-user-legacy-updated"
+	legacy.Hash = "updated-legacy-hash"
+	legacy.RoleID = adminRole.ID
+	legacy.PasswordChangeRequired = true
+	legacy.AccountLocked = true
+	legacy.LastLogin = loginTime
+	legacy.APIKeyVerifier = bytes.Repeat([]byte{0xa5}, 32)
+	legacy.APIKeyVerifierKeyID = "malicious-overwrite"
+	if err := PutUser(&legacy); err != nil {
+		t.Fatal(err)
+	}
+
+	var plaintext, keyID sql.NullString
+	var verifier []byte
+	if err := db.DB().QueryRow(
+		"SELECT api_key, api_key_verifier, api_key_verifier_key_id FROM users WHERE id = ?", legacy.Id,
+	).Scan(&plaintext, &verifier, &keyID); err != nil {
+		t.Fatal(err)
+	}
+	if !plaintext.Valid || plaintext.String != legacyToken || verifier != nil || keyID.Valid {
+		t.Fatal("ordinary SQLite user update changed byte/NULL-identical LEGACY state")
+	}
+	updated, err := GetUser(legacy.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if updated.Username != legacy.Username || updated.Hash != legacy.Hash ||
+		updated.RoleID != adminRole.ID || !updated.PasswordChangeRequired ||
+		!updated.AccountLocked || !updated.LastLogin.Equal(loginTime) {
+		t.Fatal("ordinary SQLite user fields did not persist")
+	}
+	migration, err := MigrateAPIKeys(service)
+	if err != nil || migration.Updated != 1 {
+		t.Fatalf("SQLite LEGACY row failed migration after PutUser: result=%+v err=%v", migration, err)
+	}
+	if authenticated, err := GetUserByAPIKey(legacyToken); err != nil || authenticated.Id != legacy.Id {
+		t.Fatalf("SQLite migrated token did not authenticate: %v", err)
+	}
+
+	admin, err := GetUser(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	originalVerifier := append([]byte(nil), admin.APIKeyVerifier...)
+	originalKeyID := admin.APIKeyVerifierKeyID
+	admin.Username = "admin-profile-updated"
+	admin.Hash = "updated-admin-hash"
+	admin.RoleID = role.ID
+	admin.PasswordChangeRequired = true
+	admin.AccountLocked = true
+	admin.LastLogin = loginTime.Add(time.Minute)
+	admin.APIKeyVerifier = bytes.Repeat([]byte{0x5a}, 32)
+	admin.APIKeyVerifierKeyID = "malicious-overwrite"
+	if err := PutUser(&admin); err != nil {
+		t.Fatal(err)
+	}
+	admin, err = GetUser(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !bytes.Equal(admin.APIKeyVerifier, originalVerifier) || admin.APIKeyVerifierKeyID != originalKeyID {
+		t.Fatal("ordinary SQLite user update overwrote MIGRATED verifier state")
+	}
+	if admin.Username != "admin-profile-updated" || admin.Hash != "updated-admin-hash" ||
+		admin.RoleID != role.ID || !admin.PasswordChangeRequired || !admin.AccountLocked ||
+		!admin.LastLogin.Equal(loginTime.Add(time.Minute)) {
+		t.Fatal("ordinary SQLite MIGRATED user fields did not persist")
+	}
+	if err := PutUser(&admin); err != nil {
+		t.Fatalf("no-op SQLite user update failed: %v", err)
+	}
+
+	resetToken, err := ResetUserAPIKey(admin.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey("synthetic-lifecycle-admin-token"); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatal("dedicated SQLite reset did not atomically invalidate the old token")
+	}
+	if authenticated, err := GetUserByAPIKey(resetToken); err != nil || authenticated.Id != admin.Id {
+		t.Fatalf("dedicated SQLite reset token did not authenticate: %v", err)
+	}
 }
 
 func TestRuntimeRequiresVerifierOnlyState(t *testing.T) {

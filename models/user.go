@@ -130,13 +130,34 @@ func GetUserByUsername(username string) (User, error) {
 	return u, err
 }
 
-// PutUser updates the given user
+// PutUser updates ordinary mutable user fields. API-key state is deliberately
+// excluded: only the dedicated issuance, reset, lazy-rekey, and migration paths
+// may write those columns.
 func PutUser(u *User) error {
-	if u.Id == 0 && len(u.APIKeyVerifier) == 0 {
+	if u.Id == 0 {
 		return ErrInvalidAPIKeyState
 	}
-	err := db.Save(u).Error
-	return err
+	result := db.Model(&User{}).Where("id = ?", u.Id).Updates(map[string]interface{}{
+		"username":                 u.Username,
+		"hash":                     u.Hash,
+		"role_id":                  u.RoleID,
+		"password_change_required": u.PasswordChangeRequired,
+		"account_locked":           u.AccountLocked,
+		"last_login":               u.LastLogin,
+	})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected == 0 {
+		var count int
+		if err := db.Model(&User{}).Where("id = ?", u.Id).Count(&count).Error; err != nil {
+			return err
+		}
+		if count != 1 {
+			return gorm.ErrRecordNotFound
+		}
+	}
+	return nil
 }
 
 // CreateUserWithAPIKey creates a verifier-only user and returns its generated

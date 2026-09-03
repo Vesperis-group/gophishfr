@@ -89,6 +89,29 @@ plaintext reads and authentication fallbacks are zero.
   scanner, and reproducible-frontend gates were rerun. Dependency manifests
   remain unchanged.
 
+## Iteration 3 user-update isolation
+
+- `PutUser` now has an explicit allowlist containing only username, password
+  hash, role ID, password-change requirement, account lock, and last-login.
+  It cannot write `api_key`, `api_key_verifier`, or
+  `api_key_verifier_key_id`, even if its in-memory `User` carries attacker-
+  supplied verifier values. New users still go through the dedicated atomic
+  verifier issuance path.
+- All production callers were audited: login persists last-login, settings and
+  forced reset persist password changes, and the user API persists profile,
+  role, password policy, and lock fields. A no-op update remains successful on
+  MySQL while a missing ID fails rather than creating a user.
+- SQLite and real MySQL tests prove a LEGACY row remains plaintext/NULL/NULL
+  byte-for-byte across login-style and general updates and then migrates
+  successfully. They also prove ordinary MIGRATED updates preserve exact
+  verifier bytes/key ID, ordinary fields persist, malicious verifier values are
+  ignored, and dedicated reset atomically invalidates and replaces the token.
+- Full Go/race, clean real-MySQL, browser, container, migration/bootstrap/auth,
+  fuzz, scanner, and reproducibility gates passed with the established scanner
+  baseline. The iteration-3 Yarn audit endpoint returned HTTP 503 on three
+  attempts; manifests are unchanged and the iteration-2 audit found zero
+  vulnerabilities.
+
 ## Limitations
 
 HMAC protects token confidentiality after a read-only database leak, including

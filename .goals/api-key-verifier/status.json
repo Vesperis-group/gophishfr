@@ -1,7 +1,7 @@
 {
   "goal_id": "api-key-verifier",
-  "status": "inspecting",
-  "iteration": 2,
+  "status": "completed",
+  "iteration": 3,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "a28fcca62aa94d2b3b90e50e0d19f0ad87d210ef",
@@ -41,6 +41,27 @@
       "result": "pass",
       "completed_at": "2026-09-04T00:14:54+02:00",
       "summary": "Security review finding from iteration 1 (CONTROLLED_BOTH state authenticated at runtime) comprehensively corrected. All three runtime code paths now enforce `api_key IS NULL` requirement: initial indexed lookup (line 99), verifier-write validation (line 324), and lazy-rekey CAS reread (line 370). New SQLite and real MySQL test coverage validates rejection of LEGACY/BOTH/all-absent states, successful migration/clearing, old-pepper BOTH without rekey, concurrent transition rejection, normal lazy upgrade, and reset invalidation. No logic errors, no new plaintext exposure paths. Regression verification confirms session/CSRF/RBAC/view-only, browser reveal lifecycle, Docker separation, and migration atomicity unchanged. Production-ready for merge."
+    },
+    {
+      "iteration": 2,
+      "role": "security-review",
+      "result": "pass",
+      "completed_at": "2026-09-04T00:20:00+02:00",
+      "summary": "Final verifier-only security re-review found no remaining high-confidence security issue."
+    },
+    {
+      "iteration": 2,
+      "role": "code-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T00:22:00+02:00",
+      "summary": "PutUser full-row Save writes empty verifier key ID into legacy rows, corrupting migration state."
+    },
+    {
+      "iteration": 3,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T00:46:02+02:00",
+      "summary": "Replaced PutUser full-row persistence with an explicit ordinary-field allowlist so login, password, role, profile, and lock updates cannot mutate legacy or verifier state. SQLite and real-MySQL tests prove LEGACY state survives ordinary updates and remains migratable, MIGRATED verifier bytes/key ID survive malicious and normal DTO values, ordinary fields persist, no-op updates remain valid, and dedicated reset remains atomic. Full project, backend, browser, Docker, race, fuzz, scanner, mode, dependency, and reproducibility validation was rerun; Yarn audit was temporarily unavailable with HTTP 503 while manifests remained unchanged."
     }
   ]
 }
