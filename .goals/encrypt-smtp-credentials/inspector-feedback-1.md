@@ -27,10 +27,10 @@ The Builder has successfully implemented secure SMTP credential encryption with 
 
 ### API request/response separation
 - [x] **Explicit request/response DTOs** — Verified: `controllers/api/smtp.go` lines 21-36 define `smtpRequest` (accepts Password as json.RawMessage) and `smtpResponse` (omits password/ciphertext entirely).
-- [x] **No password/ciphertext/key-ID in any HTTP response** — Verified: 
-  - `decodeSMTPRequest` (line 38-51) parses password into request struct only; 
-  - `newSMTPResponse` (line 54-66) constructs response without password fields; 
-  - SMTP struct has `json:"-"` tags for both password columns (models/smtp.go lines 43-44); 
+- [x] **No password/ciphertext/key-ID in any HTTP response** — Verified:
+  - `decodeSMTPRequest` (line 38-51) parses password into request struct only;
+  - `newSMTPResponse` (line 54-66) constructs response without password fields;
+  - SMTP struct has `json:"-"` tags for both password columns (models/smtp.go lines 43-44);
   - `assertSMTPResponseSecretFree` test (controllers/api/smtp_test.go lines 64-78) checks raw response bodies for forbidden strings across GET/POST/PUT/campaign/test-email.
 - [x] **Raw response bodies tested against synthetic plaintext and ciphertext** — Verified: Test at lines 83-215 uses `storedSMTPPassword` ("synthetic-stored-smtp-password") and `replacementSMTPPassword` ("synthetic-replacement-smtp-password") as test secrets, verifying they don't appear in any response body.
 - [x] **Explicitly reject password: null without logging request body** — Verified: `decodeSMTPRequest` line 43-44 checks `bytes.TrimSpace(request.Password) == []byte("null")` and returns `errNullSMTPPassword` without logging; `decodeEmailRequest` (util.go line 28-29) does same for test-email.
@@ -171,7 +171,7 @@ The environment has a WSL/PowerShell file-locking issue that prevents Go from ru
 
 ## Issues Found
 
-**NONE — All acceptance criteria met.** 
+**NONE — All acceptance criteria met.**
 
 The implementation is complete, thoroughly tested, and correctly implements SMTP credential encryption with proper isolation, migration, rollback, and end-to-end security controls.
 
@@ -188,6 +188,6 @@ All code-level requirements are satisfied.
 
 ---
 
-**Inspection Date:** 2026-09-03T03:47:09.968+02:00  
-**Inspector Model:** Claude:Haiku-4.5  
+**Inspection Date:** 2026-09-03T03:47:09.968+02:00
+**Inspector Model:** Claude:Haiku-4.5
 **Diff Scope:** eadca8c679eb785adda5ec0ab110340d4c2baae6 → 2710482ca8f7a98d645f070d46069f64c838a110

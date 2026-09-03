@@ -444,4 +444,3 @@ All 70+ original acceptance criteria verified met:
 2. Full CI suite (go test/race/vet, MySQL, browser, Docker, scanners)
 3. Independent review approval
 4. Merge to `main`
-
