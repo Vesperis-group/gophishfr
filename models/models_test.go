@@ -1,6 +1,7 @@
 package models
 
 import (
+	"os"
 	"testing"
 
 	"github.com/Vesperis-group/gophishfr/config"
@@ -8,7 +9,15 @@ import (
 )
 
 // Hook up gocheck into the "go test" runner.
-func Test(t *testing.T) { check.TestingT(t) }
+func Test(t *testing.T) {
+	if err := os.Setenv(InitialAdminPassword, "synthetic-model-test-password"); err != nil {
+		t.Fatal(err)
+	}
+	defer func() {
+		_ = os.Unsetenv(InitialAdminPassword)
+	}()
+	check.TestingT(t)
+}
 
 type ModelsSuite struct {
 	config *config.Config

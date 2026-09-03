@@ -1,0 +1,60 @@
+{
+  "goal_id": "secure-admin-bootstrap",
+  "status": "completed",
+  "iteration": 2,
+  "builder_model": "Claude:Sonnet-4.6",
+  "inspector_model": "Claude:Haiku-4.5",
+  "initial_sha": "df54953a9f90bbccab2d740b7478468a40ef3bbb",
+  "created_at": "2026-09-03T16:45:00+02:00",
+  "history": [
+    {
+      "iteration": 1,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-03T17:05:00+02:00",
+      "summary": "Replaced generated/logged bootstrap passwords with an authoritative mounted FILE and validated ENV fallback, made fresh creation hash-before-insert and historical empty-hash recovery one-time, preserved forced reset and API-token behavior, removed Ansible log scraping, and added focused Go, native logging, container, operations, and self-review coverage. Full verification, race, real Docker lifecycle, dependency checks, and security scanners completed with no new finding."
+    },
+    {
+      "iteration": 1,
+      "role": "inspector",
+      "result": "passed",
+      "completed_at": "2026-09-03T17:05:06+02:00",
+      "summary": "All acceptance criteria verified: FILE > ENV precedence with fatal authoritative failures, bounded file read with UTF-8/NUL validation, fresh-install atomicity via hash-before-insert, historical empty-hash recovery exactly once, PasswordChangeRequired preserved, Ansible updated with no_log and 0400 file, comprehensive test coverage including container integration, zero plaintext logging."
+    },
+    {
+      "iteration": 1,
+      "role": "security-review",
+      "result": "fail",
+      "completed_at": "2026-09-03T17:12:00+02:00",
+      "summary": "An empty role variable in vars/main.yml overrides inventory/Vault input, preventing Ansible from provisioning the bootstrap secret."
+    },
+    {
+      "iteration": 2,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-03T17:19:00+02:00",
+      "summary": "Moved the empty bootstrap value from high-precedence role vars to role defaults so inventory, play, and Vault overrides reach the protected input-file and systemd tasks; retained no_log, service-user ownership, mode 0400, and safe unset behavior; added an executable structural regression to the full verification gate. Full repository/race, real container lifecycle, YAML parsing, dependency, and security checks preserve all iteration-1 guarantees."
+    },
+    {
+      "iteration": 2,
+      "role": "inspector",
+      "result": "passed",
+      "completed_at": "2026-09-03T17:19:38+02:00",
+      "summary": "Ansible precedence correction verified: empty default moved to role defaults (low precedence) allowing inventory/play/Vault overrides; structural test proves override reaches secret-file provisioning and service environment; no_log retained on both tasks; file mode 0400 and service-user ownership correct; guard conditions prevent provisioning when unset; all iteration-1 guarantees preserved with zero product code changes; YAML syntax validated."
+    },
+    {
+      "iteration": 2,
+      "role": "security-review",
+      "result": "pass",
+      "completed_at": "2026-09-03T17:24:00+02:00",
+      "summary": "Independent specialist re-review confirmed the Ansible override path and complete bootstrap security surface with no remaining high-confidence finding."
+    },
+    {
+      "iteration": 2,
+      "role": "code-review",
+      "result": "pass",
+      "completed_at": "2026-09-03T17:25:00+02:00",
+      "summary": "Final complete-diff review found no high-confidence correctness, security, availability, data-integrity, compatibility, or test defect."
+    }
+  ]
+}

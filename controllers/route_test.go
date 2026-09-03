@@ -9,6 +9,8 @@ import (
 	"testing"
 
 	"github.com/PuerkitoBio/goquery"
+	"github.com/Vesperis-group/gophishfr/auth"
+	"github.com/Vesperis-group/gophishfr/models"
 )
 
 func attemptLogin(t *testing.T, ctx *testContext, client *http.Client, username, password, optionalPath string) *http.Response {
@@ -228,6 +230,53 @@ func TestSuccessfulLogin(t *testing.T) {
 	expected := http.StatusOK
 	if got != expected {
 		t.Fatalf("invalid status code received. expected %d got %d", expected, got)
+	}
+}
+
+func TestInitialAdministratorMustChangePassword(t *testing.T) {
+	ctx := setupTest(t)
+	defer tearDown(t, ctx)
+	jar, err := cookiejar.New(nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	client := &http.Client{Jar: jar}
+
+	loginResponse := attemptLogin(t, ctx, client, "admin", "gophish", "")
+	defer func() { _ = loginResponse.Body.Close() }()
+	if loginResponse.Request.URL.Path != "/reset_password" {
+		t.Fatalf("initial login was not redirected to password reset")
+	}
+
+	changedPassword := "synthetic-reset-value"
+	request, err := http.NewRequest(
+		http.MethodPost,
+		fmt.Sprintf("%s/reset_password", ctx.adminServer.URL),
+		strings.NewReader(url.Values{
+			"password":         {changedPassword},
+			"confirm_password": {changedPassword},
+		}.Encode()),
+	)
+	if err != nil {
+		t.Fatal(err)
+	}
+	request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	request.Header.Set("Sec-Fetch-Site", "same-origin")
+	response, err := client.Do(request)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = response.Body.Close() }()
+
+	admin, err := models.GetUserByUsername(models.DefaultAdminUsername)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if admin.PasswordChangeRequired {
+		t.Fatal("successful initial password reset did not clear forced-change marker")
+	}
+	if err := auth.ValidatePassword(changedPassword, admin.Hash); err != nil {
+		t.Fatal("successful initial password reset did not store the new password")
 	}
 }
 

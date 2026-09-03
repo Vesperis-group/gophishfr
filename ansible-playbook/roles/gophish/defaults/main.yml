@@ -1,0 +1,4 @@
+# Required for a fresh database. Role defaults deliberately have the lowest
+# Ansible precedence so inventory, play, and Vault values can override this
+# non-secret empty value. Never commit an actual password here.
+gophish_initial_admin_password: ""

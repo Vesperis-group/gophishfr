@@ -27,6 +27,7 @@ type testContext struct {
 }
 
 func setupTest(t *testing.T) *testContext {
+	t.Setenv(models.InitialAdminPassword, "synthetic-worker-test-password")
 	conf := &config.Config{
 		DBName:         "sqlite3",
 		DBPath:         ":memory:",

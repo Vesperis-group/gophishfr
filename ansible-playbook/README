@@ -14,7 +14,17 @@ legacy `gophish.service` unit with `gophishfr.service`.
 
 3) Modify files/config.json with any changes.
 
-4) Execute
+4) A fresh database requires an explicit initial administrator password. Supply
+`gophish_initial_admin_password` through Ansible Vault, encrypted inventory, or
+an interactive extra variable. Do not write it into `vars/main.yml`. The role
+uses `no_log`, installs a mode `0400` input file, and points the service at that
+file. It never reads credentials from `gophish.log`.
+
+An existing installation with an initialized administrator does not require the
+variable. A historical partial installation whose administrator has an empty
+password hash does require it once.
+
+5) Execute
 
 # Log in as root with SSH key
 ansible-playbook site.yml -i hosts -u root --private-key=private.key
