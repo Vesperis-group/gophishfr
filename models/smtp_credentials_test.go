@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"database/sql"
 	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -796,6 +797,75 @@ func TestSQLiteSMTPCredentialSchemaLifecycle(t *testing.T) {
 	}
 }
 
+func TestSQLiteSMTPCredentialDownPreservesSequence(t *testing.T) {
+	testConfig := setupIMAPCredentialDatabase(t)
+	cipher := testCredentialCipher(t, "smtp-key", map[string][]byte{
+		"smtp-key": bytes.Repeat([]byte{0x76}, 32),
+	})
+	profiles := make([]SMTP, 3)
+	for i := range profiles {
+		profiles[i] = validModelSMTP(testSMTPSecret)
+		profiles[i].Name = fmt.Sprintf("Sequence profile %d", i+1)
+		if err := PostSMTP(&profiles[i], cipher); err != nil {
+			t.Fatalf("create sequence profile %d: %v", i+1, err)
+		}
+	}
+	deletedID := profiles[len(profiles)-1].Id
+	campaignResult, err := db.DB().Exec(`
+		INSERT INTO campaigns (user_id, name, smtp_id)
+		VALUES (?, 'Historical SMTP reference', ?)
+	`, profiles[0].UserId, deletedID)
+	if err != nil {
+		t.Fatalf("create historical SMTP reference: %v", err)
+	}
+	campaignID, err := campaignResult.LastInsertId()
+	if err != nil {
+		t.Fatalf("read historical campaign ID: %v", err)
+	}
+	if err := DeleteSMTP(deletedID, profiles[0].UserId); err != nil {
+		t.Fatalf("delete highest-ID SMTP profile: %v", err)
+	}
+	if result, err := RollbackSMTPCredentials(cipher); err != nil || result.Updated != 2 {
+		t.Fatalf("rollback credentials before schema Down: result=%+v err=%v", result, err)
+	}
+	if err := goose.SetDialect("sqlite3"); err != nil {
+		t.Fatalf("set SQLite dialect: %v", err)
+	}
+	if err := goose.Down(db.DB(), testConfig.MigrationsPath); err != nil {
+		t.Fatalf("roll back SMTP credential schema: %v", err)
+	}
+	insert, err := db.DB().Exec(`
+		INSERT INTO smtp (
+			user_id, interface_type, name, host, username, password,
+			from_address, ignore_cert_errors
+		)
+		VALUES (1, 'SMTP', 'After schema rollback', 'localhost:25', '', '',
+		        'sender@example.test', 0)
+	`)
+	if err != nil {
+		t.Fatalf("create SMTP profile after schema Down: %v", err)
+	}
+	newID, err := insert.LastInsertId()
+	if err != nil {
+		t.Fatalf("read new SMTP profile ID: %v", err)
+	}
+	if newID <= deletedID {
+		t.Fatalf("SMTP ID %d reused deleted high-water ID %d", newID, deletedID)
+	}
+	var retargeted int
+	if err := db.Raw(`
+		SELECT COUNT(*)
+		FROM campaigns
+		JOIN smtp ON smtp.id = campaigns.smtp_id
+		WHERE campaigns.id = ?
+	`, campaignID).Row().Scan(&retargeted); err != nil {
+		t.Fatalf("check historical SMTP reference: %v", err)
+	}
+	if retargeted != 0 {
+		t.Fatal("schema Down caused a historical SMTP reference to target a new profile")
+	}
+}
+
 func TestMySQLSMTPCredentialLifecycle(t *testing.T) {
 	connectionString := testingMySQLDSN(t)
 	if connectionString == "" {
@@ -927,6 +997,47 @@ func TestMySQLSMTPCredentialStorageBoundsNonStrict(t *testing.T) {
 	if plaintext, err := DecryptSMTPPassword(stored, cipher); err != nil || plaintext != maxPassword {
 		t.Fatalf("round-trip maximum MySQL password: matched=%t err=%v", plaintext == maxPassword, err)
 	}
+	headerOnly := stored
+	headerOnly.Password = ""
+	headerOnly.Headers = []Header{{Key: "X-MySQL-Noop", Value: "updated"}}
+	noOpProbe := db.Model(&SMTP{}).
+		Where("id = ? AND user_id = ?", stored.Id, stored.UserId).
+		Update("name", stored.Name)
+	if noOpProbe.Error != nil {
+		t.Fatalf("probe MySQL changed-rows semantics: %v", noOpProbe.Error)
+	}
+	if noOpProbe.RowsAffected != 0 {
+		t.Fatalf("MySQL test requires changed-rows semantics, got %d affected", noOpProbe.RowsAffected)
+	}
+	if err := PutSMTP(&headerOnly, cipher); err != nil {
+		t.Fatalf("same-second MySQL header-only update: %v", err)
+	}
+	headerUpdated := loadOnlySMTP(t, profile.Id, profile.UserId)
+	if len(headerUpdated.Headers) != 1 ||
+		headerUpdated.Headers[0].Key != "X-MySQL-Noop" ||
+		headerUpdated.PasswordCiphertext != stored.PasswordCiphertext {
+		t.Fatal("MySQL header-only update did not preserve ciphertext and replace headers")
+	}
+	wrongOwner := headerUpdated
+	wrongOwner.UserId++
+	wrongOwner.Password = ""
+	if err := PutSMTP(&wrongOwner, cipher); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("wrong-owner MySQL no-op error = %v, want not found", err)
+	}
+	contextConflict := headerUpdated
+	contextConflict.Password = ""
+	contextConflict.Host = "localhost:2526"
+	if err := PutSMTP(&contextConflict, cipher); !errors.Is(err, ErrSMTPCredentialContextChange) {
+		t.Fatalf("MySQL context-conflict error = %v, want context rejection", err)
+	}
+	guarded := loadOnlySMTP(t, profile.Id, profile.UserId)
+	if guarded.Host != headerUpdated.Host ||
+		guarded.PasswordCiphertext != headerUpdated.PasswordCiphertext ||
+		len(guarded.Headers) != 1 ||
+		guarded.Headers[0].Key != "X-MySQL-Noop" {
+		t.Fatal("failed MySQL ownership/context guards changed the profile")
+	}
+	stored = headerUpdated
 
 	rejectedUpdate := stored
 	rejectedUpdate.Password = overPassword

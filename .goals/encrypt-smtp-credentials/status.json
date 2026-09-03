@@ -1,7 +1,7 @@
 {
   "goal_id": "encrypt-smtp-credentials",
-  "status": "completed",
-  "iteration": 2,
+  "status": "inspecting",
+  "iteration": 3,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "eadca8c679eb785adda5ec0ab110340d4c2baae6",
@@ -46,6 +46,20 @@
       "result": "pass",
       "completed_at": "2026-09-03T04:34:00+02:00",
       "summary": "Independent specialist re-review confirmed both original findings closed with no remaining high-confidence security issue."
+    },
+    {
+      "iteration": 2,
+      "role": "code-review",
+      "result": "fail",
+      "completed_at": "2026-09-03T04:44:00+02:00",
+      "summary": "SQLite Down can reuse deleted IDs, stored-password test email discards safe unsaved fields, and MySQL no-op PUT can falsely fail."
+    },
+    {
+      "iteration": 3,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-03T05:04:14+02:00",
+      "summary": "Preserved SQLite SMTP ID history, separated protected test-email routing from safe message fields, and verified MySQL no-op updates in transaction."
     }
   ]
 }

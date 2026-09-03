@@ -112,15 +112,39 @@ func (as *Server) SendTestEmail(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	if s.SMTP.Id != 0 {
+		submitted := s.SMTP
 		stored, lookupErr := models.GetSMTP(s.SMTP.Id, s.UserId)
 		if lookupErr != nil {
 			JSONResponse(w, models.Response{Success: false, Message: "Sending profile not found"}, http.StatusBadRequest)
 			return
 		}
 		if incomingPassword == "" {
-			// A stored secret is inseparable from its authorized connection
-			// context. Never combine it with request-controlled routing fields.
-			s.SMTP = stored
+			if stored.Password != "" {
+				credentialErr := models.ErrSMTPCredentialNotMigrated
+				if stored.PasswordCiphertext != "" {
+					credentialErr = models.ErrSMTPCredentialInvalidState
+				}
+				JSONResponse(w, models.Response{Success: false, Message: credentialErr.Error()}, http.StatusBadRequest)
+				return
+			}
+			if stored.PasswordCiphertext != "" {
+				// Bind only the fields that can redirect authentication. Safe
+				// unsaved message fields remain available to the test send.
+				submitted.Id = stored.Id
+				submitted.UserId = stored.UserId
+				submitted.Interface = stored.Interface
+				submitted.Host = stored.Host
+				submitted.Username = stored.Username
+				submitted.IgnoreCertErrors = stored.IgnoreCertErrors
+				submitted.Password = ""
+				submitted.PasswordCiphertext = stored.PasswordCiphertext
+				s.SMTP = submitted
+			} else {
+				// With no stored secret there is nothing to redirect, so the
+				// complete submitted connection context remains usable.
+				s.SMTP.UserId = stored.UserId
+				s.SMTP.PasswordCiphertext = ""
+			}
 		} else {
 			s.SMTP.UserId = stored.UserId
 			s.SMTP.PasswordCiphertext = ""

@@ -162,11 +162,13 @@ whose plaintext exceeds the storage-safe limit, fails before any SMTP
 connection is attempted.
 
 For an existing authorized profile, test email uses its stored envelope when
-the browser's password field is empty. In that case it also uses the complete
-stored connection context, ignoring request-supplied host, username, interface,
-TLS policy, sender, and headers. A newly entered test password explicitly uses
-the request connection context only in memory and is neither persisted nor
-echoed.
+the browser's password field is empty. In that case it binds the stored
+interface, host/port, username, TLS policy, ciphertext, owner, and profile ID,
+while still applying safe unsaved message fields such as the submitted From
+address and custom headers. A stored profile with no secret may use the complete
+submitted connection context because there is no credential to redirect. A
+newly entered test password explicitly uses the request connection context only
+in memory and is neither persisted nor echoed.
 
 ## Docker
 
@@ -219,3 +221,7 @@ remove the ciphertext column while any envelope remains. After data rollback
 and that single Down, old binaries can read the restored password column. If
 any step fails, keep writers stopped and restore the matching database and
 keyring backups rather than deleting ciphertext or forcing the schema change.
+
+On SQLite, schema Down also preserves the `smtp` autoincrement high-water mark
+while rebuilding the table. Deleted profile IDs therefore remain retired and
+cannot be reused to retarget historical `campaigns.smtp_id` references.

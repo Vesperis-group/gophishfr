@@ -2,8 +2,9 @@
 
 ## Outcome
 
-The goal passed independent inspection and a security-specialist re-review after
-two Builder iterations.
+The security corrections passed independent inspection and specialist
+re-review. Builder iteration 3 corrected all three findings from the final code
+review and is ready for independent inspection.
 SMTP sending-profile passwords are now write-only at the HTTP/browser boundary,
 encrypted at rest with the existing AES-256-GCM credential foundation, bound to
 the authenticated owner and immutable profile ID, and decrypted only at the SMTP
@@ -22,9 +23,10 @@ dialer boundary.
   unchanged. Routing changes require a non-empty replacement, while
   unauthenticated profiles remain freely editable with both secret columns
   empty.
-- Stored-password test email ignores request-controlled SMTP context and uses
-  the complete owner-authorized stored profile. An explicit non-empty password
-  uses the request context only in memory.
+- Stored-password test email binds the owner-authorized stored profile ID,
+  interface, host/port, username, TLS policy, and ciphertext while retaining
+  safe submitted From/header fields. A stored no-secret profile or explicit
+  non-empty password uses submitted connection context only in memory.
 - Plaintext is limited to 255 valid UTF-8 bytes and v1 ciphertext to its derived
   464-byte maximum within the 2048-character column. Create, rotate, migration,
   and rollback re-read and compare secret columns byte-for-byte in the same
@@ -59,17 +61,25 @@ dialer boundary.
 5. The Goal Inspector returned PASS again in commit
    `fddb6726cba274e47bcb853f3af79d07119f40f6`, and the independent security
    specialist re-review also returned PASS.
+6. A final code review found SQLite sequence regression on schema Down, loss of
+   safe unsaved test-email fields, and false MySQL failure for matched no-op
+   updates. These are assigned to Builder iteration 3.
+7. Builder iteration 3 preserved the SQLite SMTP ID high-water mark, composed
+   test-email profiles from stored protected and submitted safe fields, and
+   verified owner-scoped MySQL no-op updates inside the transaction.
 
 ## Inspector Findings
 
-Both security findings are corrected. PUT rejects preserved-password changes to
+All review findings are corrected. PUT rejects preserved-password changes to
 host, username, TLS policy, or equivalent routing fields; blank/absent
-stored-profile test-email requests use the complete stored profile. Explicit
-replacement passwords still permit context changes. UTF-8 byte bounds,
-conservative envelope sizing, staged migration/rollback, and transactional
-readback checks prevent silent storage truncation from committing.
-The Goal Inspector and the independent security specialist both verified these
-corrections with no remaining high-confidence security finding.
+stored-password test-email requests use stored authentication routing but keep
+safe unsaved sender/header fields. No-secret profiles retain submitted context,
+and explicit replacement passwords still permit context changes. SQLite Down
+retains deleted SMTP IDs in its sequence high-water mark. MySQL matched no-op
+updates succeed only after locked, owner-scoped verification, while ownership
+and context conflicts remain fail-closed. UTF-8 byte bounds, conservative
+envelope sizing, staged migration/rollback, and transactional readback checks
+continue to prevent silent storage truncation from committing.
 
 ## Iteration 2 validation
 
@@ -85,6 +95,22 @@ corrections with no remaining high-confidence security finding.
 - Gosec reports the same 14 documented pre-existing findings and no finding in
   the new credential-bound/storage-verification code.
 - Dependency manifests, lockfiles, and generated frontend assets are unchanged.
+
+## Iteration 3 validation
+
+- `./scripts/verify.sh`: PASS with format, lint, module, vet, build, unit, race,
+  frontend, action-pin, and pinned-toolchain vulnerability gates.
+- Targeted SQLite/model/API tests and the clean real MySQL 8.4 driver, IMAP,
+  SMTP lifecycle, and non-strict changed-row/storage-bound suite: PASS.
+- Browser suite and Docker build/credential lifecycle: PASS, including safe
+  unsaved test-email sender/header delivery.
+- Both credential fuzz targets completed bounded 10-second runs.
+- `govulncheck`, Gitleaks, actionlint, zizmor, Yarn audit, and Retire.js: PASS.
+- Gosec reports the same 14 documented pre-existing findings and no new finding.
+- Two clean frontend builds produced the same sending-profile asset hash;
+  dependency manifests and lockfiles remain unchanged.
+- Independent high-confidence review of the uncommitted iteration-3 diff
+  reported no findings.
 
 ## Recommendations
 

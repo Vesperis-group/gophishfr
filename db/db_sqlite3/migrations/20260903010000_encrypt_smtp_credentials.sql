@@ -16,6 +16,17 @@ WHERE password_ciphertext <> ''
 LIMIT 1;
 DROP TABLE smtp_ciphertext_must_be_rolled_back_before_schema_down;
 
+CREATE TEMPORARY TABLE smtp_sequence_before_schema_down (
+    high_water_mark INTEGER NOT NULL
+);
+INSERT INTO smtp_sequence_before_schema_down (high_water_mark)
+SELECT CASE
+    WHEN COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'smtp'), 0)
+         > COALESCE((SELECT MAX(id) FROM smtp), 0)
+    THEN COALESCE((SELECT seq FROM sqlite_sequence WHERE name = 'smtp'), 0)
+    ELSE COALESCE((SELECT MAX(id) FROM smtp), 0)
+END;
+
 ALTER TABLE smtp RENAME TO smtp_with_ciphertext;
 CREATE TABLE smtp (
     id integer primary key autoincrement,
@@ -54,3 +65,14 @@ SELECT
     ignore_cert_errors
 FROM smtp_with_ciphertext;
 DROP TABLE smtp_with_ciphertext;
+
+UPDATE sqlite_sequence
+SET seq = (SELECT high_water_mark FROM smtp_sequence_before_schema_down)
+WHERE name = 'smtp';
+INSERT INTO sqlite_sequence (name, seq)
+SELECT 'smtp', high_water_mark
+FROM smtp_sequence_before_schema_down
+WHERE NOT EXISTS (
+    SELECT 1 FROM sqlite_sequence WHERE name = 'smtp'
+);
+DROP TABLE smtp_sequence_before_schema_down;

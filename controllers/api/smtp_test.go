@@ -366,6 +366,7 @@ type smtpCredentialTestWorker struct {
 	cipher   *credentials.Cipher
 	password string
 	request  *models.EmailRequest
+	dialer   *models.Dialer
 }
 
 func (w *smtpCredentialTestWorker) Start() {}
@@ -378,7 +379,8 @@ func (w *smtpCredentialTestWorker) SendTestEmail(request *models.EmailRequest) e
 	if err != nil {
 		return err
 	}
-	w.password = dialer.(*models.Dialer).Password
+	w.dialer = dialer.(*models.Dialer)
+	w.password = w.dialer.Password
 	return nil
 }
 
@@ -468,9 +470,13 @@ func TestSendTestEmailUsesStoredOrInlineCredentialWithoutEcho(t *testing.T) {
 			worker.request.SMTP.Username != profile.Username ||
 			worker.request.SMTP.IgnoreCertErrors != profile.IgnoreCertErrors ||
 			worker.request.SMTP.Interface != profile.Interface ||
-			worker.request.SMTP.FromAddress != profile.FromAddress ||
+			worker.request.SMTP.FromAddress != "attacker@example.test" ||
 			len(worker.request.SMTP.Headers) != 1 ||
-			worker.request.SMTP.Headers[0].Key != "X-Stored" {
+			worker.request.SMTP.Headers[0].Key != "X-Redirected" ||
+			worker.dialer.Host != "127.0.0.1" ||
+			worker.dialer.Port != 2525 ||
+			worker.dialer.Username != profile.Username ||
+			worker.dialer.TLSConfig.InsecureSkipVerify != profile.IgnoreCertErrors {
 			t.Fatalf("stored test email (%s) combined ciphertext with request-controlled connection context", passwordMode)
 		}
 		assertSMTPResponseSecretFree(t, response.Body.Bytes(), profile.PasswordCiphertext)
@@ -488,6 +494,72 @@ func TestSendTestEmailUsesStoredOrInlineCredentialWithoutEcho(t *testing.T) {
 		worker.request.SMTP.Password != "" ||
 		worker.request.SMTP.PasswordCiphertext != "" {
 		t.Fatal("replacement test email did not use only the explicit request context and password")
+	}
+
+	noSecret := models.SMTP{
+		UserId:           testCtx.admin.Id,
+		Interface:        "SMTP",
+		Name:             "Stored no-secret test profile",
+		Host:             "127.0.0.1:2525",
+		Username:         "",
+		Password:         "",
+		FromAddress:      "stored-no-secret@example.test",
+		IgnoreCertErrors: false,
+		Headers:          []models.Header{{Key: "X-Stored-No-Secret", Value: "stored"}},
+	}
+	if err := models.PostSMTP(&noSecret, nil); err != nil {
+		t.Fatalf("store no-secret SMTP profile: %v", err)
+	}
+	noSecretRequest := map[string]interface{}{
+		"email": "recipient@example.test",
+		"smtp": map[string]interface{}{
+			"id":                 noSecret.Id,
+			"interface_type":     "SMTPS",
+			"name":               "Unsaved no-secret profile",
+			"from_address":       "unsaved-no-secret@example.test",
+			"host":               "127.0.0.1:65533",
+			"username":           "unsaved-no-secret-user",
+			"ignore_cert_errors": true,
+			"headers": []map[string]string{{
+				"key": "X-Unsaved-No-Secret", "value": "true",
+			}},
+			"password": "",
+		},
+	}
+	response = performSMTPRequest(
+		t,
+		testCtx,
+		http.MethodPost,
+		"/api/util/send_test_email",
+		marshalSMTPPayload(t, noSecretRequest),
+		testCtx.apiKey,
+	)
+	if response.Code != http.StatusOK {
+		t.Fatalf("no-secret edited-context test-email status = %d, body=%s", response.Code, response.Body.String())
+	}
+	if worker.password != "" ||
+		worker.request.SMTP.Interface != "SMTPS" ||
+		worker.request.SMTP.Host != "127.0.0.1:65533" ||
+		worker.request.SMTP.Username != "unsaved-no-secret-user" ||
+		!worker.request.SMTP.IgnoreCertErrors ||
+		worker.request.SMTP.FromAddress != "unsaved-no-secret@example.test" ||
+		len(worker.request.SMTP.Headers) != 1 ||
+		worker.request.SMTP.Headers[0].Key != "X-Unsaved-No-Secret" ||
+		worker.dialer.Host != "127.0.0.1" ||
+		worker.dialer.Port != 65533 ||
+		worker.dialer.Username != "unsaved-no-secret-user" ||
+		!worker.dialer.TLSConfig.InsecureSkipVerify {
+		t.Fatal("no-secret test email did not retain the complete submitted context")
+	}
+	storedNoSecret, err := models.GetSMTP(noSecret.Id, noSecret.UserId)
+	if err != nil {
+		t.Fatalf("reload no-secret SMTP profile: %v", err)
+	}
+	if storedNoSecret.Host != noSecret.Host ||
+		storedNoSecret.Username != noSecret.Username ||
+		storedNoSecret.Password != "" ||
+		storedNoSecret.PasswordCiphertext != "" {
+		t.Fatal("no-secret test email persisted submitted context or credential data")
 	}
 
 	body["smtp"].(map[string]interface{})["id"] = 0

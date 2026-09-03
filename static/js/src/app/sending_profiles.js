@@ -80,6 +80,7 @@ function sendTestEmail() {
         position: document.querySelector("input[name=to_position]").value,
         url: '',
         smtp: {
+            interface_type: document.getElementById("interface_type").value,
             from_address: document.getElementById("from").value,
             host: document.getElementById("host").value,
             username: document.getElementById("username").value,

@@ -521,8 +521,50 @@ test("SMTP mutations preserve credential and modal contracts", async ({ page }) 
   await expect(page.locator("#modal")).toBeVisible();
   await expect(page.locator("#password")).toHaveValue("");
   const unchangedPasswordName = `${profileName}_unchanged_password`;
+  const unsavedFromAddress = "unsaved-test@profile.invalid";
   await page.locator("#name").fill(unchangedPasswordName);
+  await page.locator("#from").fill(unsavedFromAddress);
   await addHeader(page, "X-Synthetic-Update", "unchanged-password");
+
+  let testEmailBody: string | null = null;
+  await page.route("**/api/util/send_test_email", async (route) => {
+    testEmailBody = route.request().postData();
+    await route.fulfill({
+      body: JSON.stringify({ success: true, message: "Email sent" }),
+      contentType: "application/json",
+      status: 200,
+    });
+  });
+  await page.locator('button:has-text("Send Test Email")').click();
+  await expect(page.locator("#sendTestEmailModal")).toBeVisible();
+  await page
+    .locator("input[name=to_email]")
+    .fill("recipient@profile.invalid");
+  await page.locator("#sendTestModalSubmit").click();
+  await expect(
+    page.locator('[id="sendTestEmailModal.flashes"] .alert-success'),
+  ).toHaveText(/Email Sent!/);
+  await page
+    .locator("#sendTestEmailModal")
+    .getByText("Cancel")
+    .click();
+  await expect(page.locator("#sendTestEmailModal")).toBeHidden();
+  await page.unroute("**/api/util/send_test_email");
+  expect(testEmailBody).not.toBeNull();
+  expect((JSON.parse(testEmailBody ?? "{}") as { smtp: SMTPPayload }).smtp).toEqual({
+    from_address: unsavedFromAddress,
+    headers: [
+      { key: "X-Synthetic-Mode", value: "create-updated" },
+      { key: "X-Synthetic-Update", value: "unchanged-password" },
+    ],
+    host: createProfile.host,
+    id: profileId,
+    ignore_cert_errors: false,
+    interface_type: "SMTP",
+    name: unchangedPasswordName,
+    password: "",
+    username: createProfile.username,
+  });
 
   await page.route(
     (url) => url.pathname === `/api/smtp/${profileId}`,
@@ -561,7 +603,7 @@ test("SMTP mutations preserve credential and modal contracts", async ({ page }) 
     unchangedPasswordRequests[0].body,
   );
   expect(JSON.parse(unchangedPasswordRequests[0].body ?? "")).toEqual({
-    from_address: createProfile.from_address,
+    from_address: unsavedFromAddress,
     headers: [
       { key: "X-Synthetic-Mode", value: "create-updated" },
       { key: "X-Synthetic-Update", value: "unchanged-password" },

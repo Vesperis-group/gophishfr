@@ -162,12 +162,14 @@ if [ -z "${api_key}" ]; then
     exit 1
 fi
 
-python3 - "${workdir}/smtp-auth.txt" <<'PY' &
+python3 - "${workdir}/smtp-auth.txt" "${workdir}/smtp-message.txt" <<'PY' &
 import base64
 import socket
 import sys
 
 capture_path = sys.argv[1]
+message_path = sys.argv[2]
+open(message_path, "wb").close()
 server = socket.socket()
 server.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
 server.bind(("127.0.0.1", 2525))
@@ -183,6 +185,9 @@ for raw_line in stream:
         if line == b".":
             in_data = False
             stream.write(b"250 queued\r\n")
+        else:
+            with open(message_path, "ab") as capture:
+                capture.write(line + b"\n")
         continue
     command = line.decode("ascii", "replace")
     upper = command.upper()
@@ -193,7 +198,11 @@ for raw_line in stream:
         with open(capture_path, "wb") as capture:
             capture.write(decoded)
         stream.write(b"235 authenticated\r\n")
-    elif upper.startswith("MAIL FROM") or upper.startswith("RCPT TO"):
+    elif upper.startswith("MAIL FROM"):
+        with open(message_path, "ab") as capture:
+            capture.write(line + b"\n")
+        stream.write(b"250 ok\r\n")
+    elif upper.startswith("RCPT TO"):
         stream.write(b"250 ok\r\n")
     elif upper == "DATA":
         in_data = True
@@ -346,6 +355,11 @@ print(int(value == b"\0container-rotated-user\0synthetic-container-rotated-passw
 PY
 )" != "1" ]; then
     echo "container test-email boundary did not use the decrypted rotated password" >&2
+    exit 1
+fi
+if ! grep -q '^MAIL FROM:<attacker@example.test>' "${workdir}/smtp-message.txt" ||
+   ! grep -q '^X-Redirected: true' "${workdir}/smtp-message.txt"; then
+    echo "container test-email boundary discarded safe submitted sender/header fields" >&2
     exit 1
 fi
 if printf '%s' "${api_response}" |
