@@ -2,10 +2,8 @@
 
 ## Outcome
 
-The implementation passed independent inspection, code review, and
-security-specialist review after three Builder iterations. Builder iteration 4
-corrected the browser-suite event-lifecycle race exposed by PR #55 CI and is
-ready for independent inspection.
+The goal passed independent inspection, code review, security-specialist review,
+and CI browser-race verification after four Builder iterations.
 SMTP sending-profile passwords are now write-only at the HTTP/browser boundary,
 encrypted at rest with the existing AES-256-GCM credential foundation, bound to
 the authenticated owner and immutable profile ID, and decrypted only at the SMTP
@@ -77,7 +75,9 @@ dialer boundary.
 10. Builder iteration 4 identified that the successful-controls settings helper
     returned after request interception but before its asynchronous success
     callback. It now verifies that exact flash before the failure/retry helper
-    resets event state.
+    resets event state. Two consecutive full browser suites passed, and the Goal
+    Inspector independently returned PASS in commit
+    `a20a66c634f7bf0fa029aa5ef488e81707b6f249`.
 
 ## Inspector Findings
 

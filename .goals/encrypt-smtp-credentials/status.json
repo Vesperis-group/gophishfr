@@ -1,6 +1,6 @@
 {
   "goal_id": "encrypt-smtp-credentials",
-  "status": "inspecting",
+  "status": "completed",
   "iteration": 4,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
