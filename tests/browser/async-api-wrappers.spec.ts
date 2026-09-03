@@ -33,8 +33,8 @@ const invocations: WrapperInvocation[] = [
     pathname: "/api/campaigns/102/results",
   },
   {
-    body: null,
-    method: "GET",
+    body: {},
+    method: "POST",
     name: "campaignId.complete",
     pathname: "/api/campaigns/103/complete",
   },

@@ -7,6 +7,7 @@ import (
 
 	ctx "github.com/Vesperis-group/gophishfr/context"
 	log "github.com/Vesperis-group/gophishfr/logger"
+	mid "github.com/Vesperis-group/gophishfr/middleware"
 	"github.com/Vesperis-group/gophishfr/models"
 	"github.com/gorilla/mux"
 	"github.com/jinzhu/gorm"
@@ -125,8 +126,14 @@ func (as *Server) CampaignSummary(w http.ResponseWriter, r *http.Request) {
 func (as *Server) CampaignComplete(w http.ResponseWriter, r *http.Request) {
 	vars := mux.Vars(r)
 	id, _ := strconv.ParseInt(vars["id"], 0, 64)
-	switch {
-	case r.Method == "GET":
+	switch r.Method {
+	case http.MethodGet:
+		if mid.IsSessionAuthentication(r) {
+			JSONResponse(w, models.Response{Success: false, Message: "Method not allowed"}, http.StatusMethodNotAllowed)
+			return
+		}
+		fallthrough
+	case http.MethodPost:
 		err := models.CompleteCampaign(id, ctx.Get(r, "user_id").(int64))
 		if err != nil {
 			JSONResponse(w, models.Response{Success: false, Message: "Error completing campaign"}, http.StatusInternalServerError)

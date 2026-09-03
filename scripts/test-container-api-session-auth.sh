@@ -93,6 +93,30 @@ if [ "${login_status}" != "302" ]; then
     exit 1
 fi
 
+forced_get_status="$(curl --silent --show-error \
+    --output "${workdir}/forced-get.json" \
+    --write-out '%{http_code}' \
+    --cookie "${jar}" \
+    "${base_url}/api/groups/summary")"
+forced_mutation_status="$(curl --silent --show-error \
+    --output "${workdir}/forced-mutation.json" \
+    --write-out '%{http_code}' \
+    --cookie "${jar}" \
+    --header "Sec-Fetch-Site: same-origin" \
+    --request POST \
+    "${base_url}/api/reset")"
+if [ "${forced_get_status}" != "403" ] ||
+   [ "${forced_mutation_status}" != "403" ] ||
+   ! grep -q '"success": false' "${workdir}/forced-get.json" ||
+   ! grep -q '"success": false' "${workdir}/forced-mutation.json"; then
+    echo "forced-password-change session retained API authority" >&2
+    exit 1
+fi
+
+curl --silent --show-error --fail \
+    --header "Authorization: Bearer ${admin_api_key}" \
+    "${base_url}/api/groups/summary" >/dev/null
+
 # Complete the existing forced-password-change lifecycle so /logout executes
 # rather than redirecting back to the reset page.
 reset_status="$(curl --silent --show-error \

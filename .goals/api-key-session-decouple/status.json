@@ -1,7 +1,7 @@
 {
   "goal_id": "api-key-session-decouple",
-  "status": "passed",
-  "iteration": 1,
+  "status": "building",
+  "iteration": 2,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "e2da27ae841b9c17fd07c69cfb65d8f08260e9e3",
@@ -20,6 +20,20 @@
       "result": "passed",
       "completed_at": "2026-09-03T20:42:23+02:00",
       "summary": "All 26 acceptance criteria verified satisfied. Shared extractor used by both API auth and CSRF. Explicit credential mechanism selected before validation with no fallback. Session auth succeeds when no explicit credential present. Invalid/empty/ambiguous explicit credentials always fail (401), never inherit session authority. RBAC and error parity preserved through unchanged middleware chain. Frontend transport decoupled from API keys (same-origin cookies, no Authorization header, no global exposure). CSRF protection properly aware of credential type: session requests protected, explicit API keys remain exempt. Comprehensive test coverage across middleware, controller, browser, and real Docker container. All quality gates passed. No credential leaks in errors or logs. Plaintext storage and settings exception documented honestly."
+    },
+    {
+      "iteration": 1,
+      "role": "security-review",
+      "result": "fail",
+      "completed_at": "2026-09-03T20:49:00+02:00",
+      "summary": "Session API access bypasses forced password change, and campaign completion mutates through GET without session CSRF or view-only enforcement."
+    },
+    {
+      "iteration": 2,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-03T21:08:10+02:00",
+      "summary": "Blocked forced-password-change sessions from API access with JSON errors before handlers or RBAC while preserving explicit API-key compatibility. Moved session campaign completion to POST so existing CSRF and view-only enforcement apply, rejected session GET without mutation, retained explicit API-key GET compatibility, audited other GET handlers, and added focused, browser, Docker, documentation, and regression coverage. Full verification, race, reproducibility, container, dependency, and security scanner gates completed with no new finding."
     }
   ]
 }

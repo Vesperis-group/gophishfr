@@ -7,10 +7,13 @@ import (
 	"io"
 	"net/http"
 	"net/http/cookiejar"
+	"net/http/httptest"
 	"net/url"
 	"strings"
 	"testing"
 
+	"github.com/Vesperis-group/gophishfr/auth"
+	mid "github.com/Vesperis-group/gophishfr/middleware"
 	"github.com/Vesperis-group/gophishfr/models"
 )
 
@@ -25,14 +28,14 @@ func TestSessionAPIAuthenticationContract(t *testing.T) {
 	client := &http.Client{Jar: jar}
 	loginResponse := attemptLogin(t, testCtx, client, "admin", "gophish", "")
 	_ = loginResponse.Body.Close()
+	if loginResponse.Request.URL.Path != "/reset_password" {
+		t.Fatalf("initial login did not enter forced password reset: %s", loginResponse.Request.URL.Path)
+	}
 	admin, err := models.GetUser(1)
 	if err != nil {
 		t.Fatal(err)
 	}
-	admin.PasswordChangeRequired = false
-	if err := models.PutUser(&admin); err != nil {
-		t.Fatal(err)
-	}
+	initialAPIKey := admin.ApiKey
 
 	doRequest := func(method, path string, body io.Reader, headers map[string]string) *http.Response {
 		t.Helper()
@@ -49,6 +52,58 @@ func TestSessionAPIAuthenticationContract(t *testing.T) {
 		}
 		return response
 	}
+
+	t.Run("forced password change blocks session API GET", func(t *testing.T) {
+		response := doRequest(http.MethodGet, "/api/groups/summary", nil, nil)
+		defer func() { _ = response.Body.Close() }()
+		assertAPIResponse(t, response, http.StatusForbidden)
+		if response.Request.URL.Path != "/api/groups/summary" {
+			t.Fatal("forced-password-change API request redirected")
+		}
+	})
+
+	t.Run("forced password change blocks session API mutation", func(t *testing.T) {
+		response := doRequest(http.MethodPost, "/api/reset", nil, map[string]string{
+			"Sec-Fetch-Site": "same-origin",
+		})
+		defer func() { _ = response.Body.Close() }()
+		assertAPIResponse(t, response, http.StatusForbidden)
+		current, err := models.GetUser(1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.ApiKey != initialAPIKey {
+			t.Fatal("forced-password-change session mutated the API key")
+		}
+	})
+
+	t.Run("forced password reset enables session API", func(t *testing.T) {
+		changedPassword := "synthetic-session-contract-reset"
+		response := doRequest(
+			http.MethodPost,
+			"/reset_password",
+			strings.NewReader(url.Values{
+				"password":         {changedPassword},
+				"confirm_password": {changedPassword},
+			}.Encode()),
+			map[string]string{
+				"Content-Type":   "application/x-www-form-urlencoded",
+				"Sec-Fetch-Site": "same-origin",
+			},
+		)
+		defer func() { _ = response.Body.Close() }()
+
+		current, err := models.GetUser(1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if current.PasswordChangeRequired {
+			t.Fatal("successful reset did not clear the forced-password-change state")
+		}
+		if err := auth.ValidatePassword(changedPassword, current.Hash); err != nil {
+			t.Fatal("successful reset did not persist the replacement password")
+		}
+	})
 
 	t.Run("GET uses the existing session", func(t *testing.T) {
 		response := doRequest(http.MethodGet, "/api/groups/summary", nil, nil)
@@ -202,6 +257,154 @@ func TestSessionAPIAuthenticationContract(t *testing.T) {
 		assertAPIResponse(t, response, http.StatusUnauthorized)
 	})
 
+	sessionCampaign := createCompletionContractCampaign(t, "Session completion contract")
+	assertCampaignIncomplete := func() {
+		t.Helper()
+		campaign, err := models.GetCampaign(sessionCampaign.Id, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if campaign.Status == models.CampaignComplete {
+			t.Fatal("rejected completion request mutated the campaign")
+		}
+	}
+
+	t.Run("session campaign completion GET is rejected without mutation", func(t *testing.T) {
+		response := doRequest(
+			http.MethodGet,
+			fmt.Sprintf("/api/campaigns/%d/complete", sessionCampaign.Id),
+			nil,
+			nil,
+		)
+		defer func() { _ = response.Body.Close() }()
+		assertAPIResponse(t, response, http.StatusMethodNotAllowed)
+		assertCampaignIncomplete()
+	})
+
+	t.Run("cross-site session campaign completion GET is rejected without mutation", func(t *testing.T) {
+		response := doRequest(
+			http.MethodGet,
+			fmt.Sprintf("/api/campaigns/%d/complete", sessionCampaign.Id),
+			nil,
+			map[string]string{"Sec-Fetch-Site": "cross-site"},
+		)
+		defer func() { _ = response.Body.Close() }()
+		assertAPIResponse(t, response, http.StatusMethodNotAllowed)
+		assertCampaignIncomplete()
+	})
+
+	t.Run("cross-origin session campaign completion POST is rejected", func(t *testing.T) {
+		response := doRequest(
+			http.MethodPost,
+			fmt.Sprintf("/api/campaigns/%d/complete", sessionCampaign.Id),
+			nil,
+			map[string]string{"Origin": "https://foreign.invalid"},
+		)
+		defer func() { _ = response.Body.Close() }()
+		assertAPIResponse(t, response, http.StatusForbidden)
+		assertCampaignIncomplete()
+	})
+
+	t.Run("view-only session campaign completion POST is rejected", func(t *testing.T) {
+		hash, err := auth.GeneratePasswordHash("synthetic-view-only-session-password")
+		if err != nil {
+			t.Fatal(err)
+		}
+		viewOnly := models.User{
+			Username: "session-completion-view-only",
+			Hash:     hash,
+			ApiKey:   "synthetic-session-completion-view-only-key",
+			RoleID:   999999,
+		}
+		if err := models.PutUser(&viewOnly); err != nil {
+			t.Fatal(err)
+		}
+		viewJar, err := cookiejar.New(nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		viewClient := &http.Client{Jar: viewJar}
+		cookieRequest, err := http.NewRequest(http.MethodGet, testCtx.adminServer.URL, nil)
+		if err != nil {
+			t.Fatal(err)
+		}
+		session, err := mid.Store.Get(cookieRequest, "gophish")
+		if err != nil {
+			t.Fatal(err)
+		}
+		session.Values["id"] = viewOnly.Id
+		cookieResponse := httptest.NewRecorder()
+		if err := session.Save(cookieRequest, cookieResponse); err != nil {
+			t.Fatal(err)
+		}
+		serverURL, err := url.Parse(testCtx.adminServer.URL)
+		if err != nil {
+			t.Fatal(err)
+		}
+		cookieResult := cookieResponse.Result()
+		defer func() { _ = cookieResult.Body.Close() }()
+		viewJar.SetCookies(serverURL, cookieResult.Cookies())
+
+		request, err := http.NewRequest(
+			http.MethodPost,
+			fmt.Sprintf("%s/api/campaigns/%d/complete", testCtx.adminServer.URL, sessionCampaign.Id),
+			nil,
+		)
+		if err != nil {
+			t.Fatal(err)
+		}
+		request.Header.Set("Sec-Fetch-Site", "same-origin")
+		response, err := viewClient.Do(request)
+		if err != nil {
+			t.Fatal(err)
+		}
+		defer func() { _ = response.Body.Close() }()
+		if response.StatusCode != http.StatusForbidden {
+			t.Fatalf("expected view-only 403, got %d", response.StatusCode)
+		}
+		assertCampaignIncomplete()
+	})
+
+	t.Run("same-origin session campaign completion POST succeeds", func(t *testing.T) {
+		response := doRequest(
+			http.MethodPost,
+			fmt.Sprintf("/api/campaigns/%d/complete", sessionCampaign.Id),
+			nil,
+			map[string]string{"Sec-Fetch-Site": "same-origin"},
+		)
+		defer func() { _ = response.Body.Close() }()
+		assertAPIResponse(t, response, http.StatusOK)
+		campaign, err := models.GetCampaign(sessionCampaign.Id, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if campaign.Status != models.CampaignComplete {
+			t.Fatal("same-origin session POST did not complete campaign")
+		}
+	})
+
+	t.Run("explicit API key campaign completion GET remains compatible", func(t *testing.T) {
+		campaign := createCompletionContractCampaign(t, "Explicit completion contract")
+		response := doRequest(
+			http.MethodGet,
+			fmt.Sprintf("/api/campaigns/%d/complete", campaign.Id),
+			nil,
+			map[string]string{
+				"Authorization":  admin.ApiKey,
+				"Sec-Fetch-Site": "cross-site",
+			},
+		)
+		defer func() { _ = response.Body.Close() }()
+		assertAPIResponse(t, response, http.StatusOK)
+		completed, err := models.GetCampaign(campaign.Id, 1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if completed.Status != models.CampaignComplete {
+			t.Fatal("legacy explicit-key GET did not complete campaign")
+		}
+	})
+
 	t.Run("logout invalidates session API authority", func(t *testing.T) {
 		response := doRequest(http.MethodGet, "/logout", nil, nil)
 		_ = response.Body.Close()
@@ -218,6 +421,42 @@ func TestSessionAPIAuthenticationContract(t *testing.T) {
 		defer func() { _ = response.Body.Close() }()
 		assertAPIResponse(t, response, http.StatusOK)
 	})
+}
+
+func createCompletionContractCampaign(t *testing.T, name string) models.Campaign {
+	t.Helper()
+	group, err := models.GetGroup(1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	template, err := models.GetTemplate(1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	page, err := models.GetPage(1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	smtp, err := models.GetSMTP(1, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	campaign := models.Campaign{
+		Name:     name,
+		UserId:   1,
+		Groups:   []models.Group{group},
+		Template: template,
+		Page:     page,
+		SMTP:     smtp,
+		URL:      "http://localhost.invalid",
+	}
+	if err := models.PostCampaign(&campaign, 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := campaign.UpdateStatus(models.CampaignEmailsSent); err != nil {
+		t.Fatal(err)
+	}
+	return campaign
 }
 
 func assertAPIResponse(t *testing.T, response *http.Response, expectedStatus int) {

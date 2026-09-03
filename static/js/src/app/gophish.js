@@ -288,7 +288,7 @@ var api = {
         },
         // complete() - Completes a campaign at POST /campaigns/:id/complete
         complete: function (id) {
-            return requestJSON("/campaigns/" + id + "/complete", "GET", {})
+            return requestJSON("/campaigns/" + id + "/complete", "POST", {})
         }
     },
     // groups contains the endpoints for /groups

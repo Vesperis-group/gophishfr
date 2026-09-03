@@ -23,6 +23,22 @@ type explicitAPICredential struct {
 
 const apiFormParseErrorContextKey = "api_form_parse_error"
 
+type apiAuthenticationMechanism uint8
+
+const (
+	apiAuthenticationSession apiAuthenticationMechanism = iota + 1
+	apiAuthenticationKey
+	apiAuthenticationMechanismContextKey = "api_authentication_mechanism"
+)
+
+// IsSessionAuthentication reports whether RequireAPIKey selected ambient
+// session authentication for this request. The marker contains no credential
+// material and is set only after successful authentication.
+func IsSessionAuthentication(r *http.Request) bool {
+	mechanism, ok := ctx.Get(r, apiAuthenticationMechanismContextKey).(apiAuthenticationMechanism)
+	return ok && mechanism == apiAuthenticationSession
+}
+
 // extractExplicitAPICredential collects every legacy API credential transport.
 // Presence is deliberately independent from value: an empty Authorization
 // header or api_key parameter is still an explicit API-key authentication
@@ -164,6 +180,11 @@ func RequireAPIKey(handler http.Handler) http.Handler {
 				JSONError(w, http.StatusUnauthorized, "Invalid session")
 				return
 			}
+			if user.PasswordChangeRequired {
+				JSONError(w, http.StatusForbidden, "Password change required")
+				return
+			}
+			r = ctx.Set(r, apiAuthenticationMechanismContextKey, apiAuthenticationSession)
 			r = ctx.Set(r, "user_id", user.Id)
 			handler.ServeHTTP(w, r)
 			return
@@ -179,6 +200,7 @@ func RequireAPIKey(handler http.Handler) http.Handler {
 			return
 		}
 		r = ctx.Set(r, "user", u)
+		r = ctx.Set(r, apiAuthenticationMechanismContextKey, apiAuthenticationKey)
 		r = ctx.Set(r, "user_id", u.Id)
 		handler.ServeHTTP(w, r)
 	})

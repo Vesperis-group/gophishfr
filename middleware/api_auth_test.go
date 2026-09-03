@@ -165,6 +165,7 @@ func TestAPIAuthenticationMechanismSelection(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+	sessionUser.PasswordChangeRequired = false
 	apiUser := models.User{
 		Username: "api-identity-test-user",
 		ApiKey:   "distinctive-api-identity-test-value",
@@ -405,12 +406,66 @@ func TestCredentialAwareAPIProtection(t *testing.T) {
 	}
 }
 
+func TestSessionPasswordChangeRequired(t *testing.T) {
+	testCtx := setupTest(t)
+	user, err := models.GetUser(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !user.PasswordChangeRequired {
+		t.Fatal("test requires an initial forced-password-change user")
+	}
+
+	for _, method := range []string{http.MethodGet, http.MethodPost} {
+		t.Run("session "+method+" is rejected", func(t *testing.T) {
+			called := false
+			handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				called = true
+			})
+			request := httptest.NewRequest(method, "/api/test", nil)
+			request = ctx.Set(request, "user", user)
+			response := httptest.NewRecorder()
+			RequireAPIKey(EnforceViewOnly(handler)).ServeHTTP(response, request)
+
+			if response.Code != http.StatusForbidden {
+				t.Fatalf("expected 403, got %d", response.Code)
+			}
+			if called {
+				t.Fatal("forced-password-change session reached the API handler")
+			}
+			if response.Header().Get("Content-Type") != "application/json" {
+				t.Fatalf("expected JSON response, got %q", response.Header().Get("Content-Type"))
+			}
+			if response.Header().Get("Location") != "" {
+				t.Fatal("forced-password-change session redirected")
+			}
+		})
+	}
+
+	t.Run("explicit API key remains compatible", func(t *testing.T) {
+		handler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if IsSessionAuthentication(r) {
+				t.Fatal("explicit API key was marked as session authentication")
+			}
+			w.WriteHeader(http.StatusNoContent)
+		})
+		request := httptest.NewRequest(http.MethodPost, "/api/test", nil)
+		request.Header.Set("Authorization", testCtx.apiKey)
+		response := httptest.NewRecorder()
+		RequireAPIKey(handler).ServeHTTP(response, request)
+		if response.Code != http.StatusNoContent {
+			t.Fatalf("expected explicit key success, got %d", response.Code)
+		}
+	})
+}
+
 func TestSessionAndAPIKeyRBACParity(t *testing.T) {
 	setupTest(t)
 	admin, err := models.GetUser(1)
 	if err != nil {
 		t.Fatal(err)
 	}
+	admin.PasswordChangeRequired = false
 	viewOnly := models.User{
 		Username: "view-only-auth-parity-user",
 		ApiKey:   "distinctive-view-only-test-value",

@@ -12,6 +12,10 @@ read or transmit the user's API key.
 Requests without an explicit API credential use only the user already loaded
 from the web session. A missing, expired, invalid, or logged-out session receives
 the API's JSON `401` response; API routes do not redirect to the HTML login page.
+Sessions whose user must complete a forced password change receive a JSON `403`
+before any API handler or RBAC mutation runs. Completing the existing password
+reset flow enables session API access. Explicit API keys retain their historical
+behavior and are not coupled to that browser-session lifecycle guard.
 The same user and role context then flows through the existing view-only and
 route-specific RBAC middleware.
 
@@ -22,6 +26,13 @@ requests marked cross-site or same-site by Fetch Metadata, or carrying a foreign
 their existing behavior. No CSRF token protocol was added; deprecated
 `csrf_token` form fields remain only for compatibility with existing non-API
 forms.
+
+Campaign completion is an unsafe operation. The SPA uses
+`POST /api/campaigns/{id}/complete`, which receives the same origin and
+view-only checks as other session mutations. Session-authenticated `GET` on
+that legacy endpoint is rejected without changing campaign state. Explicit
+API-key clients may continue using the legacy completion `GET` for public API
+compatibility.
 
 ## External API clients
 

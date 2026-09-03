@@ -819,13 +819,15 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
 
     const completionConsoleErrorsBefore = consoleErrors.length;
     const completionFailedResponsesBefore = failedLocalResponses.length;
-    await page.route("**/api/campaigns/*/complete*", (route) =>
-      route.fulfill({
+    await page.route("**/api/campaigns/*/complete*", (route) => {
+      expect(route.request().method()).toBe("POST");
+      expect(route.request().postData()).toBe("{}");
+      return route.fulfill({
         body: JSON.stringify({ message: "synthetic completion failure" }),
         contentType: "application/json",
         status: 400,
-      }),
-    );
+      });
+    });
     await page.locator("#complete_button").click();
     await page.locator(".swal2-confirm").click();
     await expect(page.locator(".swal2-validation-message")).toContainText(
