@@ -34,6 +34,13 @@
       "result": "completed",
       "completed_at": "2026-09-03T21:08:10+02:00",
       "summary": "Blocked forced-password-change sessions from API access with JSON errors before handlers or RBAC while preserving explicit API-key compatibility. Moved session campaign completion to POST so existing CSRF and view-only enforcement apply, rejected session GET without mutation, retained explicit API-key GET compatibility, audited other GET handlers, and added focused, browser, Docker, documentation, and regression coverage. Full verification, race, reproducibility, container, dependency, and security scanner gates completed with no new finding."
+    },
+    {
+      "iteration": 2,
+      "role": "inspector",
+      "result": "passed",
+      "completed_at": "2026-09-03T21:30:00+02:00",
+      "summary": "Both security review findings independently verified fixed. Password-change requirement now blocks session API access with 403 JSON before handler/RBAC while API-key path unaffected. Campaign completion moved to POST with same-origin/CSRF/view-only enforcement; session GET rejected deterministically via non-forgeable auth-mechanism marker while explicit-key GET retained. All other API GET endpoints audited—campaign completion only mutating GET. Auth-mechanism marker correctly set only post-auth, cannot be forged. Full quality gates passed. Iteration 1 criteria preserved. No new issues."
     }
   ]
 }
