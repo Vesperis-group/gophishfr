@@ -1,6 +1,6 @@
 {
   "goal_id": "api-key-verifier",
-  "status": "completed",
+  "status": "inspecting",
   "iteration": 3,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
@@ -42,6 +42,27 @@
       "completed_at": "2026-09-04T00:14:54+02:00",
       "summary": "Security review finding from iteration 1 (CONTROLLED_BOTH state authenticated at runtime) comprehensively corrected. All three runtime code paths now enforce `api_key IS NULL` requirement: initial indexed lookup (line 99), verifier-write validation (line 324), and lazy-rekey CAS reread (line 370). New SQLite and real MySQL test coverage validates rejection of LEGACY/BOTH/all-absent states, successful migration/clearing, old-pepper BOTH without rekey, concurrent transition rejection, normal lazy upgrade, and reset invalidation. No logic errors, no new plaintext exposure paths. Regression verification confirms session/CSRF/RBAC/view-only, browser reveal lifecycle, Docker separation, and migration atomicity unchanged. Production-ready for merge."
     },
+    {
+      "iteration": 2,
+      "role": "code-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T00:44:00+02:00",
+      "summary": "General user updates via PutUser full-row Save corrupt LEGACY verifier state by persisting Go zero values (empty string) for nullable columns, making migration impossible after login."
+    },
+    {
+      "iteration": 3,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T00:47:18+02:00",
+      "summary": "Replaced PutUser full-row Save with explicit allowlist of ordinary mutable fields (username, hash, role_id, password_change_required, account_locked, last_login) that never touches API-key verifier state. All call sites (login/password/role updates) use only allowlisted fields. Added SQLite and real-MySQL tests validating LEGACY/MIGRATED state isolation, ordinary update persistence, malicious overwrite resistance, and dedicated verifier path atomicity. All regression, browser, container, race, fuzz, reproducibility, and scanner gates rerun."
+    },
+    {
+      "iteration": 3,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-04T00:48:17+02:00",
+      "summary": "Code-review finding from iteration 2 (PutUser corrupting LEGACY state) comprehensively corrected. PutUser now uses explicit allowlist (lines 140-146) excluding all API-key verifier columns. New SQLite and real MySQL test coverage (TestPutUserIsolatesAPIKeyStateSQLite, TestMySQLZZPutUserIsolatesAPIKeyState) validates LEGACY state byte/NULL-identical after updates while being migratable, MIGRATED verifiers resist overwrite attempts, ordinary fields persist correctly, no-op updates work, and dedicated reset remains atomic. All call sites verified for allowlisted-field-only updates: login (last_login), password-change (hash/password_change_required), password-reset (password_change_required/hash), user-api-put (username/hash/role/password_change_required/account_locked). Script modes confirmed 100755. All regressions verified. Production-ready for merge."
+    },
     {
       "iteration": 2,
       "role": "security-review",
