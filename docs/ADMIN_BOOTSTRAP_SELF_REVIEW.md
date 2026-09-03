@@ -38,3 +38,13 @@ restart hash stability, safe historical recovery, and one-time hash marking.
 Existing middleware and controller tests retain forced-reset behavior.
 
 No dependency or lockfile changes are required.
+
+## Ansible precedence correction
+
+The empty non-secret value lives in role `defaults/`, Ansible's lowest
+precedence tier, rather than role `vars/`. Inventory, play, and Vault input can
+therefore reach both the mode `0400`, service-user-owned input-file task and the
+systemd environment. An unset default skips both for an already initialized
+installation. Both tasks that evaluate the secret retain `no_log: true`.
+`scripts/test-ansible-bootstrap.py` enforces this wiring without displaying its
+synthetic override values.
