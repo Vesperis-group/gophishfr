@@ -50,7 +50,7 @@ await expect.poll(async () => readFlashEvents(page)).toEqual([
 The test suite has the following sequence in `assertSettingsFormContract` (lines 489-514):
 
 ```typescript
-await test.step("settings form exposes the measured control inventory", ...) 
+await test.step("settings form exposes the measured control inventory", ...)
 await test.step("settings form preserves encoding and HTTP transport", ...)
 await test.step("settings form submits only successful controls", ...)
   // ← assertSuccessfulControls (now waits for success callback)
@@ -141,7 +141,7 @@ Result: No changes to any product code ✓
 
 ## Test Coverage Analysis
 
-The fix is minimal and surgical, affecting only the boundary between `assertSuccessfulControls` and `assertFailureAndRetry`. 
+The fix is minimal and surgical, affecting only the boundary between `assertSuccessfulControls` and `assertFailureAndRetry`.
 
 **Pre-Fix Race Window:**
 ```
@@ -278,4 +278,3 @@ Iteration 4 additions:
 2. CI verification (full browser suite, all gates)
 3. Independent review approval
 4. Merge to `main`
-
