@@ -1,6 +1,6 @@
 {
   "goal_id": "api-key-verifier",
-  "status": "completed",
+  "status": "inspecting",
   "iteration": 2,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
@@ -34,6 +34,13 @@
       "result": "completed",
       "completed_at": "2026-09-04T00:12:37+02:00",
       "summary": "Enforced verifier-only runtime state on initial indexed lookup, verifier-write validation, lazy-rekey CAS, and conflict reread without selecting or comparing plaintext. Added SQLite and real-MySQL coverage for BOTH/LEGACY/all-absent rejection, verified migration clearing, concurrent transition rejection, normal lazy upgrade, and reset invalidation; all required regression, browser, container, race, fuzz, reproducibility, and scanner gates were rerun."
+    },
+    {
+      "iteration": 2,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-04T00:14:54+02:00",
+      "summary": "Security review finding from iteration 1 (CONTROLLED_BOTH state authenticated at runtime) comprehensively corrected. All three runtime code paths now enforce `api_key IS NULL` requirement: initial indexed lookup (line 99), verifier-write validation (line 324), and lazy-rekey CAS reread (line 370). New SQLite and real MySQL test coverage validates rejection of LEGACY/BOTH/all-absent states, successful migration/clearing, old-pepper BOTH without rekey, concurrent transition rejection, normal lazy upgrade, and reset invalidation. No logic errors, no new plaintext exposure paths. Regression verification confirms session/CSRF/RBAC/view-only, browser reveal lifecycle, Docker separation, and migration atomicity unchanged. Production-ready for merge."
     }
   ]
 }
