@@ -6,12 +6,14 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"io"
 	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	mysql "github.com/go-sql-driver/mysql"
 
@@ -36,10 +38,13 @@ const MaxDatabaseConnectionAttempts int = 10
 // DefaultAdminUsername is the default username for the administrative user
 const DefaultAdminUsername = "admin"
 
-// InitialAdminPassword is the environment variable that specifies which
-// password to use for the initial root login instead of generating one
-// randomly
+// InitialAdminPassword is the compatibility environment variable for the
+// initial administrator password.
 const InitialAdminPassword = "GOPHISH_INITIAL_ADMIN_PASSWORD"
+
+// InitialAdminPasswordFile is the preferred environment variable. Its value is
+// the path to a file containing the initial administrator password.
+const InitialAdminPasswordFile = "GOPHISH_INITIAL_ADMIN_PASSWORD_FILE"
 
 // InitialAdminApiToken is the environment variable that specifies the
 // API token to seed the initial root login instead of generating one
@@ -364,29 +369,96 @@ func normalizeLegacyGooseHistory(database *sql.DB, dialect string) error {
 	return nil
 }
 
-func createTemporaryPassword(u *User) error {
-	var temporaryPassword string
-	if envPassword := os.Getenv(InitialAdminPassword); envPassword != "" {
-		temporaryPassword = envPassword
-	} else {
-		// This will result in a 16 character password which could be viewed as an
-		// inconvenience, but it should be ok for now.
-		temporaryPassword = auth.GenerateSecureKey(auth.MinPasswordLength)
+const (
+	maxBcryptPasswordBytes = 72
+	maxPasswordFileBytes   = maxBcryptPasswordBytes + 2 // Optional CRLF.
+)
+
+func validateInitialAdminPassword(password string) error {
+	if !utf8.ValidString(password) {
+		return errors.New("initial administrator password must be valid UTF-8")
 	}
-	hash, err := auth.GeneratePasswordHash(temporaryPassword)
-	if err != nil {
-		return err
+	if strings.IndexByte(password, 0) >= 0 {
+		return errors.New("initial administrator password must not contain NUL bytes")
 	}
-	u.Hash = hash
-	// Anytime a temporary password is created, we will force the user
-	// to change their password
-	u.PasswordChangeRequired = true
-	err = db.Save(u).Error
-	if err != nil {
-		return err
+	if err := auth.CheckPasswordPolicy(password); err != nil {
+		return fmt.Errorf("initial administrator password does not meet password policy: %w", err)
 	}
-	log.Infof("Please login with the username admin and the password %s", temporaryPassword)
+	if len(password) > maxBcryptPasswordBytes {
+		return errors.New("initial administrator password exceeds bcrypt's 72-byte limit")
+	}
 	return nil
+}
+
+func readInitialAdminPasswordFile(path string) (string, error) {
+	// The path is explicitly configured by the trusted operator and must support
+	// arbitrary container and Kubernetes secret mount locations.
+	// #nosec G304 -- restricting it to an application directory would break that contract.
+	file, err := os.Open(path)
+	if err != nil {
+		return "", fmt.Errorf("read initial administrator password file %q: %w", path, err)
+	}
+	defer func() {
+		_ = file.Close()
+	}()
+
+	data, err := io.ReadAll(io.LimitReader(file, maxPasswordFileBytes+1))
+	if err != nil {
+		return "", fmt.Errorf("read initial administrator password file %q: %w", path, err)
+	}
+	if len(data) > maxPasswordFileBytes {
+		return "", fmt.Errorf("initial administrator password file %q is too large", path)
+	}
+	if strings.HasSuffix(string(data), "\r\n") {
+		data = data[:len(data)-2]
+	} else if len(data) > 0 && data[len(data)-1] == '\n' {
+		data = data[:len(data)-1]
+	}
+	password := string(data)
+	if err := validateInitialAdminPassword(password); err != nil {
+		return "", fmt.Errorf("invalid initial administrator password file %q: %w", path, err)
+	}
+	return password, nil
+}
+
+func resolveInitialAdminPassword() (string, error) {
+	if path, configured := os.LookupEnv(InitialAdminPasswordFile); configured {
+		if path == "" {
+			return "", fmt.Errorf("%s is configured with an empty path", InitialAdminPasswordFile)
+		}
+		return readInitialAdminPasswordFile(path)
+	}
+	if password := os.Getenv(InitialAdminPassword); password != "" {
+		if err := validateInitialAdminPassword(password); err != nil {
+			return "", err
+		}
+		return password, nil
+	}
+	return "", fmt.Errorf("initial administrator password is required; configure %s or %s", InitialAdminPasswordFile, InitialAdminPassword)
+}
+
+func initialAdminPasswordHash() (string, error) {
+	password, err := resolveInitialAdminPassword()
+	if err != nil {
+		return "", err
+	}
+	hash, err := auth.GeneratePasswordHash(password)
+	if err != nil {
+		return "", errors.New("hash initial administrator password")
+	}
+	return hash, nil
+}
+
+func recoverInitialAdminPassword(u *User) error {
+	hash, err := initialAdminPasswordHash()
+	if err != nil {
+		return err
+	}
+	result := db.Model(u).Updates(map[string]interface{}{
+		"hash":                     hash,
+		"password_change_required": true,
+	})
+	return result.Error
 }
 
 // Setup initializes the database and runs any needed migrations.
@@ -394,8 +466,8 @@ func createTemporaryPassword(u *User) error {
 // First, it establishes a connection to the database, then runs any migrations
 // newer than the version the database is on.
 //
-// Once the database is up-to-date, we create an admin user (if needed) that
-// has a randomly generated API key and password.
+// Once the database is up-to-date, we create an admin user (if needed) using
+// an operator-provided initial password.
 func Setup(c *config.Config) error {
 	// Setup the package-scoped config
 	conf = c
@@ -456,17 +528,24 @@ func Setup(c *config.Config) error {
 	// Create the admin user if it doesn't exist
 	var userCount int64
 	var adminUser User
-	db.Model(&User{}).Count(&userCount)
+	if err = db.Model(&User{}).Count(&userCount).Error; err != nil {
+		return err
+	}
 	adminRole, err := GetRoleBySlug(RoleAdmin)
 	if err != nil {
 		log.Error(err)
 		return err
 	}
 	if userCount == 0 {
+		hash, hashErr := initialAdminPasswordHash()
+		if hashErr != nil {
+			return hashErr
+		}
 		adminUser := User{
 			Username:               DefaultAdminUsername,
 			Role:                   adminRole,
 			RoleID:                 adminRole.ID,
+			Hash:                   hash,
 			PasswordChangeRequired: true,
 		}
 
@@ -476,22 +555,12 @@ func Setup(c *config.Config) error {
 			adminUser.ApiKey = auth.GenerateSecureKey(auth.APIKeyLength)
 		}
 
-		err = db.Save(&adminUser).Error
+		err = db.Create(&adminUser).Error
 		if err != nil {
 			log.Error(err)
 			return err
 		}
 	}
-	// If this is the first time the user is installing GophishFR, then we will
-	// generate a temporary password for the admin user.
-	//
-	// We do this here instead of in the block above where the admin is created
-	// since there's the chance the user executes GophishFR and has some kind of
-	// error, then tries restarting it. If they didn't grab the password out of
-	// the logs, then they would have lost it.
-	//
-	// By doing the temporary password here, we will regenerate that temporary
-	// password until the user is able to reset the admin password.
 	if adminUser.Username == "" {
 		adminUser, err = GetUserByUsername(DefaultAdminUsername)
 		if err != nil {
@@ -499,8 +568,8 @@ func Setup(c *config.Config) error {
 			return err
 		}
 	}
-	if adminUser.PasswordChangeRequired {
-		err = createTemporaryPassword(&adminUser)
+	if adminUser.Hash == "" {
+		err = recoverInitialAdminPassword(&adminUser)
 		if err != nil {
 			log.Error(err)
 			return err

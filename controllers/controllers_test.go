@@ -22,6 +22,7 @@ type testContext struct {
 }
 
 func setupTest(t *testing.T) *testContext {
+	t.Setenv(models.InitialAdminPassword, "synthetic-controller-test-password")
 	wd, _ := os.Getwd()
 	fmt.Println(wd)
 	conf := &config.Config{

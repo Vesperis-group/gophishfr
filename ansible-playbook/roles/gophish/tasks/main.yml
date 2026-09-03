@@ -182,6 +182,16 @@
     group: "{{ gophish_user }}"
     mode: 0644
 
+- name: Install initial administrator password input
+  copy:
+    content: "{{ gophish_initial_admin_password }}"
+    dest: "/home/{{ gophish_user }}/gophish_deploy/.initial-admin-password"
+    owner: "{{ gophish_user }}"
+    group: "{{ gophish_user }}"
+    mode: "0400"
+  when: gophish_initial_admin_password | length > 0
+  no_log: true
+
 - name: Gather service facts before migrating the unit.
   service_facts:
 
@@ -202,6 +212,7 @@
     src: gophish.service.j2
     dest: /etc/systemd/system/gophishfr.service
     mode: 644
+  no_log: true
 
 - name: Ensure systemd to reread configs
   systemd:
@@ -229,14 +240,6 @@
     name: nginx
     state: reloaded
     enabled: yes
-
-- name: Get GophishFR log file containing the initial password
-  command: cat /home/{{ gophish_user }}/gophish_deploy/gophish.log
-  register: gophish_log
-
-- name: display log file
-  debug:
-    msg: "{{ gophish_log }}"
 
 - name: Reboot the box in 1 minute.
   command: shutdown -r 1

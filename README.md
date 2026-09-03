@@ -18,9 +18,10 @@ Download an archive for your platform from the
 [GophishFR releases](https://github.com/Vesperis-group/gophishfr/releases),
 extract it, and run the `gophishfr` binary.
 
-On first start, the application writes the temporary administrator credentials
-to the console. Open <https://localhost:3333>, sign in with those credentials,
-and change the password immediately.
+Before first start, provide the initial administrator password using a
+restricted input file. See [Secure administrator bootstrap](docs/ADMIN_BOOTSTRAP.md).
+The password is never printed or logged. Open <https://localhost:3333>, sign in
+as `admin`, and complete the required password change.
 
 ## Build from source
 
@@ -46,6 +47,8 @@ docker build --tag gophishfr .
 docker run --rm -it \
   -p 3333:3333 \
   -p 8080:80 \
+  --mount type=bind,src=/secure/path/admin-password,dst=/run/secrets/gophishfr_admin_password,readonly \
+  -e GOPHISH_INITIAL_ADMIN_PASSWORD_FILE=/run/secrets/gophishfr_admin_password \
   gophishfr
 ```
 
