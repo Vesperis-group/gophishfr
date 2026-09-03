@@ -2,9 +2,8 @@
 
 ## Outcome
 
-The initial implementation passed the Goal Inspector but failed a subsequent
-independent security-specialist review. Iteration 2 corrects both findings and
-is ready for independent reinspection.
+The goal passed independent inspection and a security-specialist re-review after
+two Builder iterations.
 SMTP sending-profile passwords are now write-only at the HTTP/browser boundary,
 encrypted at rest with the existing AES-256-GCM credential foundation, bound to
 the authenticated owner and immutable profile ID, and decrypted only at the SMTP
@@ -55,7 +54,11 @@ dialer boundary.
    non-strict MySQL truncation risks.
 4. Builder iteration 2 bound preserved credentials to their stored context,
    enforced byte-safe limits and staged verification, and added cross-layer
-   regression coverage.
+   regression coverage in commit
+   `63c00cc31c649821eaae2b9021ba5162c2c76def`.
+5. The Goal Inspector returned PASS again in commit
+   `fddb6726cba274e47bcb853f3af79d07119f40f6`, and the independent security
+   specialist re-review also returned PASS.
 
 ## Inspector Findings
 
@@ -65,6 +68,8 @@ stored-profile test-email requests use the complete stored profile. Explicit
 replacement passwords still permit context changes. UTF-8 byte bounds,
 conservative envelope sizing, staged migration/rollback, and transactional
 readback checks prevent silent storage truncation from committing.
+The Goal Inspector and the independent security specialist both verified these
+corrections with no remaining high-confidence security finding.
 
 ## Iteration 2 validation
 
