@@ -161,7 +161,6 @@ function requestJSON(endpoint, method, data) {
         credentials: "same-origin",
         headers: {
             "Accept": "application/json, text/javascript, */*; q=0.01",
-            "Authorization": "Bearer " + user.api_key,
             "Content-Type": "application/json"
         }
     }
@@ -289,7 +288,7 @@ var api = {
         },
         // complete() - Completes a campaign at POST /campaigns/:id/complete
         complete: function (id) {
-            return requestJSON("/campaigns/" + id + "/complete", "GET", {})
+            return requestJSON("/campaigns/" + id + "/complete", "POST", {})
         }
     },
     // groups contains the endpoints for /groups

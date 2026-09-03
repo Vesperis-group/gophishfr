@@ -322,7 +322,7 @@ test("template mutations and email import preserve legacy contracts", async ({ p
   );
   const expectedWrapperRequests: CapturedRequest[] = [
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: JSON.stringify(wrapperCreate),
       contentType: "application/json",
       method: "POST",
@@ -330,7 +330,7 @@ test("template mutations and email import preserve legacy contracts", async ({ p
       search: "",
     },
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: JSON.stringify(wrapperUpdate),
       contentType: "application/json",
       method: "PUT",
@@ -338,7 +338,7 @@ test("template mutations and email import preserve legacy contracts", async ({ p
       search: "",
     },
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: "{}",
       contentType: "application/json",
       method: "DELETE",
@@ -346,7 +346,7 @@ test("template mutations and email import preserve legacy contracts", async ({ p
       search: "",
     },
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: JSON.stringify(wrapperImport),
       contentType: "application/json",
       method: "POST",
@@ -774,10 +774,7 @@ test("template mutations and email import preserve legacy contracts", async ({ p
   });
 
   const storedTemplates = await page.evaluate(async () => {
-    const globals = window as unknown as { user: { api_key: string } };
-    const response = await fetch("/api/templates/", {
-      headers: { Authorization: `Bearer ${globals.user.api_key}` },
-    });
+    const response = await fetch("/api/templates/");
     if (!response.ok) {
       throw new Error(`Template API returned ${response.status}`);
     }
@@ -978,7 +975,7 @@ test("template mutations and email import preserve legacy contracts", async ({ p
   expect(
     capturedMutations.every(
       (request) =>
-        request.authorizationIsBearer && request.contentType === "application/json",
+        !request.authorizationIsBearer && request.contentType === "application/json",
     ),
   ).toBe(true);
   expect(

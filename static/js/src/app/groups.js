@@ -170,9 +170,7 @@ function uploadCSVFile(file) {
 
     return fetch("/api/import/group", {
         method: "POST",
-        headers: {
-            "Authorization": "Bearer " + user.api_key
-        },
+        credentials: "same-origin",
         body: formData
     }).then(function (response) {
         return response.json().then(function (result) {

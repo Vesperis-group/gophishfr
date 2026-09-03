@@ -242,7 +242,7 @@ async function assertWrapperContracts(
     ]);
     for (const request of requests) {
       expect(request.accept).toBe("application/json, text/javascript, */*; q=0.01");
-      expect(request.authorization).toMatch(/^Bearer \S+$/);
+      expect(request.authorization).toBeUndefined();
       expect(request.contentType).toBe("application/json");
       expect(request.requestedWith === "XMLHttpRequest").toBe(!expectedNativeTransport);
     }

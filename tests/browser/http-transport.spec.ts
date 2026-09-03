@@ -350,7 +350,7 @@ test("native JSON transport preserves the HTTP contract without jQuery", async (
   expect(captured.slice(0, 5)).toEqual([
     {
       accept: "application/json, text/javascript, */*; q=0.01",
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: null,
       contentType: "application/json",
       hasCookie: true,
@@ -361,7 +361,7 @@ test("native JSON transport preserves the HTTP contract without jQuery", async (
     },
     {
       accept: "application/json, text/javascript, */*; q=0.01",
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: '{"enabled":false,"items":[0,null,""]}',
       contentType: "application/json",
       hasCookie: true,
@@ -372,7 +372,7 @@ test("native JSON transport preserves the HTTP contract without jQuery", async (
     },
     {
       accept: "application/json, text/javascript, */*; q=0.01",
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: "null",
       contentType: "application/json",
       hasCookie: true,
@@ -383,7 +383,7 @@ test("native JSON transport preserves the HTTP contract without jQuery", async (
     },
     {
       accept: "application/json, text/javascript, */*; q=0.01",
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: null,
       contentType: "application/json",
       hasCookie: true,
@@ -394,7 +394,7 @@ test("native JSON transport preserves the HTTP contract without jQuery", async (
     },
     {
       accept: "application/json, text/javascript, */*; q=0.01",
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: null,
       contentType: "application/json",
       hasCookie: true,

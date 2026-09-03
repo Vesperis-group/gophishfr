@@ -139,7 +139,7 @@ async function assertTransportContracts(
     });
     expect(requests).toEqual([
       {
-        authenticated: true,
+        authenticated: false,
         body: null,
         contentType: "application/json",
         method: "GET",
@@ -147,7 +147,7 @@ async function assertTransportContracts(
         query: "?{}",
       },
       {
-        authenticated: true,
+        authenticated: false,
         body: JSON.stringify(syntheticSettings),
         contentType: "application/json",
         method: "POST",
@@ -278,13 +278,7 @@ async function assertStoredSecretContract(
     const consoleErrorsBefore = telemetry.consoleErrors.length;
     const failedResponsesBefore = telemetry.failedLocalResponses.length;
     const contract = await page.evaluate(async (settings) => {
-      const apiKey = (
-        window as Window & {
-          user: { api_key: string };
-        }
-      ).user.api_key;
       const headers = {
-        Authorization: `Bearer ${apiKey}`,
         "Content-Type": "application/json",
       };
       const storedSettings = {

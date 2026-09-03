@@ -11,24 +11,95 @@ import (
 	"github.com/Vesperis-group/gophishfr/models"
 )
 
-// CSRFExemptPrefixes are a list of routes that are exempt from CSRF protection
-var CSRFExemptPrefixes = []string{
-	"/api",
+// explicitAPICredential is the mechanism-selection result shared by API
+// authentication and CSRF handling. Values must never be included in errors or
+// logs.
+type explicitAPICredential struct {
+	present   bool
+	value     string
+	ambiguous bool
+	malformed bool
 }
 
-// CSRFExceptions is a middleware that prevents CSRF checks on routes listed in
-// CSRFExemptPrefixes.
+const apiFormParseErrorContextKey = "api_form_parse_error"
+
+type apiAuthenticationMechanism uint8
+
+const (
+	apiAuthenticationSession apiAuthenticationMechanism = iota + 1
+	apiAuthenticationKey
+	apiAuthenticationMechanismContextKey = "api_authentication_mechanism"
+)
+
+// IsSessionAuthentication reports whether RequireAPIKey selected ambient
+// session authentication for this request. The marker contains no credential
+// material and is set only after successful authentication.
+func IsSessionAuthentication(r *http.Request) bool {
+	mechanism, ok := ctx.Get(r, apiAuthenticationMechanismContextKey).(apiAuthenticationMechanism)
+	return ok && mechanism == apiAuthenticationSession
+}
+
+// extractExplicitAPICredential collects every legacy API credential transport.
+// Presence is deliberately independent from value: an empty Authorization
+// header or api_key parameter is still an explicit API-key authentication
+// attempt. Distinct values are ambiguous; identical duplicates are accepted.
+func extractExplicitAPICredential(r *http.Request) explicitAPICredential {
+	// ParseForm is cached by net/http. GetContext normally called it already,
+	// while this call keeps the extractor correct in focused middleware tests.
+	parseErr := r.ParseForm()
+
+	values := make([]string, 0)
+	if queryValues, ok := r.URL.Query()["api_key"]; ok {
+		values = append(values, queryValues...)
+	}
+	if formValues, ok := r.PostForm["api_key"]; ok {
+		values = append(values, formValues...)
+	}
+	for _, authorization := range r.Header.Values("Authorization") {
+		values = append(values, strings.TrimPrefix(authorization, "Bearer "))
+	}
+
+	malformed := parseErr != nil || ctx.Get(r, apiFormParseErrorContextKey) != nil
+	if len(values) == 0 && !malformed {
+		return explicitAPICredential{}
+	}
+	result := explicitAPICredential{present: true, malformed: malformed}
+	if len(values) == 0 {
+		return result
+	}
+	result.value = values[0]
+	for _, value := range values[1:] {
+		if value != result.value {
+			result.ambiguous = true
+			break
+		}
+	}
+	return result
+}
+
+// CSRFExceptions keeps explicit API-key clients exempt from browser same-origin
+// checks. Session-authorized API requests are intentionally not exempt: unsafe
+// methods are protected by the existing CrossOriginProtection engine.
 func CSRFExceptions(handler http.Handler) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
-		for _, prefix := range CSRFExemptPrefixes {
-			if strings.HasPrefix(r.URL.Path, prefix) {
-				r = csrf.UnsafeSkipCheck(r)
-				break
-			}
+		if strings.HasPrefix(r.URL.Path, "/api") && extractExplicitAPICredential(r).present {
+			r = csrf.UnsafeSkipCheck(r)
 		}
 		handler.ServeHTTP(w, r)
 	}
 }
+
+// CSRFFailureHandler preserves JSON error responses for protected API requests
+// while retaining the existing error shape for browser page requests.
+var CSRFFailureHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+	if strings.HasPrefix(r.URL.Path, "/api") {
+		JSONError(w, http.StatusForbidden, http.StatusText(http.StatusForbidden))
+		return
+	}
+	http.Error(w, fmt.Sprintf("%s - %s",
+		http.StatusText(http.StatusForbidden), csrf.FailureReason(r)),
+		http.StatusForbidden)
+})
 
 // PlaintextHTTP is intentionally absent: filippo.io/csrf/gorilla derives the
 // origin from Fetch metadata headers and ignores the plaintext-HTTP hint that
@@ -52,7 +123,14 @@ func GetContext(handler http.Handler) http.HandlerFunc {
 		// Parse the request form
 		err := r.ParseForm()
 		if err != nil {
-			http.Error(w, "Error parsing request", http.StatusInternalServerError)
+			if strings.HasPrefix(r.URL.Path, "/api") {
+				// Preserve the failure for the shared credential extractor. A
+				// malformed encoded credential must never disappear and allow
+				// fallback to ambient session authority.
+				r = ctx.Set(r, apiFormParseErrorContextKey, true)
+			} else {
+				http.Error(w, "Error parsing request", http.StatusInternalServerError)
+			}
 		}
 		// Set the context appropriately here.
 		// Set the session
@@ -60,8 +138,8 @@ func GetContext(handler http.Handler) http.HandlerFunc {
 		// Put the session in the context so that we can
 		// reuse the values in different handlers
 		r = ctx.Set(r, "session", session)
-		if id, ok := session.Values["id"]; ok {
-			u, err := models.GetUser(id.(int64))
+		if id, ok := session.Values["id"].(int64); ok {
+			u, err := models.GetUser(id)
 			if err != nil {
 				r = ctx.Set(r, "user", nil)
 			} else {
@@ -76,8 +154,10 @@ func GetContext(handler http.Handler) http.HandlerFunc {
 	}
 }
 
-// RequireAPIKey ensures that a valid API key is set as either the api_key GET
-// parameter, or a Bearer token.
+// RequireAPIKey selects and enforces one API authentication mechanism. Any
+// explicit legacy API credential uses API-key authentication only; only a
+// request with no explicit credential may use the session user populated by
+// GetContext. API-key validation never falls back to ambient session authority.
 func RequireAPIKey(handler http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
@@ -87,31 +167,41 @@ func RequireAPIKey(handler http.Handler) http.Handler {
 			w.Header().Set("Access-Control-Allow-Headers", "Origin, X-Requested-With, Content-Type, Accept")
 			return
 		}
-		// A malformed body simply leaves the form empty; the missing api_key is
-		// then handled by the checks below, which reject the request.
-		_ = r.ParseForm()
-		ak := r.Form.Get("api_key")
-		// If we can't get the API key, we'll also check for the
-		// Authorization Bearer token
-		if ak == "" {
-			tokens, ok := r.Header["Authorization"]
-			if ok && len(tokens) >= 1 {
-				ak = tokens[0]
-				ak = strings.TrimPrefix(ak, "Bearer ")
+
+		credential := extractExplicitAPICredential(r)
+		if !credential.present {
+			sessionUser := ctx.Get(r, "user")
+			if sessionUser == nil {
+				JSONError(w, http.StatusUnauthorized, "API Key not set")
+				return
 			}
-		}
-		if ak == "" {
-			JSONError(w, http.StatusUnauthorized, "API Key not set")
+			user, ok := sessionUser.(models.User)
+			if !ok {
+				JSONError(w, http.StatusUnauthorized, "Invalid session")
+				return
+			}
+			if user.PasswordChangeRequired {
+				JSONError(w, http.StatusForbidden, "Password change required")
+				return
+			}
+			r = ctx.Set(r, apiAuthenticationMechanismContextKey, apiAuthenticationSession)
+			r = ctx.Set(r, "user_id", user.Id)
+			handler.ServeHTTP(w, r)
 			return
 		}
-		u, err := models.GetUserByAPIKey(ak)
+
+		if credential.malformed || credential.ambiguous || credential.value == "" {
+			JSONError(w, http.StatusUnauthorized, "Invalid API Key")
+			return
+		}
+		u, err := models.GetUserByAPIKey(credential.value)
 		if err != nil {
 			JSONError(w, http.StatusUnauthorized, "Invalid API Key")
 			return
 		}
 		r = ctx.Set(r, "user", u)
+		r = ctx.Set(r, apiAuthenticationMechanismContextKey, apiAuthenticationKey)
 		r = ctx.Set(r, "user_id", u.Id)
-		r = ctx.Set(r, "api_key", ak)
 		handler.ServeHTTP(w, r)
 	})
 }

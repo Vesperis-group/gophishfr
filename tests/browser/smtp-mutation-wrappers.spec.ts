@@ -294,7 +294,7 @@ test("SMTP mutations preserve credential and modal contracts", async ({ page }) 
   );
   expect(wrapperRequests).toEqual([
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: JSON.stringify(wrapperCreate),
       contentType: "application/json",
       method: "POST",
@@ -302,7 +302,7 @@ test("SMTP mutations preserve credential and modal contracts", async ({ page }) 
       search: "",
     },
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: JSON.stringify(wrapperUpdate),
       contentType: "application/json",
       method: "PUT",
@@ -310,7 +310,7 @@ test("SMTP mutations preserve credential and modal contracts", async ({ page }) 
       search: "",
     },
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: "{}",
       contentType: "application/json",
       method: "DELETE",
@@ -750,7 +750,7 @@ test("SMTP mutations preserve credential and modal contracts", async ({ page }) 
   expect(
     capturedMutations.every(
       (request) =>
-        request.authorizationIsBearer && request.contentType === "application/json",
+        !request.authorizationIsBearer && request.contentType === "application/json",
     ),
   ).toBe(true);
   expect(

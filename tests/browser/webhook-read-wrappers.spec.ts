@@ -89,7 +89,7 @@ test("webhook wrappers preserve their HTTP and settlement contracts", async ({ p
   ]);
   expect(captured).toEqual([
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: null,
       contentType: "application/json",
       method: "GET",
@@ -97,7 +97,7 @@ test("webhook wrappers preserve their HTTP and settlement contracts", async ({ p
       search: "?{}",
     },
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: null,
       contentType: "application/json",
       method: "GET",
@@ -161,7 +161,7 @@ test("webhook wrappers preserve their HTTP and settlement contracts", async ({ p
   ]);
   expect(captured).toEqual([
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: JSON.stringify(webhook),
       contentType: "application/json",
       method: "POST",
@@ -169,7 +169,7 @@ test("webhook wrappers preserve their HTTP and settlement contracts", async ({ p
       search: "",
     },
     {
-      authorizationIsBearer: true,
+      authorizationIsBearer: false,
       body: "{}",
       contentType: "application/json",
       method: "DELETE",

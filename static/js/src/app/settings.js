@@ -91,9 +91,8 @@ document.addEventListener('DOMContentLoaded', function () {
         e.stopPropagation()
         api.reset()
             .then(function (response) {
-                user.api_key = response.data
                 successFlash(response.message)
-                document.getElementById("api_key").value = user.api_key
+                document.getElementById("api_key").value = response.data
             }, function (error) {
                 errorFlash(requestErrorMessage(error))
             })
