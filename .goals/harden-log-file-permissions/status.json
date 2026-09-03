@@ -1,0 +1,10 @@
+{
+  "goal_id": "harden-log-file-permissions",
+  "status": "inspecting",
+  "iteration": 1,
+  "builder_model": "Claude:Sonnet-4.6",
+  "inspector_model": "Claude:Haiku-4.5",
+  "initial_sha": "8ea8fac33885bce4a611a87023caf4c4a33aa725",
+  "created_at": "2026-09-03T18:40:00+02:00",
+  "history": []
+}
