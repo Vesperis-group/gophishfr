@@ -234,6 +234,9 @@ jobs:
       - name: Build container image
         run: docker build --tag gophishfr:ci .
 
+      - name: Test Docker configuration is not logged
+        run: ./scripts/test-docker-config-no-log.sh gophishfr:ci
+
       - name: Test credential keyring container behavior
         run: ./scripts/test-container-imap-keyring.sh gophishfr:ci
 
