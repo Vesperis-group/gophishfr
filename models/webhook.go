@@ -1,6 +1,7 @@
 package models
 
 import (
+	"database/sql"
 	"errors"
 
 	"github.com/Vesperis-group/gophishfr/internal/credentials"
@@ -158,8 +159,14 @@ func PostWebhook(wh *Webhook, intent WebhookSecretIntent, secret string, credent
 		if err != nil {
 			return err
 		}
+		// A freshly inserted row always holds a concrete empty string in
+		// both secret columns (PostWebhook never persists a NULL secret),
+		// but the predicate still treats secret IS NULL as an equally valid
+		// no-secret match: consistent NULL-aware predicates everywhere this
+		// package guards a secret-column update are cheap insurance against
+		// a future insert path that omits the column.
 		update := transaction.Model(&Webhook{}).
-			Where("id = ? AND secret = '' AND secret_ciphertext = ''", wh.Id).
+			Where("id = ? AND (secret IS NULL OR secret = '') AND secret_ciphertext = ''", wh.Id).
 			Update("secret_ciphertext", ciphertext)
 		if update.Error != nil {
 			return update.Error
@@ -169,12 +176,14 @@ func PostWebhook(wh *Webhook, intent WebhookSecretIntent, secret string, credent
 		}
 		wh.SecretCiphertext = ciphertext
 	}
-	if err := verifyWebhookCredentialStorage(
-		transaction,
-		wh.Id,
-		"",
-		wh.SecretCiphertext,
-	); err != nil {
+	if err := verifyWebhookRowStorage(transaction, storedWebhookRow{
+		ID:               wh.Id,
+		Name:             wh.Name,
+		URL:              wh.URL,
+		IsActive:         wh.IsActive,
+		Secret:           sql.NullString{String: "", Valid: true},
+		SecretCiphertext: wh.SecretCiphertext,
+	}); err != nil {
 		return err
 	}
 	if err := transaction.Commit().Error; err != nil {
@@ -196,10 +205,16 @@ func PostWebhook(wh *Webhook, intent WebhookSecretIntent, secret string, credent
 //
 // The existing row is read inside the same transaction that performs the
 // update, and the update is guarded on the exact secret-column state just
-// read: a concurrent preserve, clear, replace, or delete between the read and
-// the write causes the guarded update to affect zero rows, which is reported
-// as ErrWebhookConcurrentChange rather than silently applied over a state
-// that was never validated.
+// read -- treating a legacy NULL secret and a legacy empty string as the
+// same valid no-secret state, so a preserve/clear/replace on a not-yet-
+// normalized legacy row is never silently skipped. A concurrent preserve,
+// clear, replace, or delete between the read and the write causes the
+// guarded update to affect zero rows; verifyWebhookRowStorage then re-reads
+// the row and fails closed with ErrWebhookCredentialStorageMismatch (or
+// gorm.ErrRecordNotFound for a concurrent delete) unless every column --
+// name, URL, active state, and secret state -- already equals what this
+// transaction intended, so a conflict can never be masked as success just
+// because the secret state happened to already match.
 func PutWebhook(wh *Webhook, intent WebhookSecretIntent, secret string, credentialCipher *credentials.Cipher) error {
 	if err := wh.Validate(); err != nil {
 		log.Error(err)
@@ -254,18 +269,25 @@ func PutWebhook(wh *Webhook, intent WebhookSecretIntent, secret string, credenti
 	}
 	wh.Secret = ""
 
+	// The secret predicate treats a legacy NULL exactly like a legacy empty
+	// string -- both are the same valid no-secret state, and a literal
+	// "secret = ''" comparison never matches a NULL column in SQL. Without
+	// this, a preserve/clear/replace on a legacy-NULL row would silently
+	// match zero rows here and drop any metadata change (for example,
+	// deactivating the webhook) bundled into the same update.
+	//
 	// MySQL's default (non-CLIENT_FOUND_ROWS) RowsAffected reports rows that
 	// actually *changed* value, not rows that matched the WHERE clause: an
 	// ordinary no-op resubmission (preserve intent, no metadata change) can
 	// therefore legitimately report 0 even though exactly one row matched.
-	// Concurrency safety instead comes from the read-back verification below,
-	// which compares the persisted secret columns against what this
-	// transaction intended and fails closed on any mismatch; RowsAffected is
-	// only used here to catch the impossible ">1" case for a primary-key
-	// scoped update.
+	// Concurrency safety instead comes from verifyWebhookRowStorage below,
+	// which re-reads name, URL, active state, and secret state together and
+	// fails closed unless every one of them already equals what this
+	// transaction intended; RowsAffected is only used here to catch the
+	// impossible ">1" case for a primary-key-scoped update.
 	update := transaction.Model(&Webhook{}).
 		Where(
-			"id = ? AND secret = '' AND secret_ciphertext = ?",
+			"id = ? AND (secret IS NULL OR secret = '') AND secret_ciphertext = ?",
 			wh.Id,
 			existing.SecretCiphertext,
 		).
@@ -282,12 +304,14 @@ func PutWebhook(wh *Webhook, intent WebhookSecretIntent, secret string, credenti
 	if update.RowsAffected > 1 {
 		return ErrWebhookConcurrentChange
 	}
-	if err := verifyWebhookCredentialStorage(
-		transaction,
-		wh.Id,
-		"",
-		wh.SecretCiphertext,
-	); err != nil {
+	if err := verifyWebhookRowStorage(transaction, storedWebhookRow{
+		ID:               wh.Id,
+		Name:             wh.Name,
+		URL:              wh.URL,
+		IsActive:         wh.IsActive,
+		Secret:           sql.NullString{String: "", Valid: true},
+		SecretCiphertext: wh.SecretCiphertext,
+	}); err != nil {
 		return err
 	}
 	if err := transaction.Commit().Error; err != nil {

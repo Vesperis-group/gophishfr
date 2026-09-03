@@ -654,13 +654,22 @@ func TestMySQLWebhookCredentialLifecycle(t *testing.T) {
 		INSERT INTO webhooks (name, url, secret, secret_ciphertext, is_active)
 		VALUES
 			('MySQL legacy', 'https://webhook.invalid/mysql-legacy', ?, '', 1),
-			('MySQL no secret', 'https://webhook.invalid/mysql-none', '', '', 1)
+			('MySQL no secret', 'https://webhook.invalid/mysql-none', '', '', 1),
+			('MySQL NULL no secret', 'https://webhook.invalid/mysql-null', NULL, '', 0)
 	`, testWebhookSecret).Error; err != nil {
 		t.Fatalf("seed MySQL webhook rows: %v", err)
 	}
 	result, err := MigrateWebhookSecrets(cipher)
-	if err != nil || result.Updated != 1 || result.Unchanged != 1 {
+	if err != nil || result.Updated != 1 || result.Unchanged != 2 {
 		t.Fatalf("migrate MySQL webhook credentials: result=%+v err=%v", result, err)
+	}
+	var migratedNull sql.NullString
+	if err := db.Raw("SELECT secret FROM webhooks WHERE name = 'MySQL NULL no secret'").
+		Row().Scan(&migratedNull); err != nil {
+		t.Fatalf("read MySQL NULL no-secret row after migration: %v", err)
+	}
+	if migratedNull.Valid {
+		t.Fatalf("MySQL migration changed valid NULL no-secret state to %q", migratedNull.String)
 	}
 	if err := goose.SetDialect("mysql"); err != nil {
 		t.Fatalf("set MySQL dialect: %v", err)
@@ -678,8 +687,8 @@ func TestMySQLWebhookCredentialLifecycle(t *testing.T) {
 	if err := db.Raw("SELECT COUNT(*) FROM webhooks").Row().Scan(&webhookCount); err != nil {
 		t.Fatalf("count old-binary MySQL webhook rows: %v", err)
 	}
-	if webhookCount != 2 {
-		t.Fatalf("MySQL schema Down preserved %d webhooks, want 2", webhookCount)
+	if webhookCount != 3 {
+		t.Fatalf("MySQL schema Down preserved %d webhooks, want 3", webhookCount)
 	}
 }
 
@@ -760,5 +769,526 @@ func TestMySQLWebhookCredentialStorageBoundsNonStrict(t *testing.T) {
 	updated := loadOnlyWebhook(t, wh.Id)
 	if updated.URL != "https://webhook.invalid/mysql-updated" || updated.SecretCiphertext != stored.SecretCiphertext {
 		t.Fatal("MySQL metadata-only update did not preserve ciphertext and apply the URL change")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Iteration 2: a legacy `secret IS NULL` column is exactly as valid a
+// no-secret state as a legacy empty string. The tests below prove that
+// preserve, clear, replace, a bundled metadata update, a genuine no-op, a
+// concurrent conflict, and offline rollback all treat NULL and '' as the
+// same state, and that a NULL-secret webhook's deactivation actually
+// persists and is reflected in active-delivery selection.
+// ---------------------------------------------------------------------------
+
+// forceNullWebhookSecret bypasses the model layer to put webhooks.id into a
+// genuine SQL NULL secret state. PostWebhook and PutWebhook always write a
+// concrete empty string, so this simulates the state a pre-existing,
+// imported, or partially restored row can have that this application's own
+// write paths never produce on their own.
+func forceNullWebhookSecret(t *testing.T, id int64) {
+	t.Helper()
+	if err := db.Exec("UPDATE webhooks SET secret = NULL WHERE id = ?", id).Error; err != nil {
+		t.Fatalf("force NULL legacy secret for webhook %d: %v", id, err)
+	}
+	var raw sql.NullString
+	if err := db.Raw("SELECT secret FROM webhooks WHERE id = ?", id).Row().Scan(&raw); err != nil {
+		t.Fatalf("read raw secret column for webhook %d: %v", id, err)
+	}
+	if raw.Valid {
+		t.Fatalf("test setup did not produce a NULL secret column for webhook %d, got %q", id, raw.String)
+	}
+}
+
+// TestWebhookNullLegacySecretPreserveClearReplace freezes that a legacy
+// `secret IS NULL` row -- not just a legacy empty string -- is an equally
+// valid starting state for every update intent: preserve leaves an existing
+// ciphertext byte-for-byte unchanged, clear empties both columns, and
+// replace encrypts a new secret, whether or not a ciphertext already exists
+// alongside the NULL legacy column. A successful update also always
+// normalizes the legacy column to a concrete empty string, so a NULL never
+// reappears once this package has written the row.
+func TestWebhookNullLegacySecretPreserveClearReplace(t *testing.T) {
+	setupIMAPCredentialDatabase(t)
+	cipher := testCredentialCipher(t, "webhook-null-key", map[string][]byte{
+		"webhook-null-key": bytes.Repeat([]byte{0x81}, 32),
+	})
+
+	tests := []struct {
+		name            string
+		seedCiphertext  bool // whether the NULL-secret row already has a stored secret
+		intent          WebhookSecretIntent
+		incomingSecret  string
+		wantSecretAfter string // "" means no secret is expected afterward
+	}{
+		{
+			name:            "NULL secret with ciphertext, preserve",
+			seedCiphertext:  true,
+			intent:          WebhookSecretPreserve,
+			wantSecretAfter: testWebhookSecret,
+		},
+		{
+			name:            "NULL secret with ciphertext, explicit clear",
+			seedCiphertext:  true,
+			intent:          WebhookSecretClear,
+			wantSecretAfter: "",
+		},
+		{
+			name:            "NULL secret with ciphertext, replace",
+			seedCiphertext:  true,
+			intent:          WebhookSecretReplace,
+			incomingSecret:  testWebhookReplacement,
+			wantSecretAfter: testWebhookReplacement,
+		},
+		{
+			name:            "NULL secret with no ciphertext, preserve stays empty",
+			seedCiphertext:  false,
+			intent:          WebhookSecretPreserve,
+			wantSecretAfter: "",
+		},
+		{
+			name:            "NULL secret with no ciphertext, explicit clear stays empty",
+			seedCiphertext:  false,
+			intent:          WebhookSecretClear,
+			wantSecretAfter: "",
+		},
+		{
+			name:            "NULL secret with no ciphertext, replace",
+			seedCiphertext:  false,
+			intent:          WebhookSecretReplace,
+			incomingSecret:  testWebhookReplacement,
+			wantSecretAfter: testWebhookReplacement,
+		},
+	}
+	for _, test := range tests {
+		test := test
+		t.Run(test.name, func(t *testing.T) {
+			seedIntent := WebhookSecretPreserve
+			seedSecret := ""
+			if test.seedCiphertext {
+				seedIntent = WebhookSecretReplace
+				seedSecret = testWebhookSecret
+			}
+			wh := validModelWebhook()
+			wh.Name = "NULL matrix: " + test.name
+			if err := PostWebhook(&wh, seedIntent, seedSecret, cipher); err != nil {
+				t.Fatalf("seed webhook: %v", err)
+			}
+			forceNullWebhookSecret(t, wh.Id)
+
+			update := wh
+			if err := PutWebhook(&update, test.intent, test.incomingSecret, cipher); err != nil {
+				t.Fatalf("update NULL-secret row: %v", err)
+			}
+
+			var rawSecret sql.NullString
+			if err := db.Raw("SELECT secret FROM webhooks WHERE id = ?", wh.Id).Row().Scan(&rawSecret); err != nil {
+				t.Fatalf("read raw secret column after update: %v", err)
+			}
+			if !rawSecret.Valid || rawSecret.String != "" {
+				t.Fatalf("legacy secret column after update = valid=%v value=%q, want a concrete empty string, not NULL", rawSecret.Valid, rawSecret.String)
+			}
+
+			stored := loadOnlyWebhook(t, wh.Id)
+			if test.wantSecretAfter == "" {
+				if stored.SecretCiphertext != "" {
+					t.Fatal("expected no-secret state after update, found ciphertext")
+				}
+				return
+			}
+			plaintext, err := DecryptWebhookSecret(stored, cipher)
+			if err != nil || plaintext != test.wantSecretAfter {
+				t.Fatalf("decrypt after NULL-secret update: matched=%t err=%v", plaintext == test.wantSecretAfter, err)
+			}
+		})
+	}
+}
+
+// TestWebhookNullLegacySecretMetadataUpdatePersistsAndExcludesFromActiveDelivery
+// is the central regression test for the iteration-2 security finding: a
+// metadata update (deactivating a webhook, alongside a rename) on a row
+// whose legacy secret column is a genuine SQL NULL must actually persist,
+// not silently no-op because a predicate that literally compares
+// secret to an empty string never
+// matches NULL. An administrator deactivating a NULL-secret webhook must
+// see it excluded from both GetActiveWebhooks and ActiveWebhookEndpoints
+// afterward, not receive a false-success response while the webhook keeps
+// receiving campaign events.
+func TestWebhookNullLegacySecretMetadataUpdatePersistsAndExcludesFromActiveDelivery(t *testing.T) {
+	setupIMAPCredentialDatabase(t)
+	cipher := testCredentialCipher(t, "webhook-null-deactivate-key", map[string][]byte{
+		"webhook-null-deactivate-key": bytes.Repeat([]byte{0x82}, 32),
+	})
+
+	wh := validModelWebhook()
+	wh.Name = "NULL secret active webhook"
+	wh.IsActive = true
+	if err := PostWebhook(&wh, WebhookSecretPreserve, "", cipher); err != nil {
+		t.Fatalf("create no-secret active webhook: %v", err)
+	}
+	forceNullWebhookSecret(t, wh.Id)
+
+	activeBefore, err := GetActiveWebhooks()
+	if err != nil || len(activeBefore) != 1 || activeBefore[0].Id != wh.Id {
+		t.Fatalf("GetActiveWebhooks before deactivation = %+v, err=%v, want exactly the seeded webhook", activeBefore, err)
+	}
+	endpointsBefore, err := ActiveWebhookEndpoints(cipher)
+	if err != nil || len(endpointsBefore) != 1 {
+		t.Fatalf("ActiveWebhookEndpoints before deactivation = %+v, err=%v, want exactly one endpoint", endpointsBefore, err)
+	}
+
+	deactivate := wh
+	deactivate.IsActive = false
+	deactivate.Name = "Deactivated NULL secret webhook"
+	deactivate.URL = "https://webhook.invalid/deactivated"
+	if err := PutWebhook(&deactivate, WebhookSecretPreserve, "", cipher); err != nil {
+		t.Fatalf("deactivate NULL-secret webhook: %v", err)
+	}
+
+	persisted := loadOnlyWebhook(t, wh.Id)
+	if persisted.IsActive {
+		t.Fatal("deactivation of a NULL-secret webhook did not persist -- it is still active in storage")
+	}
+	if persisted.Name != "Deactivated NULL secret webhook" || persisted.URL != "https://webhook.invalid/deactivated" {
+		t.Fatal("metadata changes bundled with a NULL-secret preserve update did not persist")
+	}
+
+	activeAfter, err := GetActiveWebhooks()
+	if err != nil || len(activeAfter) != 0 {
+		t.Fatalf("GetActiveWebhooks after deactivation = %+v, err=%v, want none", activeAfter, err)
+	}
+	endpointsAfter, err := ActiveWebhookEndpoints(cipher)
+	if err != nil || len(endpointsAfter) != 0 {
+		t.Fatalf("ActiveWebhookEndpoints after deactivation = %+v, err=%v, want none (a deactivated webhook must never be eligible for delivery)", endpointsAfter, err)
+	}
+}
+
+// TestWebhookNullLegacySecretNoOpUpdateSucceeds proves that a genuine no-op
+// resubmission -- identical name, URL, and active state, preserving a
+// ciphertext on a row whose legacy secret column started as NULL --
+// succeeds. The NULL-aware predicate fix must not turn an ordinary
+// unmodified resave into a spurious concurrency failure.
+func TestWebhookNullLegacySecretNoOpUpdateSucceeds(t *testing.T) {
+	setupIMAPCredentialDatabase(t)
+	cipher := testCredentialCipher(t, "webhook-null-noop-key", map[string][]byte{
+		"webhook-null-noop-key": bytes.Repeat([]byte{0x83}, 32),
+	})
+	wh := validModelWebhook()
+	if err := PostWebhook(&wh, WebhookSecretReplace, testWebhookSecret, cipher); err != nil {
+		t.Fatalf("seed webhook: %v", err)
+	}
+	forceNullWebhookSecret(t, wh.Id)
+
+	stored := loadOnlyWebhook(t, wh.Id)
+	noop := stored
+	if err := PutWebhook(&noop, WebhookSecretPreserve, "", cipher); err != nil {
+		t.Fatalf("identical no-op update on NULL-secret row: %v", err)
+	}
+	after := loadOnlyWebhook(t, wh.Id)
+	if after.SecretCiphertext != stored.SecretCiphertext || after.Name != stored.Name ||
+		after.URL != stored.URL || after.IsActive != stored.IsActive {
+		t.Fatal("no-op update unexpectedly changed the webhook")
+	}
+}
+
+// TestWebhookNullLegacySecretConcurrentChangeFailsClosed proves the
+// NULL-aware predicate fix does not weaken concurrency detection: a
+// concurrently mutated ciphertext on a row whose legacy secret column was
+// NULL is still caught by verifyWebhookRowStorage and rolled back, not
+// silently accepted just because the (now NULL-matching) predicate found a
+// row to update.
+func TestWebhookNullLegacySecretConcurrentChangeFailsClosed(t *testing.T) {
+	setupIMAPCredentialDatabase(t)
+	cipher := testCredentialCipher(t, "webhook-null-conflict-key", map[string][]byte{
+		"webhook-null-conflict-key": bytes.Repeat([]byte{0x84}, 32),
+	})
+	wh := validModelWebhook()
+	if err := PostWebhook(&wh, WebhookSecretReplace, testWebhookSecret, cipher); err != nil {
+		t.Fatalf("seed webhook: %v", err)
+	}
+	forceNullWebhookSecret(t, wh.Id)
+	before := loadOnlyWebhook(t, wh.Id)
+
+	if err := db.Exec(`
+		CREATE TRIGGER silently_mutate_null_secret_webhook_ciphertext
+		AFTER UPDATE ON webhooks
+		WHEN NEW.name = 'null-secret-silent-mutator'
+		BEGIN
+			UPDATE webhooks SET secret_ciphertext = 'tampered-by-trigger' WHERE id = NEW.id;
+		END
+	`).Error; err != nil {
+		t.Fatalf("create silent-mutation trigger: %v", err)
+	}
+	update := before
+	update.Name = "null-secret-silent-mutator"
+	if err := PutWebhook(&update, WebhookSecretPreserve, "", cipher); !errors.Is(err, ErrWebhookCredentialStorageMismatch) {
+		t.Fatalf("silently-mutated NULL-secret update error = %v, want storage mismatch", err)
+	}
+	after := loadOnlyWebhook(t, wh.Id)
+	if after.Name != before.Name || after.SecretCiphertext != before.SecretCiphertext {
+		t.Fatal("failed update on a NULL-secret row was not rolled back completely")
+	}
+	var rawSecret sql.NullString
+	if err := db.Raw("SELECT secret FROM webhooks WHERE id = ?", wh.Id).Row().Scan(&rawSecret); err != nil {
+		t.Fatalf("read failed-update legacy secret state: %v", err)
+	}
+	if rawSecret.Valid {
+		t.Fatalf("failed update did not restore original NULL legacy secret, got %q", rawSecret.String)
+	}
+}
+
+// TestRollbackWebhookSecretsAcceptsNullLegacySecretWithCiphertext is the
+// regression test for the iteration-2 rollback finding: a row whose legacy
+// secret column is a genuine SQL NULL alongside a valid ciphertext -- for
+// example one restored from a partial backup -- is a valid state the
+// offline rollback must restore, not reject as an unexpected row change.
+func TestRollbackWebhookSecretsAcceptsNullLegacySecretWithCiphertext(t *testing.T) {
+	setupIMAPCredentialDatabase(t)
+	cipher := testCredentialCipher(t, "webhook-null-rollback-key", map[string][]byte{
+		"webhook-null-rollback-key": bytes.Repeat([]byte{0x85}, 32),
+	})
+	encrypted := validModelWebhook()
+	encrypted.Name = "NULL secret with ciphertext"
+	if err := PostWebhook(&encrypted, WebhookSecretReplace, testWebhookSecret, cipher); err != nil {
+		t.Fatalf("seed encrypted webhook: %v", err)
+	}
+	// Simulate a row whose legacy column reverted to (or was restored as) a
+	// genuine NULL while its ciphertext survived -- PostWebhook itself never
+	// produces this combination, but a real database can carry it.
+	forceNullWebhookSecret(t, encrypted.Id)
+
+	result, err := RollbackWebhookSecrets(cipher)
+	if err != nil || result.Updated != 1 || result.Unchanged != 0 {
+		t.Fatalf("rollback NULL-secret+ciphertext row: result=%+v err=%v", result, err)
+	}
+
+	var restoredSecret, restoredCiphertext string
+	if err := db.Raw("SELECT secret, secret_ciphertext FROM webhooks WHERE id = ?", encrypted.Id).
+		Row().Scan(&restoredSecret, &restoredCiphertext); err != nil {
+		t.Fatalf("read rolled-back row: %v", err)
+	}
+	if restoredSecret != testWebhookSecret {
+		t.Fatalf("rollback did not restore the legacy secret: got %q", restoredSecret)
+	}
+	if restoredCiphertext != "" {
+		t.Fatal("rollback did not clear the ciphertext column")
+	}
+
+	// Idempotent: repeating rollback on the now-plaintext row is a safe
+	// no-op, not an error.
+	result, err = RollbackWebhookSecrets(cipher)
+	if err != nil || result.Updated != 0 || result.Unchanged != 1 {
+		t.Fatalf("idempotent rollback result = %+v err=%v", result, err)
+	}
+}
+
+// TestMySQLWebhookCredentialNullLegacySecretLifecycle is the real-MySQL
+// counterpart of the SQLite NULL-legacy-secret regression tests above: it
+// proves against a real server that a legacy `secret IS NULL` row's
+// metadata update actually persists and excludes it from active delivery,
+// that a genuine no-op resubmission succeeds under MySQL's default
+// changed-rows RowsAffected semantics, and that rollback accepts a NULL
+// secret alongside a valid ciphertext.
+func TestMySQLWebhookCredentialNullLegacySecretLifecycle(t *testing.T) {
+	connectionString := testingMySQLDSN(t)
+	if connectionString == "" {
+		return
+	}
+	database, err := openDatabase("mysql", connectionString)
+	if err != nil {
+		t.Fatalf("open MySQL database: %v", err)
+	}
+	db = database
+	db.LogMode(false)
+	conf = &config.Config{
+		DBName:         "mysql",
+		DBPath:         connectionString,
+		MigrationsPath: "../db/db_mysql/migrations",
+	}
+	if err := migrateDatabase(db.DB(), conf.DBName, conf.MigrationsPath); err != nil {
+		t.Fatalf("migrate MySQL database: %v", err)
+	}
+	if err := db.Exec("DELETE FROM webhooks").Error; err != nil {
+		t.Fatalf("clear MySQL webhooks: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = goose.SetDialect("mysql")
+		_ = goose.Up(db.DB(), conf.MigrationsPath)
+		_ = db.Exec("DELETE FROM webhooks").Error
+		_ = database.Close()
+	})
+
+	cipher := testCredentialCipher(t, "webhook-null-mysql-key", map[string][]byte{
+		"webhook-null-mysql-key": bytes.Repeat([]byte{0x86}, 32),
+	})
+
+	// Preserve, clear, and replace must all accept both valid NULL source
+	// states (with and without ciphertext), persist a concrete empty legacy
+	// column, and leave exactly the requested credential state.
+	for _, test := range []struct {
+		name            string
+		seedCiphertext  bool
+		intent          WebhookSecretIntent
+		incomingSecret  string
+		wantSecretAfter string
+	}{
+		{name: "preserve ciphertext", seedCiphertext: true, intent: WebhookSecretPreserve, wantSecretAfter: testWebhookSecret},
+		{name: "clear ciphertext", seedCiphertext: true, intent: WebhookSecretClear},
+		{name: "replace ciphertext", seedCiphertext: true, intent: WebhookSecretReplace, incomingSecret: testWebhookReplacement, wantSecretAfter: testWebhookReplacement},
+		{name: "preserve no secret", intent: WebhookSecretPreserve},
+		{name: "clear no secret", intent: WebhookSecretClear},
+		{name: "replace no secret", intent: WebhookSecretReplace, incomingSecret: testWebhookReplacement, wantSecretAfter: testWebhookReplacement},
+	} {
+		seedIntent := WebhookSecretPreserve
+		seedSecret := ""
+		if test.seedCiphertext {
+			seedIntent = WebhookSecretReplace
+			seedSecret = testWebhookSecret
+		}
+		wh := validModelWebhook()
+		wh.Name = "MySQL NULL matrix: " + test.name
+		wh.IsActive = false
+		if err := PostWebhook(&wh, seedIntent, seedSecret, cipher); err != nil {
+			t.Fatalf("%s: seed MySQL webhook: %v", test.name, err)
+		}
+		if err := db.Exec("UPDATE webhooks SET secret = NULL WHERE id = ?", wh.Id).Error; err != nil {
+			t.Fatalf("%s: force MySQL NULL legacy secret: %v", test.name, err)
+		}
+		update := wh
+		if err := PutWebhook(&update, test.intent, test.incomingSecret, cipher); err != nil {
+			t.Fatalf("%s: update MySQL NULL-secret row: %v", test.name, err)
+		}
+		var rawSecret sql.NullString
+		if err := db.Raw("SELECT secret FROM webhooks WHERE id = ?", wh.Id).Row().Scan(&rawSecret); err != nil {
+			t.Fatalf("%s: read MySQL raw secret after update: %v", test.name, err)
+		}
+		if !rawSecret.Valid || rawSecret.String != "" {
+			t.Fatalf("%s: MySQL runtime update left legacy secret valid=%v value=%q, want concrete empty", test.name, rawSecret.Valid, rawSecret.String)
+		}
+		stored := loadOnlyWebhook(t, wh.Id)
+		if test.wantSecretAfter == "" {
+			if stored.SecretCiphertext != "" {
+				t.Fatalf("%s: expected no ciphertext after update", test.name)
+			}
+		} else if plaintext, decryptErr := DecryptWebhookSecret(stored, cipher); decryptErr != nil || plaintext != test.wantSecretAfter {
+			t.Fatalf("%s: MySQL decrypt after update matched=%t err=%v", test.name, plaintext == test.wantSecretAfter, decryptErr)
+		}
+	}
+
+	// Deactivating a NULL-secret webhook must persist and exclude it from
+	// active delivery.
+	active := validModelWebhook()
+	active.Name = "MySQL NULL secret active"
+	active.IsActive = true
+	if err := PostWebhook(&active, WebhookSecretPreserve, "", cipher); err != nil {
+		t.Fatalf("create no-secret active webhook: %v", err)
+	}
+	if err := db.Exec("UPDATE webhooks SET secret = NULL WHERE id = ?", active.Id).Error; err != nil {
+		t.Fatalf("force NULL legacy secret: %v", err)
+	}
+	activeBefore, err := GetActiveWebhooks()
+	if err != nil || len(activeBefore) != 1 {
+		t.Fatalf("GetActiveWebhooks before deactivation = %+v, err=%v, want exactly one", activeBefore, err)
+	}
+	deactivate := active
+	deactivate.IsActive = false
+	if err := PutWebhook(&deactivate, WebhookSecretPreserve, "", cipher); err != nil {
+		t.Fatalf("deactivate MySQL NULL-secret webhook: %v", err)
+	}
+	persisted := loadOnlyWebhook(t, active.Id)
+	if persisted.IsActive {
+		t.Fatal("MySQL: deactivation of a NULL-secret webhook did not persist")
+	}
+	activeAfter, err := GetActiveWebhooks()
+	if err != nil || len(activeAfter) != 0 {
+		t.Fatalf("GetActiveWebhooks after deactivation = %+v, err=%v, want none", activeAfter, err)
+	}
+	endpointsAfter, err := ActiveWebhookEndpoints(cipher)
+	if err != nil || len(endpointsAfter) != 0 {
+		t.Fatalf("ActiveWebhookEndpoints after deactivation = %+v, err=%v, want none", endpointsAfter, err)
+	}
+
+	// A genuine no-op resubmission on a NULL-secret (now normalized to '')
+	// row must still succeed under MySQL's default (non-CLIENT_FOUND_ROWS)
+	// changed-rows semantics.
+	noOpProbe := db.Model(&Webhook{}).
+		Where("id = ?", persisted.Id).
+		Update("name", persisted.Name)
+	if noOpProbe.Error != nil {
+		t.Fatalf("probe MySQL changed-rows semantics: %v", noOpProbe.Error)
+	}
+	if noOpProbe.RowsAffected != 0 {
+		t.Fatalf("MySQL test requires changed-rows semantics, got %d affected", noOpProbe.RowsAffected)
+	}
+	noop := persisted
+	if err := PutWebhook(&noop, WebhookSecretPreserve, "", cipher); err != nil {
+		t.Fatalf("identical no-op update on MySQL NULL-secret row: %v", err)
+	}
+
+	// A missing row must not be mistaken for a MySQL changed-row no-op.
+	missing := validModelWebhook()
+	missing.Id = 999999999
+	if err := PutWebhook(&missing, WebhookSecretPreserve, "", cipher); !errors.Is(err, gorm.ErrRecordNotFound) {
+		t.Fatalf("missing MySQL webhook update error = %v, want record not found", err)
+	}
+
+	// Simulate a conflicting writer changing the row after the caller loaded
+	// it but before PutWebhook starts its transaction. The resulting ambiguous
+	// plaintext+ciphertext state must fail closed rather than being mistaken
+	// for a changed-row no-op and overwritten.
+	conflict := validModelWebhook()
+	conflict.Name = "MySQL NULL conflict source"
+	if err := PostWebhook(&conflict, WebhookSecretReplace, testWebhookSecret, cipher); err != nil {
+		t.Fatalf("seed MySQL conflict webhook: %v", err)
+	}
+	conflictBefore := loadOnlyWebhook(t, conflict.Id)
+	if err := db.Exec("UPDATE webhooks SET secret = ? WHERE id = ?", testWebhookReplacement, conflict.Id).Error; err != nil {
+		t.Fatalf("simulate conflicting MySQL credential write: %v", err)
+	}
+	conflictingUpdate := conflictBefore
+	conflictingUpdate.Name = "mysql-null-secret-conflict"
+	if err := PutWebhook(&conflictingUpdate, WebhookSecretPreserve, "", cipher); !errors.Is(err, ErrWebhookCredentialInvalidState) {
+		t.Fatalf("conflicting MySQL update error = %v, want invalid state", err)
+	}
+	conflictAfter := loadOnlyWebhook(t, conflict.Id)
+	if conflictAfter.Name != conflictBefore.Name || conflictAfter.SecretCiphertext != conflictBefore.SecretCiphertext {
+		t.Fatal("conflicting MySQL update changed metadata or ciphertext")
+	}
+	var conflictRawSecret string
+	if err := db.Raw("SELECT secret FROM webhooks WHERE id = ?", conflict.Id).Row().Scan(&conflictRawSecret); err != nil {
+		t.Fatalf("read conflicting MySQL secret: %v", err)
+	}
+	if conflictRawSecret != testWebhookReplacement {
+		t.Fatal("conflicting MySQL credential state was overwritten")
+	}
+
+	// Rollback must accept a NULL legacy secret alongside a valid
+	// ciphertext instead of rejecting it as an unexpected row change.
+	encrypted := validModelWebhook()
+	encrypted.Name = "MySQL NULL secret with ciphertext"
+	if err := PostWebhook(&encrypted, WebhookSecretReplace, testWebhookSecret, cipher); err != nil {
+		t.Fatalf("seed MySQL encrypted webhook: %v", err)
+	}
+	if err := db.Exec("UPDATE webhooks SET secret = NULL WHERE id = ?", encrypted.Id).Error; err != nil {
+		t.Fatalf("force NULL legacy secret alongside MySQL ciphertext: %v", err)
+	}
+	result, err := RollbackWebhookSecrets(cipher)
+	if !errors.Is(err, ErrWebhookCredentialInvalidState) {
+		t.Fatalf("rollback accepted conflicting MySQL credential state: result=%+v err=%v", result, err)
+	}
+	if err := db.Exec("UPDATE webhooks SET secret = '' WHERE id = ?", conflict.Id).Error; err != nil {
+		t.Fatalf("repair synthetic MySQL conflict before rollback: %v", err)
+	}
+	result, err = RollbackWebhookSecrets(cipher)
+	if err != nil || result.Updated != 5 || result.Unchanged != 4 {
+		t.Fatalf("roll back MySQL NULL-secret+ciphertext row: result=%+v err=%v", result, err)
+	}
+	var restoredSecret, restoredCiphertext string
+	if err := db.Raw("SELECT secret, secret_ciphertext FROM webhooks WHERE id = ?", encrypted.Id).
+		Row().Scan(&restoredSecret, &restoredCiphertext); err != nil {
+		t.Fatalf("read rolled-back MySQL row: %v", err)
+	}
+	if restoredSecret != testWebhookSecret || restoredCiphertext != "" {
+		t.Fatalf("MySQL rollback did not restore plaintext and clear ciphertext: secret=%q ciphertext=%q", restoredSecret, restoredCiphertext)
 	}
 }

@@ -328,7 +328,7 @@ jobs:
       - name: Test MySQL driver and migrations
         env:
           GOPHISHFR_MYSQL_TEST_DSN: gophishfr:gophishfr_test@tcp(127.0.0.1:3306)/gophishfr_test?parseTime=true
-        run: go test ./models -run '^TestMySQL(DriverIntegration|IMAPCredentialLifecycle|SMTPCredentialLifecycle|SMTPCredentialStorageBoundsNonStrict)$' -count=1
+        run: go test ./models -run '^TestMySQL(DriverIntegration|IMAPCredentialLifecycle|SMTPCredentialLifecycle|SMTPCredentialStorageBoundsNonStrict|WebhookCredential.*)$' -count=1
 
   go-race:
     name: Go test (race)

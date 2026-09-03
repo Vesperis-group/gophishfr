@@ -2,6 +2,7 @@ package models
 
 import (
 	"bytes"
+	"database/sql"
 	"errors"
 	"fmt"
 	"strconv"
@@ -264,6 +265,69 @@ func verifyWebhookCredentialStorage(
 	return nil
 }
 
+// storedWebhookRow captures every persisted webhooks column that PostWebhook
+// and PutWebhook write: the tri-state secret pair plus every mutable
+// metadata field (name, URL, active state). Secret deliberately remains a
+// sql.NullString here rather than being normalized with COALESCE: runtime
+// writes always set a concrete empty string, and their final verification must
+// prove that exact state was persisted. Offline migration/rollback reads use
+// storedWebhookCredential instead, where NULL and empty are intentionally
+// normalized because both are valid legacy-empty source states.
+type storedWebhookRow struct {
+	ID               int64          `gorm:"column:id"`
+	Name             string         `gorm:"column:name"`
+	URL              string         `gorm:"column:url"`
+	IsActive         bool           `gorm:"column:is_active"`
+	Secret           sql.NullString `gorm:"column:secret"`
+	SecretCiphertext string         `gorm:"column:secret_ciphertext"`
+}
+
+func readWebhookRowStorage(transaction *gorm.DB, id int64) (storedWebhookRow, error) {
+	var stored storedWebhookRow
+	if err := transaction.Raw(`
+		SELECT
+			id,
+			name,
+			url,
+			is_active,
+			secret,
+			COALESCE(secret_ciphertext, '') AS secret_ciphertext
+		FROM webhooks
+		WHERE id = ?
+	`, id).Scan(&stored).Error; err != nil {
+		return storedWebhookRow{}, err
+	}
+	if stored.ID != id {
+		return storedWebhookRow{}, gorm.ErrRecordNotFound
+	}
+	return stored, nil
+}
+
+// verifyWebhookRowStorage re-reads want.ID inside transaction and fails
+// closed with ErrWebhookCredentialStorageMismatch unless every column --
+// name, URL, active state, legacy secret (including NULL-ness), and ciphertext
+// -- exactly matches want. Checking only the secret columns is not enough: a
+// guarded UPDATE whose WHERE clause silently matched zero rows (for example
+// because a legacy NULL secret escaped a predicate that literally compared
+// secret to an empty string) still leaves the old secret state in place, which
+// trivially still equals what a preserve/no-op intended, so a secret-only check
+// cannot tell that an intended metadata change -- such as deactivating a
+// webhook -- was never actually written. Comparing every column this package
+// can write is what distinguishes that silent failure from a genuine matched
+// no-op, including MySQL's default "changed rows" RowsAffected semantics,
+// where zero rows reported changed can still mean the WHERE clause matched and
+// every column already held the intended value.
+func verifyWebhookRowStorage(transaction *gorm.DB, want storedWebhookRow) error {
+	stored, err := readWebhookRowStorage(transaction, want.ID)
+	if err != nil {
+		return err
+	}
+	if stored != want {
+		return ErrWebhookCredentialStorageMismatch
+	}
+	return nil
+}
+
 // MigrateWebhookSecrets performs the explicit offline plaintext-to-ciphertext
 // data migration. Schema migration remains a separate Goose operation.
 func MigrateWebhookSecrets(credentialCipher *credentials.Cipher) (WebhookCredentialMigrationResult, error) {
@@ -445,7 +509,7 @@ func rollbackWebhookCredentialRow(
 	update := transaction.Exec(`
 		UPDATE webhooks
 		SET secret = ?
-		WHERE id = ? AND secret = '' AND secret_ciphertext = ?
+		WHERE id = ? AND (secret IS NULL OR secret = '') AND secret_ciphertext = ?
 	`, plaintext, row.ID, row.SecretCiphertext)
 	if update.Error != nil {
 		return update.Error

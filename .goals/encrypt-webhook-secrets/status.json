@@ -1,7 +1,7 @@
 {
   "goal_id": "encrypt-webhook-secrets",
   "status": "inspecting",
-  "iteration": 1,
+  "iteration": 2,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "aa842b799004f369733444467712e4acd9b62cdc",
@@ -20,6 +20,20 @@
       "result": "pass",
       "completed_at": "2026-09-03T08:07:28+02:00",
       "summary": "All acceptance criteria verified with comprehensive evidence: cryptographic boundary intact (shared keyring, ID-bound AAD, record-copy failure), transaction safety proven (read-back verification, plaintext-insert trigger test, concurrent-mutation detection), API isolation verified (tri-state decoder, write-only responses, PermissionModifySystem enforcement), frontend never leaks secrets (no prefill, explicit controls, browser test confirmation), zero-outbound guarantee tested (credential failures excluded before http.Client.Do, multiple failure modes covered), lifecycle operations complete (migration idempotence, rollback atomicity, schema Down guarded), comprehensive test coverage (764+ new lines, SQLite/MySQL/API/browser/Docker verified), documentation thorough (threat model, matrices, prerequisites, key loss handling). IMAP/SMTP regression fixed (goose.DownTo instead of assumed version). No issues requiring fixes."
+    },
+    {
+      "iteration": 1,
+      "role": "security-review",
+      "result": "fail",
+      "completed_at": "2026-09-03T08:14:00+02:00",
+      "summary": "NULL legacy secret rows can report successful metadata updates without changing the row, and rollback rejects valid NULL+ciphertext states."
+    },
+    {
+      "iteration": 2,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-03T15:25:00+02:00",
+      "summary": "Made runtime and rollback predicates NULL-aware, added exact in-transaction verification of metadata and concrete credential storage, proved NULL preserve/clear/replace/deactivation/migration/rollback/no-op/conflict behavior on SQLite and real MySQL, and broadened CI to run every MySQL webhook credential test. Full verification, browser, Docker lifecycle, fuzzing, dependency audits, and security scanners completed without a new finding."
     }
   ]
 }
