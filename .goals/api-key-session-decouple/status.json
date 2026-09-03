@@ -1,6 +1,6 @@
 {
   "goal_id": "api-key-session-decouple",
-  "status": "building",
+  "status": "passed",
   "iteration": 1,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
@@ -13,6 +13,13 @@
       "result": "completed",
       "completed_at": "2026-09-03T20:25:00+02:00",
       "summary": "Added deterministic dual API-key/session authentication with explicit-credential conflict rejection, shared credential-aware CSRF selection, unchanged RBAC and JSON API behavior, and session-only first-party HTTP transport. Removed the API key from common browser state while retaining its dedicated settings and API management exposure, regenerated reproducible assets, and added exhaustive middleware, controller, browser, Docker, documentation, and regression evidence. Full verification, race, browser, production-container, dependency, and security scanner gates completed with no new finding."
+    },
+    {
+      "iteration": 1,
+      "role": "inspector",
+      "result": "passed",
+      "completed_at": "2026-09-03T20:42:23+02:00",
+      "summary": "All 26 acceptance criteria verified satisfied. Shared extractor used by both API auth and CSRF. Explicit credential mechanism selected before validation with no fallback. Session auth succeeds when no explicit credential present. Invalid/empty/ambiguous explicit credentials always fail (401), never inherit session authority. RBAC and error parity preserved through unchanged middleware chain. Frontend transport decoupled from API keys (same-origin cookies, no Authorization header, no global exposure). CSRF protection properly aware of credential type: session requests protected, explicit API keys remain exempt. Comprehensive test coverage across middleware, controller, browser, and real Docker container. All quality gates passed. No credential leaks in errors or logs. Plaintext storage and settings exception documented honestly."
     }
   ]
 }
