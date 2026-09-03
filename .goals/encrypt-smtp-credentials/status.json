@@ -95,6 +95,13 @@
       "result": "completed",
       "completed_at": "2026-09-03T05:36:44+02:00",
       "summary": "Made the successful-controls browser scenario await its flash callback before the failure/retry scenario resets event state."
+    },
+    {
+      "iteration": 4,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-03T05:45:00+02:00",
+      "summary": "Flash-event race condition fixed correctly. Asynchronous success callback now awaited before test state reset, eliminating timing-dependent race on slow CI workers. Only test code changed; no product code, assertions, timeouts, or SMTP contract regressions. All 70+ goal criteria remain met."
     }
   ]
 }
