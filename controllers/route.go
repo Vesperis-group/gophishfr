@@ -38,6 +38,7 @@ type AdminServerOption func(*AdminServer)
 type AdminServer struct {
 	server           *http.Server
 	worker           worker.Worker
+	workerConfigured bool
 	config           config.AdminServer
 	limiter          *ratelimit.PostLimiter
 	credentialCipher *credentials.Cipher
@@ -68,11 +69,11 @@ var defaultTLSConfig = &tls.Config{
 func WithWorker(w worker.Worker) AdminServerOption {
 	return func(as *AdminServer) {
 		as.worker = w
+		as.workerConfigured = true
 	}
 }
 
-// WithCredentialCipher injects the immutable IMAP credential cipher into the
-// administrative API.
+// WithCredentialCipher injects the immutable application credential cipher.
 func WithCredentialCipher(credentialCipher *credentials.Cipher) AdminServerOption {
 	return func(as *AdminServer) {
 		as.credentialCipher = credentialCipher
@@ -82,20 +83,21 @@ func WithCredentialCipher(credentialCipher *credentials.Cipher) AdminServerOptio
 // NewAdminServer returns a new instance of the AdminServer with the
 // provided config and options applied.
 func NewAdminServer(config config.AdminServer, options ...AdminServerOption) *AdminServer {
-	defaultWorker, _ := worker.New()
 	defaultServer := &http.Server{
 		ReadTimeout: 10 * time.Second,
 		Addr:        config.ListenURL,
 	}
 	defaultLimiter := ratelimit.NewPostLimiter()
 	as := &AdminServer{
-		worker:  defaultWorker,
 		server:  defaultServer,
 		limiter: defaultLimiter,
 		config:  config,
 	}
 	for _, opt := range options {
 		opt(as)
+	}
+	if !as.workerConfigured {
+		as.worker, _ = worker.New(worker.WithCredentialCipher(as.credentialCipher))
 	}
 	as.registerRoutes()
 	return as

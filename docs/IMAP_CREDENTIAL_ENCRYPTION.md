@@ -4,9 +4,11 @@ GophishFR stores IMAP passwords as versioned AES-256-GCM envelopes produced by
 [`internal/credentials`](../internal/credentials). The envelope is authenticated
 for the owning user, so moving it to another user's row makes it unusable.
 
-This feature is intentionally limited to IMAP passwords. SMTP credentials,
-webhook data, captured event details, API keys, and other secrets remain
-separate security backlog items and are not changed by this migration.
+This feature is intentionally limited to IMAP passwords. SMTP passwords use
+the same keyring through their separate
+[`SMTP_CREDENTIAL_ENCRYPTION.md`](SMTP_CREDENTIAL_ENCRYPTION.md) lifecycle.
+Webhook data, captured event details, API keys, and other secrets remain
+separate security backlog items.
 
 ## Safety requirements
 

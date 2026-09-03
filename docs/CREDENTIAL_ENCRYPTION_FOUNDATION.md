@@ -7,10 +7,10 @@ comment (`internal/credentials/doc.go`), which is the authoritative reference
 for exact behaviour. This page summarizes it for readers who are not
 browsing `go doc`.
 
-The first production integration is IMAP-password-only and is documented in
-[`IMAP_CREDENTIAL_ENCRYPTION.md`](IMAP_CREDENTIAL_ENCRYPTION.md). SMTP,
-webhook, and other credentials remain outside this foundation and are not
-encrypted by that integration.
+The IMAP and SMTP password integrations are documented in
+[`IMAP_CREDENTIAL_ENCRYPTION.md`](IMAP_CREDENTIAL_ENCRYPTION.md) and
+[`SMTP_CREDENTIAL_ENCRYPTION.md`](SMTP_CREDENTIAL_ENCRYPTION.md). Webhook and
+other credentials remain outside this foundation.
 
 ## Threat model
 
@@ -166,10 +166,10 @@ synthetic 32-byte key for local experimentation:
 openssl rand -base64 32
 ```
 
-The IMAP integration reads `GOPHISHFR_CREDENTIAL_KEYRING_FILE` once at process
+The application reads `GOPHISHFR_CREDENTIAL_KEYRING_FILE` once at process
 bootstrap. Its absence is compatible with installations that do not use
-encrypted IMAP credentials; IMAP secret reads and writes fail closed without
-it. See the operational guide linked above.
+encrypted IMAP or SMTP credentials; encrypted secret reads and writes fail
+closed without it. See the operational guides linked above.
 
 ## AAD / Context
 

@@ -6,6 +6,7 @@ import (
 	"io"
 	"time"
 
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	"github.com/gophish/gomail"
 )
 
@@ -133,7 +134,7 @@ func (mm *mockMessage) defaultDialer() (Dialer, error) {
 	return newMockDialer(), nil
 }
 
-func (mm *mockMessage) GetDialer() (Dialer, error) {
+func (mm *mockMessage) GetDialer(_ *credentials.Cipher) (Dialer, error) {
 	return mm.getdialer()
 }
 

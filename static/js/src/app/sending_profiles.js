@@ -88,6 +88,10 @@ function sendTestEmail() {
             headers: headerRecords,
         }
     }
+    if (activeProfileId != null) {
+        test_email_request.smtp.id = activeProfileId
+        test_email_request.smtp.name = document.getElementById("name").value
+    }
     btnHtml = document.getElementById("sendTestModalSubmit").innerHTML
     document.getElementById("sendTestModalSubmit").innerHTML = '<i class="fa fa-spinner fa-spin"></i> Sending'
     // Send the test email
@@ -302,7 +306,9 @@ function applyProfileFields(profile, name) {
     document.getElementById("from").value = profile.from_address
     document.getElementById("host").value = profile.host
     document.getElementById("username").value = profile.username || ""
-    document.getElementById("password").value = profile.password || ""
+    // Stored SMTP passwords are write-only. Editing and copying always start
+    // with an empty field; an empty update preserves an existing credential.
+    document.getElementById("password").value = ""
     document.getElementById("ignore_cert_errors").checked = profile.ignore_cert_errors
 }
 

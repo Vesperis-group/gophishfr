@@ -21,6 +21,7 @@ type ServerOption func(*Server)
 type Server struct {
 	handler          http.Handler
 	worker           worker.Worker
+	workerConfigured bool
 	limiter          *ratelimit.PostLimiter
 	credentialCipher *credentials.Cipher
 }
@@ -28,14 +29,15 @@ type Server struct {
 // NewServer returns a new instance of the API handler with the provided
 // options applied.
 func NewServer(options ...ServerOption) *Server {
-	defaultWorker, _ := worker.New()
 	defaultLimiter := ratelimit.NewPostLimiter()
 	as := &Server{
-		worker:  defaultWorker,
 		limiter: defaultLimiter,
 	}
 	for _, opt := range options {
 		opt(as)
+	}
+	if !as.workerConfigured {
+		as.worker, _ = worker.New(worker.WithCredentialCipher(as.credentialCipher))
 	}
 	as.registerRoutes()
 	return as
@@ -45,6 +47,7 @@ func NewServer(options ...ServerOption) *Server {
 func WithWorker(w worker.Worker) ServerOption {
 	return func(as *Server) {
 		as.worker = w
+		as.workerConfigured = true
 	}
 }
 
@@ -54,8 +57,7 @@ func WithLimiter(limiter *ratelimit.PostLimiter) ServerOption {
 	}
 }
 
-// WithCredentialCipher injects the immutable cipher used only for IMAP
-// credential persistence.
+// WithCredentialCipher injects the immutable application credential cipher.
 func WithCredentialCipher(credentialCipher *credentials.Cipher) ServerOption {
 	return func(as *Server) {
 		as.credentialCipher = credentialCipher

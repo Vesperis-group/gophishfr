@@ -5,6 +5,7 @@ import (
 	"net/mail"
 
 	"github.com/Vesperis-group/gophishfr/config"
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	log "github.com/Vesperis-group/gophishfr/logger"
 	"github.com/Vesperis-group/gophishfr/mailer"
 	"github.com/gophish/gomail"
@@ -18,19 +19,20 @@ const PreviewPrefix = "preview-"
 // to send a test email to test an SMTP connection.
 // This type implements the mailer.Mail interface.
 type EmailRequest struct {
-	Id          int64        `json:"-"`
-	Template    Template     `json:"template"`
-	TemplateId  int64        `json:"-"`
-	Page        Page         `json:"page"`
-	PageId      int64        `json:"-"`
-	SMTP        SMTP         `json:"smtp"`
-	URL         string       `json:"url"`
-	Tracker     string       `json:"tracker" gorm:"-"`
-	TrackingURL string       `json:"tracking_url" gorm:"-"`
-	UserId      int64        `json:"-"`
-	ErrorChan   chan (error) `json:"-" gorm:"-"`
-	RId         string       `json:"id"`
-	FromAddress string       `json:"-"`
+	Id                  int64        `json:"-"`
+	Template            Template     `json:"template"`
+	TemplateId          int64        `json:"-"`
+	Page                Page         `json:"page"`
+	PageId              int64        `json:"-"`
+	SMTP                SMTP         `json:"smtp"`
+	URL                 string       `json:"url"`
+	Tracker             string       `json:"tracker" gorm:"-"`
+	TrackingURL         string       `json:"tracking_url" gorm:"-"`
+	UserId              int64        `json:"-"`
+	ErrorChan           chan (error) `json:"-" gorm:"-"`
+	RId                 string       `json:"id"`
+	FromAddress         string       `json:"-"`
+	runtimeSMTPPassword string       `gorm:"-"`
 	BaseRecipient
 }
 
@@ -178,6 +180,15 @@ func (s *EmailRequest) Generate(msg *gomail.Message) error {
 }
 
 // GetDialer returns the mailer.Dialer for the underlying SMTP object
-func (s *EmailRequest) GetDialer() (mailer.Dialer, error) {
-	return s.SMTP.GetDialer()
+func (s *EmailRequest) GetDialer(credentialCipher *credentials.Cipher) (mailer.Dialer, error) {
+	if s.runtimeSMTPPassword != "" {
+		return s.SMTP.getDialer(s.runtimeSMTPPassword)
+	}
+	return s.SMTP.GetDialer(credentialCipher)
+}
+
+// SetRuntimeSMTPPassword supplies a request-only password for a test email.
+// The value is neither serialized nor persisted.
+func (s *EmailRequest) SetRuntimeSMTPPassword(password string) {
+	s.runtimeSMTPPassword = password
 }
