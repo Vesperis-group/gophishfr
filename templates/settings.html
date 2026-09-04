@@ -28,15 +28,21 @@
             <br />
             {{end}}
             <div class="row">
-                <label for="api_key" class="col-sm-2 form-label">API Key:</label>
+                <div class="col-sm-2 form-label">API Key:</div>
                 <div class="col-md-6">
-                    <input type="text" id="api_key" onclick="this.select();" value="{{.User.ApiKey}}"
-                        class="form-control" readonly />
+                    <p>API keys cannot be displayed after creation. Resetting issues a replacement and immediately invalidates the old key.</p>
                 </div>
                 <form id="apiResetForm">
                     <button class="btn btn-primary"><i class="fa fa-refresh" type="submit"></i> Reset</button>
                     <input type="hidden" name="csrf_token" value="{{.Token}}" />
                 </form>
+            </div>
+            <div id="apiKeyReveal" class="alert alert-warning d-none" role="status" aria-live="polite">
+                <strong>Copy this new API key now.</strong>
+                It cannot be displayed again after you close this notice or reload.
+                <code id="apiKeyRevealValue"></code>
+                <button type="button" class="btn btn-secondary" id="copyApiKey">Copy</button>
+                <button type="button" class="btn btn-secondary" id="closeApiKeyReveal">Close</button>
             </div>
             <br />
             <form id="settingsForm">

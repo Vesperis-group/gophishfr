@@ -61,19 +61,14 @@ are non-ambient authority. Authentication and RBAC still validate them, so an
 empty, invalid, or conflicting attempt cannot gain access. Existing CORS,
 OPTIONS, status, response, and unsafe-method compatibility remains unchanged.
 
-## Temporary API-key management exposure
+## Verifier storage and reveal-once management
 
-The API key is absent from the common `user` JavaScript object and standard
-administration pages. The following legacy management/storage contracts remain
-intentionally unchanged in this change:
+Runtime authentication uses only indexed HMAC verifiers from the dedicated API
+verifier keyring. It never reads or falls back to the nullable legacy
+plaintext column. User GET/PUT responses and settings loads contain no token or
+verifier metadata. Creation and reset reveal the generated token only in their
+immediate successful response; a reset invalidates the old value at commit.
 
-- plaintext `users.api_key` storage and parameterized lookup;
-- the dedicated settings API-key input and reset workflow;
-- `/api/users` API-key serialization;
-- `/api/reset` returning the newly generated key; and
-- raw, query, and form API-key transports.
-
-Verifier/HMAC storage, pepper/keyring support, and reveal-once behavior belong
-to the follow-up API-key verifier migration. Do not describe browser exposure
-as completely eliminated while the dedicated settings and API-management
-surfaces still reveal keys.
+See [API-key HMAC verifiers](API_KEY_VERIFIER.md) for keyring setup, the
+explicit irreversible offline migration, backup-only rollback, pepper
+rotation, missing-key behavior, and limitations.

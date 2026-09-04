@@ -26,13 +26,23 @@ mkdir -p "${workdir}/file-state" "${workdir}/env-state" "${workdir}/missing-stat
 chmod 0777 "${workdir}/file-state" "${workdir}/env-state" "${workdir}/missing-state"
 printf '%s\n' "${secret}" >"${workdir}/admin-password"
 chmod 0400 "${workdir}/admin-password"
+python3 - "${workdir}/api-verifier-keyring.json" <<'PY'
+import base64, json, os, sys
+with open(sys.argv[1], "w", encoding="utf-8") as output:
+    json.dump({"version": 1, "active_key_id": "bootstrap-api",
+               "keys": [{"id": "bootstrap-api",
+                         "key": base64.b64encode(os.urandom(32)).decode("ascii")}]}, output)
+PY
+chmod 0444 "${workdir}/api-verifier-keyring.json"
 
 docker build --tag "${image}" .
 
 docker run -d --name "${file_container}" \
     --mount "type=bind,src=${workdir}/admin-password,dst=/run/secrets/gophishfr_admin_password,readonly" \
+    --mount "type=bind,src=${workdir}/api-verifier-keyring.json,dst=/run/secrets/gophishfr-api-verifier,readonly" \
     --mount "type=bind,src=${workdir}/file-state,dst=/state" \
     --env GOPHISH_INITIAL_ADMIN_PASSWORD_FILE=/run/secrets/gophishfr_admin_password \
+    --env GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE=/run/secrets/gophishfr-api-verifier \
     --env DB_FILE_PATH=/state/gophish.db \
     --env ADMIN_USE_TLS=false \
     "${image}" >/dev/null
@@ -62,6 +72,8 @@ fi
 
 docker run -d --name "${restart_container}" \
     --mount "type=bind,src=${workdir}/file-state,dst=/state" \
+    --mount "type=bind,src=${workdir}/api-verifier-keyring.json,dst=/run/secrets/gophishfr-api-verifier,readonly" \
+    --env GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE=/run/secrets/gophishfr-api-verifier \
     --env DB_FILE_PATH=/state/gophish.db \
     --env ADMIN_USE_TLS=false \
     "${image}" >/dev/null
@@ -81,7 +93,9 @@ fi
 
 docker run -d --name "${env_container}" \
     --mount "type=bind,src=${workdir}/env-state,dst=/state" \
+    --mount "type=bind,src=${workdir}/api-verifier-keyring.json,dst=/run/secrets/gophishfr-api-verifier,readonly" \
     --env "GOPHISH_INITIAL_ADMIN_PASSWORD=${secret}" \
+    --env GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE=/run/secrets/gophishfr-api-verifier \
     --env DB_FILE_PATH=/state/gophish.db \
     --env ADMIN_USE_TLS=false \
     "${image}" >/dev/null
@@ -100,6 +114,8 @@ docker stop "${env_container}" >/dev/null
 
 if docker run --name "${missing_container}" \
     --mount "type=bind,src=${workdir}/missing-state,dst=/state" \
+    --mount "type=bind,src=${workdir}/api-verifier-keyring.json,dst=/run/secrets/gophishfr-api-verifier,readonly" \
+    --env GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE=/run/secrets/gophishfr-api-verifier \
     --env DB_FILE_PATH=/state/gophish.db \
     --env ADMIN_USE_TLS=false \
     "${image}" >/dev/null 2>&1; then

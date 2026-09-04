@@ -39,6 +39,7 @@ import (
 	"github.com/Vesperis-group/gophishfr/controllers"
 	"github.com/Vesperis-group/gophishfr/dialer"
 	"github.com/Vesperis-group/gophishfr/imap"
+	"github.com/Vesperis-group/gophishfr/internal/apikey"
 	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	log "github.com/Vesperis-group/gophishfr/logger"
 	"github.com/Vesperis-group/gophishfr/middleware"
@@ -80,6 +81,10 @@ var (
 		"rollback-webhook-secrets",
 		"Offline: decrypt webhook secrets before downgrading the schema or binary.",
 	).Bool()
+	migrateAPIKeys = kingpin.Flag(
+		"migrate-api-keys",
+		"Offline irreversible migration: replace legacy API token plaintext with HMAC verifiers after stopping all writers and testing a backup.",
+	).Bool()
 	mode = kingpin.Flag("mode", fmt.Sprintf("Run the binary in one of the modes (%s, %s or %s)", modeAll, modeAdmin, modePhish)).
 		Default("all").Enum(modeAll, modeAdmin, modePhish)
 )
@@ -108,6 +113,12 @@ func main() {
 		log.Warnf("Please consider adding a contact_address entry in your config.json")
 	}
 	config.Version = string(version)
+	credentialKeyringAction := *migrateIMAPCredentials ||
+		*rollbackIMAPCredentials ||
+		*migrateSMTPCredentials ||
+		*rollbackSMTPCredentials ||
+		*migrateWebhookSecrets ||
+		*rollbackWebhookSecrets
 	credentialActions := 0
 	for _, selected := range []bool{
 		*migrateIMAPCredentials,
@@ -116,13 +127,14 @@ func main() {
 		*rollbackSMTPCredentials,
 		*migrateWebhookSecrets,
 		*rollbackWebhookSecrets,
+		*migrateAPIKeys,
 	} {
 		if selected {
 			credentialActions++
 		}
 	}
 	if credentialActions > 1 {
-		log.Fatal("credential migration and rollback actions are mutually exclusive")
+		log.Fatal("offline migration and rollback actions are mutually exclusive")
 	}
 	if *migrateIMAPCredentials || *rollbackIMAPCredentials {
 		if err := models.ValidateIMAPCredentialBackend(conf.DBName); err != nil {
@@ -136,6 +148,11 @@ func main() {
 	}
 	if *migrateWebhookSecrets || *rollbackWebhookSecrets {
 		if err := models.ValidateWebhookCredentialBackend(conf.DBName); err != nil {
+			log.Fatal(err)
+		}
+	}
+	if *migrateAPIKeys {
+		if err := models.ValidateAPIKeyVerifierBackend(conf.DBName); err != nil {
 			log.Fatal(err)
 		}
 	}
@@ -162,7 +179,15 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	if credentialActions != 0 && credentialCipher == nil {
+	apiKeyVerifier, err := loadAPIKeyVerifier()
+	if err != nil {
+		log.Fatal(err)
+	}
+	if *migrateAPIKeys && apiKeyVerifier == nil {
+		log.Fatal(models.ErrAPIKeyVerifierUnavailable)
+	}
+	models.SetAPIKeyVerifier(apiKeyVerifier)
+	if credentialKeyringAction && credentialCipher == nil {
 		switch {
 		case *migrateSMTPCredentials || *rollbackSMTPCredentials:
 			log.Fatal(models.ErrSMTPCredentialKeyringRequired)
@@ -184,11 +209,20 @@ func main() {
 	// of the exact same shared cipher every other credential path receives
 	// explicitly.
 	models.SetWebhookCredentialCipher(credentialCipher)
+	if *migrateAPIKeys {
+		result, err := models.MigrateAPIKeys(apiKeyVerifier)
+		if err != nil {
+			log.Fatal(err)
+		}
+		log.Infof("API verifier migration complete: %d rows updated, %d rows unchanged", result.Updated, result.Unchanged)
+		return
+	}
 	if *migrateIMAPCredentials || *rollbackIMAPCredentials {
 		result, err := runIMAPCredentialAction(credentialCipher, *rollbackIMAPCredentials)
 		if err != nil {
 			log.Fatal(err)
 		}
+
 		action := "migration"
 		if *rollbackIMAPCredentials {
 			action = "rollback"
@@ -277,6 +311,22 @@ func main() {
 		}
 	}
 
+}
+
+func loadAPIKeyVerifier() (*apikey.Service, error) {
+	path := os.Getenv(apikey.KeyringEnvironment)
+	if path == "" {
+		return nil, nil
+	}
+	keyring, err := apikey.LoadKeyringFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("load API verifier keyring: %w", err)
+	}
+	verifier, err := apikey.New(keyring)
+	if err != nil {
+		return nil, fmt.Errorf("initialize API verifier: %w", err)
+	}
+	return verifier, nil
 }
 
 func loadCredentialCipher() (*credentials.Cipher, error) {

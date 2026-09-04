@@ -831,7 +831,8 @@ func TestSQLiteSMTPCredentialDownPreservesSequence(t *testing.T) {
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatalf("set SQLite dialect: %v", err)
 	}
-	if err := goose.Down(db.DB(), testConfig.MigrationsPath); err != nil {
+	restoreTestUsersForAPIVerifierDown(t)
+	if err := goose.DownTo(db.DB(), testConfig.MigrationsPath, 20260903000000); err != nil {
 		t.Fatalf("roll back SMTP credential schema: %v", err)
 	}
 	insert, err := db.DB().Exec(`

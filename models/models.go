@@ -537,6 +537,9 @@ func Setup(c *config.Config) error {
 		return err
 	}
 	if userCount == 0 {
+		if _, verifierErr := currentAPIKeyVerifier(); verifierErr != nil {
+			return verifierErr
+		}
 		hash, hashErr := initialAdminPasswordHash()
 		if hashErr != nil {
 			return hashErr
@@ -550,12 +553,10 @@ func Setup(c *config.Config) error {
 		}
 
 		if envToken := os.Getenv(InitialAdminApiToken); envToken != "" {
-			adminUser.ApiKey = envToken
+			err = createUserWithToken(&adminUser, []byte(envToken))
 		} else {
-			adminUser.ApiKey = auth.GenerateSecureKey(auth.APIKeyLength)
+			_, err = CreateUserWithAPIKey(&adminUser)
 		}
-
-		err = db.Create(&adminUser).Error
 		if err != nil {
 			log.Error(err)
 			return err

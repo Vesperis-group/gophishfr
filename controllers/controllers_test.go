@@ -1,6 +1,7 @@
 package controllers
 
 import (
+	"crypto/rand"
 	"fmt"
 	"net/http/httptest"
 	"os"
@@ -9,6 +10,7 @@ import (
 
 	"github.com/Vesperis-group/gophishfr/auth"
 	"github.com/Vesperis-group/gophishfr/config"
+	"github.com/Vesperis-group/gophishfr/internal/apikey"
 	"github.com/Vesperis-group/gophishfr/models"
 )
 
@@ -23,6 +25,8 @@ type testContext struct {
 
 func setupTest(t *testing.T) *testContext {
 	t.Setenv(models.InitialAdminPassword, "synthetic-controller-test-password")
+	t.Setenv(models.InitialAdminApiToken, "synthetic-controller-api-token")
+	installTestAPIKeyVerifier(t)
 	wd, _ := os.Getwd()
 	fmt.Println(wd)
 	conf := &config.Config{
@@ -58,11 +62,11 @@ func setupTest(t *testing.T) *testContext {
 
 	// Create a second user to test account locked status
 	u2 := models.User{Username: "houdini", Hash: hash, AccountLocked: true}
-	if err := models.PutUser(&u2); err != nil {
+	if _, err := models.CreateUserWithAPIKey(&u2); err != nil {
 		t.Fatalf("error creating new user: %v", err)
 	}
 
-	ctx.apiKey = u.ApiKey
+	ctx.apiKey = "synthetic-controller-api-token"
 	// Start the phishing server
 	ctx.phishServer = httptest.NewUnstartedServer(NewPhishingServer(ctx.config.PhishConf).server.Handler)
 	ctx.phishServer.Config.Addr = ctx.config.PhishConf.ListenURL
@@ -75,8 +79,26 @@ func setupTest(t *testing.T) *testContext {
 	if err != nil {
 		t.Fatalf("error changing directories to setup asset discovery: %v", err)
 	}
+
 	createTestData(t)
 	return ctx
+}
+
+func installTestAPIKeyVerifier(t *testing.T) {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	keyring, err := apikey.NewKeyring("test-active", map[string][]byte{"test-active": key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	verifier, err := apikey.New(keyring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models.SetAPIKeyVerifier(verifier)
 }
 
 func tearDown(t *testing.T, ctx *testContext) {

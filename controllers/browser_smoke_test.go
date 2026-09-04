@@ -41,6 +41,7 @@ func TestBrowserSmoke(t *testing.T) {
 
 	t.Setenv(models.InitialAdminPassword, browserTestPassword)
 	t.Setenv(models.InitialAdminApiToken, "browser-test-api-token-not-a-secret")
+	installTestAPIKeyVerifier(t)
 
 	databaseDirectory := t.TempDir()
 	conf := &config.Config{

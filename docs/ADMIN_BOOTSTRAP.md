@@ -14,6 +14,13 @@ the process at it:
 GOPHISH_INITIAL_ADMIN_PASSWORD_FILE=/run/secrets/gophishfr_admin_password ./gophishfr
 ```
 
+Fresh bootstrap also requires the independent API verifier keyring configured
+through `GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE`. A supplied
+`GOPHISH_INITIAL_ADMIN_API_TOKEN` is stored only as an HMAC verifier; a
+generated bootstrap token is not logged or recoverable and should be replaced
+and revealed intentionally after sign-in. See
+[API-key HMAC verifiers](API_KEY_VERIFIER.md).
+
 For containers, mount the file read-only at that path. The application follows
 normal symlinks, including symlinks used by mounted Kubernetes-style secrets.
 It does not change or copy the file.

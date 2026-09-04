@@ -599,7 +599,8 @@ func TestSQLiteWebhookCredentialDownPreservesSequence(t *testing.T) {
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatalf("set SQLite dialect: %v", err)
 	}
-	if err := goose.Down(db.DB(), testConfig.MigrationsPath); err != nil {
+	restoreTestUsersForAPIVerifierDown(t)
+	if err := goose.DownTo(db.DB(), testConfig.MigrationsPath, 20260903010000); err != nil {
 		t.Fatalf("roll back webhook credential schema: %v", err)
 	}
 	insert, err := db.DB().Exec(`
@@ -673,6 +674,9 @@ func TestMySQLWebhookCredentialLifecycle(t *testing.T) {
 	}
 	if err := goose.SetDialect("mysql"); err != nil {
 		t.Fatalf("set MySQL dialect: %v", err)
+	}
+	if err := goose.DownTo(db.DB(), conf.MigrationsPath, 20260903020000); err != nil {
+		t.Fatalf("remove later API verifier migration: %v", err)
 	}
 	if err := goose.Down(db.DB(), conf.MigrationsPath); err == nil {
 		t.Fatal("MySQL webhook schema Down accepted ciphertext")

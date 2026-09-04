@@ -30,13 +30,23 @@ admin_password="synthetic-container-session-password"
 admin_api_key="container-api-session-contract-token"
 printf '%s\n' "${admin_password}" >"${workdir}/admin-password"
 chmod 0400 "${workdir}/admin-password"
+python3 - "${workdir}/api-verifier-keyring.json" <<'PY'
+import base64, json, os, sys
+with open(sys.argv[1], "w", encoding="utf-8") as output:
+    json.dump({"version": 1, "active_key_id": "session-api",
+               "keys": [{"id": "session-api",
+                         "key": base64.b64encode(os.urandom(32)).decode("ascii")}]}, output)
+PY
+chmod 0444 "${workdir}/api-verifier-keyring.json"
 
 docker run --detach --name "${container}" \
     --publish 127.0.0.1::3333 \
     --mount "type=bind,src=${workdir}/admin-password,dst=/run/secrets/gophishfr_admin_password,readonly" \
+    --mount "type=bind,src=${workdir}/api-verifier-keyring.json,dst=/run/secrets/gophishfr-api-verifier,readonly" \
     --mount "type=bind,src=${workdir}/state,dst=/state" \
     --env GOPHISH_INITIAL_ADMIN_PASSWORD_FILE=/run/secrets/gophishfr_admin_password \
     --env "GOPHISH_INITIAL_ADMIN_API_TOKEN=${admin_api_key}" \
+    --env GOPHISHFR_API_KEY_VERIFIER_KEYRING_FILE=/run/secrets/gophishfr-api-verifier \
     --env DB_FILE_PATH=/state/gophish.db \
     --env ADMIN_USE_TLS=false \
     "${image}" >/dev/null
@@ -236,8 +246,8 @@ fi
 
 curl --silent --show-error --fail --cookie "${jar}" "${base_url}/settings" \
     --output "${workdir}/settings.html"
-if ! grep -Fq "${admin_api_key}" "${workdir}/settings.html"; then
-    echo "dedicated settings key exposure changed unexpectedly" >&2
+if grep -Fq "${admin_api_key}" "${workdir}/settings.html"; then
+    echo "settings exposed the existing API key" >&2
     exit 1
 fi
 

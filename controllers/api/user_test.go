@@ -14,7 +14,12 @@ import (
 	"github.com/Vesperis-group/gophishfr/models"
 )
 
-func createUnpriviledgedUser(t *testing.T, slug string) *models.User {
+type testAPIUser struct {
+	*models.User
+	ApiKey string
+}
+
+func createUnpriviledgedUser(t *testing.T, slug string) *testAPIUser {
 	role, err := models.GetRoleBySlug(slug)
 	if err != nil {
 		t.Fatalf("error getting role by slug: %v", err)
@@ -22,15 +27,14 @@ func createUnpriviledgedUser(t *testing.T, slug string) *models.User {
 	unauthorizedUser := &models.User{
 		Username: "foo",
 		Hash:     "bar",
-		ApiKey:   "12345",
 		Role:     role,
 		RoleID:   role.ID,
 	}
-	err = models.PutUser(unauthorizedUser)
+	apiKey, err := models.CreateUserWithAPIKey(unauthorizedUser)
 	if err != nil {
 		t.Fatalf("error saving unpriviledged user: %v", err)
 	}
-	return unauthorizedUser
+	return &testAPIUser{User: unauthorizedUser, ApiKey: apiKey}
 }
 
 func TestGetUsers(t *testing.T) {
@@ -85,7 +89,7 @@ func TestCreateUser(t *testing.T) {
 		t.Fatalf("unexpected error code received. expected %d got %d", expected, w.Code)
 	}
 
-	got := &models.User{}
+	got := &userCreationResponse{}
 	err = json.NewDecoder(w.Body).Decode(got)
 	if err != nil {
 		t.Fatalf("error decoding user payload: %v", err)
@@ -95,6 +99,9 @@ func TestCreateUser(t *testing.T) {
 	}
 	if got.Role.Slug != payload.Role {
 		t.Fatalf("unexpected role received. expected %s got %s", payload.Role, got.Role.Slug)
+	}
+	if got.APIKey == "" {
+		t.Fatal("creation response did not reveal the generated API key")
 	}
 }
 
@@ -130,6 +137,7 @@ func TestModifyUser(t *testing.T) {
 	if w.Code != expected {
 		t.Fatalf("unexpected error code received. expected %d got %d", expected, w.Code)
 	}
+	assertNoAPIKeyMetadata(t, w.Body.Bytes())
 	if response.Username != newUsername {
 		t.Fatalf("unexpected username received. expected %s got %s", newUsername, response.Username)
 	}

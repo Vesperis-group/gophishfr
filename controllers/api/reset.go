@@ -1,9 +1,9 @@
 package api
 
 import (
+	"errors"
 	"net/http"
 
-	"github.com/Vesperis-group/gophishfr/auth"
 	ctx "github.com/Vesperis-group/gophishfr/context"
 	"github.com/Vesperis-group/gophishfr/models"
 )
@@ -13,12 +13,21 @@ func (as *Server) Reset(w http.ResponseWriter, r *http.Request) {
 	switch {
 	case r.Method == "POST":
 		u := ctx.Get(r, "user").(models.User)
-		u.ApiKey = auth.GenerateSecureKey(auth.APIKeyLength)
-		err := models.PutUser(&u)
+		apiKey, err := models.ResetUserAPIKey(u.Id)
 		if err != nil {
-			http.Error(w, "Error setting API Key", http.StatusInternalServerError)
+			status := http.StatusInternalServerError
+			message := "Unable to reset API key"
+			if errors.Is(err, models.ErrAPIKeyVerifierUnavailable) {
+				status = http.StatusServiceUnavailable
+				message = "API verifier key unavailable"
+			}
+			JSONResponse(w, models.Response{Success: false, Message: message}, status)
 		} else {
-			JSONResponse(w, models.Response{Success: true, Message: "API Key successfully reset!", Data: u.ApiKey}, http.StatusOK)
+			JSONResponse(w, models.Response{
+				Success: true,
+				Message: "API Key successfully reset!",
+				Data:    apiKey,
+			}, http.StatusOK)
 		}
 	}
 }

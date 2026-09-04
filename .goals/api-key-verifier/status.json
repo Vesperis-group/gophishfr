@@ -1,0 +1,242 @@
+{
+  "goal_id": "api-key-verifier",
+  "status": "completed",
+  "iteration": 8,
+  "builder_model": "Claude:Sonnet-4.6",
+  "inspector_model": "Claude:Haiku-4.5",
+  "initial_sha": "a28fcca62aa94d2b3b90e50e0d19f0ad87d210ef",
+  "created_at": "2026-09-03T21:55:00+02:00",
+  "history": [
+    {
+      "iteration": 1,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-03T23:25:00+02:00",
+      "summary": "Replaced recoverable API-key storage with a dedicated HMAC-SHA-256 verifier/keyring protocol, irreversible transactional SQLite/MySQL migration, bounded indexed multi-pepper authentication and race-safe lazy rekey, verifier-only bootstrap/create/reset, reveal-once DTOs and browser UI, guarded schema rollback, and comprehensive backend/browser/container/fuzz/documentation evidence. Full local quality gates and real MySQL passed; dependencies are unchanged."
+    },
+    {
+      "iteration": 1,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-03T23:30:00+02:00",
+      "summary": "All 62 acceptance criteria independently verified. Comprehensive code inspection of verifier protocol (HMAC-SHA-256 framing), keyring isolation (separate environment variable, no fallback), schema migrations (SQLite rebuild preserving sequence, MySQL BINARY, composite index), runtime authentication (indexed lookup, no plaintext fallback), offline migration (atomic, guarded Down, idempotent), lazy upgrade (CAS, concurrent safety), reveal-once DTOs and browser lifecycle, Docker separation, comprehensive test coverage (unit/race/fuzz/browser/container), and documentation. No security vulnerabilities, logic errors, or specification violations detected. Production-ready for merge."
+    },
+    {
+      "iteration": 1,
+      "role": "security-review",
+      "result": "fail",
+      "completed_at": "2026-09-03T23:39:00+02:00",
+      "summary": "Verifier lookup authenticates controlled BOTH rows because it does not require legacy api_key to be NULL."
+    },
+    {
+      "iteration": 2,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T00:12:37+02:00",
+      "summary": "Enforced verifier-only runtime state on initial indexed lookup, verifier-write validation, lazy-rekey CAS, and conflict reread without selecting or comparing plaintext. Added SQLite and real-MySQL coverage for BOTH/LEGACY/all-absent rejection, verified migration clearing, concurrent transition rejection, normal lazy upgrade, and reset invalidation; all required regression, browser, container, race, fuzz, reproducibility, and scanner gates were rerun."
+    },
+    {
+      "iteration": 2,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-04T00:14:54+02:00",
+      "summary": "Security review finding from iteration 1 (CONTROLLED_BOTH state authenticated at runtime) comprehensively corrected. All three runtime code paths now enforce `api_key IS NULL` requirement: initial indexed lookup (line 99), verifier-write validation (line 324), and lazy-rekey CAS reread (line 370). New SQLite and real MySQL test coverage validates rejection of LEGACY/BOTH/all-absent states, successful migration/clearing, old-pepper BOTH without rekey, concurrent transition rejection, normal lazy upgrade, and reset invalidation. No logic errors, no new plaintext exposure paths. Regression verification confirms session/CSRF/RBAC/view-only, browser reveal lifecycle, Docker separation, and migration atomicity unchanged. Production-ready for merge."
+    },
+    {
+      "iteration": 2,
+      "role": "code-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T00:44:00+02:00",
+      "summary": "General user updates via PutUser full-row Save corrupt LEGACY verifier state by persisting Go zero values (empty string) for nullable columns, making migration impossible after login."
+    },
+    {
+      "iteration": 3,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T00:47:18+02:00",
+      "summary": "Replaced PutUser full-row Save with explicit allowlist of ordinary mutable fields (username, hash, role_id, password_change_required, account_locked, last_login) that never touches API-key verifier state. All call sites (login/password/role updates) use only allowlisted fields. Added SQLite and real-MySQL tests validating LEGACY/MIGRATED state isolation, ordinary update persistence, malicious overwrite resistance, and dedicated verifier path atomicity. All regression, browser, container, race, fuzz, reproducibility, and scanner gates rerun."
+    },
+    {
+      "iteration": 3,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-04T00:48:17+02:00",
+      "summary": "Code-review finding from iteration 2 (PutUser corrupting LEGACY state) comprehensively corrected. PutUser now uses explicit allowlist (lines 140-146) excluding all API-key verifier columns. New SQLite and real MySQL test coverage (TestPutUserIsolatesAPIKeyStateSQLite, TestMySQLZZPutUserIsolatesAPIKeyState) validates LEGACY state byte/NULL-identical after updates while being migratable, MIGRATED verifiers resist overwrite attempts, ordinary fields persist correctly, no-op updates work, and dedicated reset remains atomic. All call sites verified for allowlisted-field-only updates: login (last_login), password-change (hash/password_change_required), password-reset (password_change_required/hash), user-api-put (username/hash/role/password_change_required/account_locked). Script modes confirmed 100755. All regressions verified. Production-ready for merge."
+    },
+    {
+      "iteration": 2,
+      "role": "security-review",
+      "result": "pass",
+      "completed_at": "2026-09-04T00:20:00+02:00",
+      "summary": "Final verifier-only security re-review found no remaining high-confidence security issue."
+    },
+    {
+      "iteration": 2,
+      "role": "code-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T00:22:00+02:00",
+      "summary": "PutUser full-row Save writes empty verifier key ID into legacy rows, corrupting migration state."
+    },
+    {
+      "iteration": 3,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T00:46:02+02:00",
+      "summary": "Replaced PutUser full-row persistence with an explicit ordinary-field allowlist so login, password, role, profile, and lock updates cannot mutate legacy or verifier state. SQLite and real-MySQL tests prove LEGACY state survives ordinary updates and remains migratable, MIGRATED verifier bytes/key ID survive malicious and normal DTO values, ordinary fields persist, no-op updates remain valid, and dedicated reset remains atomic. Full project, backend, browser, Docker, race, fuzz, scanner, mode, dependency, and reproducibility validation was rerun; Yarn audit was temporarily unavailable with HTTP 503 while manifests remained unchanged."
+    },
+    {
+      "iteration": 3,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-04T00:50:59+02:00",
+      "summary": "PutUser allowlist and SQLite/MySQL verifier-state isolation independently verified."
+    },
+    {
+      "iteration": 3,
+      "role": "security-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T00:55:00+02:00",
+      "summary": "API-key authentication accepts account_locked users, allowing locked administrators to retain API access."
+    },
+    {
+      "iteration": 4,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T05:45:00+02:00",
+      "summary": "Enforced account-lock state throughout indexed API-key lookup, defensive validation, lazy-rekey CAS/reread, and final authentication linearization while preserving generic failures and unchanged session behavior. Added SQLite, real-MySQL, and all-transport coverage for locked users/admins, unlock restoration, locked create/reset, and concurrent lock-before-rekey rejection. Full project, backend, browser, Docker, race, fuzz, scanner, mode, dependency-integrity, and reproducibility validation passed; Yarn audit registry timed out while manifests remained unchanged."
+    },
+    {
+      "iteration": 4,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-04T05:44:25+02:00",
+      "summary": "Security review finding from iteration 3 (locked accounts retain API access) comprehensively corrected. Account-lock state enforced across three-layer indexed lookup (line 99), defensive validation (lines 111-113), lazy-rekey CAS/reread (lines 388-391, 412-415), and final authentication linearization (lines 125-130 + ensureAPIKeyAccountUnlocked). New SQLite, real MySQL, and all-transport test coverage (TestLockedAccountRejectsAPIKeyAndLazyRekeySQLite, TestMySQLZZLockedAccountRejectsAPIKeyAndLazyRekey, TestLockedAccountsRejectEveryAPIKeyTransport) validates rejection of locked users/admins across Bearer/raw/query/form, unlock restoration of same token, create/reset while locked both fail authentication, concurrent lock during lazy-rekey rejects without state mutation, and error responses match invalid-key (no account leaks). Session behavior unchanged from PR #62. All prior iterations' criteria remain satisfied. Yarn audit registry timed out (temporary network issue); manifests unchanged. Production-ready for merge."
+    },
+    {
+      "iteration": 4,
+      "role": "security-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T05:52:00+02:00",
+      "summary": "Active-key authentication can complete after a concurrent reset because the final check validates only lock state, not the exact verifier pair."
+    },
+    {
+      "iteration": 4,
+      "role": "code-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T05:52:00+02:00",
+      "summary": "Create/reset reveal DTOs unnecessarily changed legacy JSON field locations and break existing clients."
+    },
+    {
+      "iteration": 5,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T06:15:00+02:00",
+      "summary": "Added an exact accepted-verifier/key-ID, verifier-only, unlocked final authentication query shared by active and lazy paths, with deterministic SQLite and real-MySQL reset/lock race coverage proving stale requests never reach handlers. Restored legacy create/reset JSON shapes through explicit reveal-only response DTOs while keeping persistent users and ordinary surfaces secret-free. Full Go/race, clean MySQL, browser, Docker, fuzz, reproducibility, scanner, mode, and dependency-integrity gates passed; Yarn audit registry timed out while manifests remained unchanged."
+    },
+    {
+      "iteration": 5,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-04T06:18:30+02:00",
+      "summary": "Release-candidate security and code review findings from iteration 4 comprehensively corrected. (1) Active-key reset race fixed by adding atomic final-state query (ensureAPIKeyStateCurrent) validating exact user/lock/api_key-NULL/verifier-key-ID pair before returning authenticated user; concurrent reset/replacement/legacy-state/lock before this check rejects request generically. (2) Legacy JSON shapes preserved: create response uses top-level fields + top-level api_key; reset data remains token string. Refactored GetUserByAPIKey with test hook for deterministic races. New SQLite TestAPIKeyFinalStateLinearizesResetAndLockSQLite and real MySQL TestMySQLZZAPIKeyFinalStateLinearizesResetAndLock validate three scenarios (active reset race, lazy reset race, lazy lock race) proving stale tokens never execute handlers and lazy mutations prevented by concurrent locks. Response-shape test TestAPIKeyResponsesAreSecretFreeExceptImmediateReveal validates create top-level fields, reset token string, GET/list/PUT/settings secret-free, and persistent User cannot recover key. All 62 iteration-1 criteria remain satisfied; all prior fixes (verifier-only runtime, PutUser isolation, account-lock enforcement) verified compatible; all transports/migration/browser/Docker/race/fuzz/scanner gates confirmed. Yarn audit registry timed out; manifests unchanged. Production-ready for merge."
+    },
+    {
+      "iteration": 5,
+      "role": "security-review",
+      "result": "pass",
+      "completed_at": "2026-09-04T06:26:00+02:00",
+      "summary": "Final release security review found no remaining high-confidence security issue."
+    },
+    {
+      "iteration": 5,
+      "role": "code-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T06:26:00+02:00",
+      "summary": "Offline migration rejects valid legacy Unicode tokens by enforcing a 255-byte rather than backend-compatible character/storage contract."
+    },
+    {
+      "iteration": 6,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T06:44:00+02:00",
+      "summary": "Removed the incompatible legacy-token byte limit so migration HMACs exact non-empty stored bytes without normalization or truncation. Added SQLite coverage for long and multibyte values plus real-MySQL coverage for 255 multibyte characters and strict/non-strict over-character-limit behavior, including exact readable-value authentication and idempotence. Full Go/race, migration, clean MySQL, browser, Docker, fuzz, reproducibility, scanner, mode, and dependency-integrity gates passed; Yarn audit registry timed out while manifests remained unchanged."
+    },
+    {
+      "iteration": 6,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-04T06:46:15+02:00",
+      "summary": "Code-review finding from iteration 5 (255-byte migration limit rejecting valid legacy tokens) comprehensively corrected. Migration removed maxLegacyAPIKeyBytes constant and now accepts any non-empty legacy value, computing HMAC over exact byte sequence without normalization/truncation/case-folding. New SQLite TestOfflineAPIKeyMigrationPreservesExactLongTokensSQLite validates tokens >255 bytes and 255-character multibyte (765 bytes) migrate and authenticate exactly, byte-truncated variants reject, rerun is idempotent no-op. Real MySQL TestMySQLZZOfflineAPIKeyMigrationPreservesCharacterBoundary validates 255 multibyte characters (765 bytes, >255) accepted by strict MySQL and migrate/authenticate exactly; characterizes strict-mode rejection of 256+ characters; characterizes non-strict-mode insertion truncation to 255 characters; proves migration hashes exact readable value (accounting for any truncation already present). Documentation updated explaining byte vs character limits and backend-specific behavior. All 62 acceptance criteria remain satisfied; all prior iterations (verifier-only, PutUser, account-lock, final-state, response-shapes) verified compatible. Full Go/race, migration idempotence/atomicity, clean MySQL, browser, Docker, container, fuzz, reproducibility, and scanner gates confirmed. Yarn audit registry timed out; manifests unchanged. Production-ready for merge."
+    },
+    {
+      "iteration": 6,
+      "role": "security-review",
+      "result": "pass",
+      "completed_at": "2026-09-04T06:53:00+02:00",
+      "summary": "Final consolidated security review found no remaining high-confidence security issue."
+    },
+    {
+      "iteration": 6,
+      "role": "code-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T06:53:00+02:00",
+      "summary": "Concurrent settings reset submissions can display an earlier token already invalidated by a later reset."
+    },
+    {
+      "iteration": 7,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T07:10:01+02:00",
+      "summary": "Serialized first-party Settings resets with a synchronous in-flight/reveal guard, disabled pending and revealed-state controls, failure retry recovery, and plaintext clearing before controls reopen. Deterministic deferred/out-of-order/rapid-submit browser coverage proves one request, no stale overwrite, and successful retry. Full Go/race, clean MySQL, browser, Docker, fuzz, reproducibility, scanner, mode, and dependency-integrity gates passed; Yarn audit registry timed out while manifests remained unchanged."
+    },
+    {
+      "iteration": 7,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-04T07:16:20+02:00",
+      "summary": "Code-review finding from iteration 6 (concurrent reset form submissions revealing out-of-order/stale tokens) comprehensively corrected. Reset form now uses synchronous in-flight guard (apiResetRequest state variable + per-attempt resetAttempt token) blocking concurrent click/submit/keyboard/programmatic submissions. Controls disabled before dispatch and kept disabled during reveal. On failure, controls re-enabled for retry. On close, controls re-enabled only if no pending request. Stale responses (apiResetRequest !== resetAttempt) silently dropped without UI update, preventing out-of-order overwrite. New Playwright deterministic tests validate exactly one request under rapid click/submit/keyboard/dispatchEvent sequences; deferred first response reveals correct token while later responses rejected; failure re-enables controls; successful close clears DOM/state/plaintext and re-enables retry. External API semantics unchanged (backend concurrent calls independent; frontend guard is Settings-UI-only). All 62 acceptance criteria remain satisfied; all prior iterations (verifier-only, PutUser, account-lock, final-state, response-shapes, legacy-bytes) verified compatible. Full Go/race, clean MySQL, browser (13/13), Docker, fuzz, reproducibility, and scanner gates confirmed; frontend assets regenerated with confirmed build reproducibility. Yarn audit registry timed out; manifests unchanged. Production-ready for merge."
+    },
+    {
+      "iteration": 7,
+      "role": "security-review",
+      "result": "pass",
+      "completed_at": "2026-09-04T07:22:00+02:00",
+      "summary": "Ultimate consolidated cryptographic/application security review found no remaining high-confidence finding."
+    },
+    {
+      "iteration": 7,
+      "role": "code-review",
+      "result": "pass",
+      "completed_at": "2026-09-04T07:22:00+02:00",
+      "summary": "Ultimate complete-diff code review found no remaining significant issue in the committed range."
+    },
+    {
+      "iteration": 7,
+      "role": "ci",
+      "result": "fail",
+      "completed_at": "2026-09-04T07:40:00+02:00",
+      "summary": "Container verifier harness host-side sqlite3 update failed because the database created by container user app was not writable by the GitHub runner UID."
+    },
+    {
+      "iteration": 8,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T07:49:31+02:00",
+      "summary": "Corrected only the verifier container test harness: a short-lived root container changes the synthetic database to mode 0666 while retaining app UID/GID ownership, explicit assertions cover both properties, host sqlite3 readback proves legacy-row mutation, and subsequent non-root migration/runtime writes pass. ShellCheck, the focused verifier lifecycle, all Docker suites, and the full Go/race verification passed with production behavior, keyring permissions, dependencies, and executable modes unchanged."
+    },
+    {
+      "iteration": 8,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-04T07:55:42+02:00",
+      "summary": "CI blocker from iteration 7 (host sqlite3 unable to write database owned by non-runner UID) comprehensively corrected with a surgical harness-only fix. Builder added: (1) numeric UID/GID extraction from container image, (2) root helper container invoking chmod 0666 on test database only, (3) dual assertions verifying ownership remains app UID/GID and mode is exactly 0666, (4) follow-up assertion that host sqlite3 can write and read back synthetic legacy row. All production code unchanged; keyring permissions remain 0444 readonly; all non-root container writes to mode-0666 database succeed (verified by migration/runtime/lazy-upgrade tests). Script syntax sound; idempotent; deterministic across CI UID variations. All prior 62 acceptance criteria and 7 iterations' fixes verified compatible. Full gates confirmed: Go/race, focused harness, Docker regressions, verify.sh, shell linting. Production-ready for merge."
+    },
+    {
+      "iteration": 8,
+      "role": "code-review",
+      "result": "pass",
+      "completed_at": "2026-09-04T07:58:00+02:00",
+      "summary": "Focused review confirmed the ownership/mode adjustment is confined to synthetic test state, preserves keyrings and production behavior, and cleans resources safely."
+    }
+  ]
+}

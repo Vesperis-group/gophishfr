@@ -85,6 +85,24 @@
         </div>
     </div>
 </div>
+<div class="modal fade" id="apiKeyRevealModal" tabindex="-1" role="dialog"
+    aria-labelledby="apiKeyRevealTitle" aria-modal="true" data-bs-backdrop="static" data-bs-keyboard="false">
+    <div class="modal-dialog" role="document">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h4 class="modal-title" id="apiKeyRevealTitle">New user's API key</h4>
+            </div>
+            <div class="modal-body">
+                <p><strong>Copy this key now.</strong> It cannot be displayed again after closing or reloading.</p>
+                <code id="apiKeyRevealValue"></code>
+            </div>
+            <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" id="copyApiKeyReveal">Copy</button>
+                <button type="button" class="btn btn-primary" id="closeApiKeyReveal">Close</button>
+            </div>
+        </div>
+    </div>
+</div>
 {{end}} {{define "scripts"}}
 <script src="/js/dist/app/passwords.min.js"></script>
 <script src="/js/dist/app/users.min.js"></script>

@@ -35,7 +35,7 @@ func TestSessionAPIAuthenticationContract(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	initialAPIKey := admin.ApiKey
+	initialVerifier := append([]byte(nil), admin.APIKeyVerifier...)
 
 	doRequest := func(method, path string, body io.Reader, headers map[string]string) *http.Response {
 		t.Helper()
@@ -72,7 +72,7 @@ func TestSessionAPIAuthenticationContract(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if current.ApiKey != initialAPIKey {
+		if !bytes.Equal(current.APIKeyVerifier, initialVerifier) {
 			t.Fatal("forced-password-change session mutated the API key")
 		}
 	})
@@ -238,7 +238,7 @@ func TestSessionAPIAuthenticationContract(t *testing.T) {
 	t.Run("explicit API key retains unsafe cross-site compatibility", func(t *testing.T) {
 		payload := []byte(`{"name":"Explicit key contract group","targets":[{"email":"api-key-contract@example.invalid"}]}`)
 		response := doRequest(http.MethodPost, "/api/groups/", bytes.NewReader(payload), map[string]string{
-			"Authorization":  "Bearer " + admin.ApiKey,
+			"Authorization":  "Bearer " + testCtx.apiKey,
 			"Content-Type":   "application/json",
 			"Sec-Fetch-Site": "cross-site",
 		})
@@ -249,7 +249,7 @@ func TestSessionAPIAuthenticationContract(t *testing.T) {
 	t.Run("distinct explicit credentials are rejected", func(t *testing.T) {
 		response := doRequest(
 			http.MethodGet,
-			"/api/groups/summary?api_key="+url.QueryEscape(admin.ApiKey),
+			"/api/groups/summary?api_key="+url.QueryEscape(testCtx.apiKey),
 			nil,
 			map[string]string{"Authorization": "different-explicit-test-value"},
 		)
@@ -313,10 +313,9 @@ func TestSessionAPIAuthenticationContract(t *testing.T) {
 		viewOnly := models.User{
 			Username: "session-completion-view-only",
 			Hash:     hash,
-			ApiKey:   "synthetic-session-completion-view-only-key",
 			RoleID:   999999,
 		}
-		if err := models.PutUser(&viewOnly); err != nil {
+		if _, err := models.CreateUserWithAPIKey(&viewOnly); err != nil {
 			t.Fatal(err)
 		}
 		viewJar, err := cookiejar.New(nil)
@@ -390,7 +389,7 @@ func TestSessionAPIAuthenticationContract(t *testing.T) {
 			fmt.Sprintf("/api/campaigns/%d/complete", campaign.Id),
 			nil,
 			map[string]string{
-				"Authorization":  admin.ApiKey,
+				"Authorization":  testCtx.apiKey,
 				"Sec-Fetch-Site": "cross-site",
 			},
 		)
@@ -416,7 +415,7 @@ func TestSessionAPIAuthenticationContract(t *testing.T) {
 
 	t.Run("explicit API key still works after logout", func(t *testing.T) {
 		response := doRequest(http.MethodGet, "/api/groups/summary", nil, map[string]string{
-			"Authorization": admin.ApiKey,
+			"Authorization": testCtx.apiKey,
 		})
 		defer func() { _ = response.Body.Close() }()
 		assertAPIResponse(t, response, http.StatusOK)

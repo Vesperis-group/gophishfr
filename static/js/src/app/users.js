@@ -1,4 +1,18 @@
 let users = []
+let revealedAPIKey = ""
+
+const closeAPIKeyReveal = () => {
+    revealedAPIKey = ""
+    document.getElementById("apiKeyRevealValue").replaceChildren()
+    bsModalHide("#apiKeyRevealModal")
+}
+
+document.getElementById("closeApiKeyReveal").addEventListener("click", closeAPIKeyReveal)
+document.getElementById("copyApiKeyReveal").addEventListener("click", () => {
+    if (revealedAPIKey && navigator.clipboard) {
+        navigator.clipboard.writeText(revealedAPIKey)
+    }
+})
 
 // Save attempts to POST or PUT to /users/
 const save = (id) => {
@@ -37,6 +51,9 @@ const save = (id) => {
                 load()
                 dismiss()
                 bsModalHide("#modal")
+                revealedAPIKey = data.api_key
+                document.getElementById("apiKeyRevealValue").textContent = revealedAPIKey
+                bsModalShow("#apiKeyRevealModal")
             }, (error) => {
                 modalError(requestErrorMessage(error))
             })
