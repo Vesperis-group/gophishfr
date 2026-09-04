@@ -1,6 +1,6 @@
 {
   "goal_id": "api-key-verifier",
-  "status": "completed",
+  "status": "inspecting",
   "iteration": 4,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
@@ -104,6 +104,13 @@
       "result": "completed",
       "completed_at": "2026-09-04T05:45:00+02:00",
       "summary": "Enforced account-lock state throughout indexed API-key lookup, defensive validation, lazy-rekey CAS/reread, and final authentication linearization while preserving generic failures and unchanged session behavior. Added SQLite, real-MySQL, and all-transport coverage for locked users/admins, unlock restoration, locked create/reset, and concurrent lock-before-rekey rejection. Full project, backend, browser, Docker, race, fuzz, scanner, mode, dependency-integrity, and reproducibility validation passed; Yarn audit registry timed out while manifests remained unchanged."
+    },
+    {
+      "iteration": 4,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-04T05:44:25+02:00",
+      "summary": "Security review finding from iteration 3 (locked accounts retain API access) comprehensively corrected. Account-lock state enforced across three-layer indexed lookup (line 99), defensive validation (lines 111-113), lazy-rekey CAS/reread (lines 388-391, 412-415), and final authentication linearization (lines 125-130 + ensureAPIKeyAccountUnlocked). New SQLite, real MySQL, and all-transport test coverage (TestLockedAccountRejectsAPIKeyAndLazyRekeySQLite, TestMySQLZZLockedAccountRejectsAPIKeyAndLazyRekey, TestLockedAccountsRejectEveryAPIKeyTransport) validates rejection of locked users/admins across Bearer/raw/query/form, unlock restoration of same token, create/reset while locked both fail authentication, concurrent lock during lazy-rekey rejects without state mutation, and error responses match invalid-key (no account leaks). Session behavior unchanged from PR #62. All prior iterations' criteria remain satisfied. Yarn audit registry timed out (temporary network issue); manifests unchanged. Production-ready for merge."
     }
   ]
 }
