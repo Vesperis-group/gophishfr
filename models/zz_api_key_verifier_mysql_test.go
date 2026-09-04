@@ -2,6 +2,7 @@ package models
 
 import (
 	"bytes"
+	"context"
 	"database/sql"
 	"errors"
 	"os"
@@ -507,6 +508,7 @@ func TestMySQLZZAPIKeyVerifierLifecycle(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
+
 	db = database
 	db.LogMode(false)
 	conf = &config.Config{
@@ -571,5 +573,103 @@ func TestMySQLZZAPIKeyVerifierLifecycle(t *testing.T) {
 	}
 	if _, err := MigrateAPIKeys(service); err == nil {
 		t.Fatal("non-strict MySQL truncation/malformed readback was accepted")
+	}
+}
+
+func TestMySQLZZAPIKeyMigrationPreservesCharacterSemantics(t *testing.T) {
+	connectionString := mysqlAPIKeyTestDSN(t)
+	database, err := openDatabase("mysql", connectionString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db = database
+	db.LogMode(false)
+	conf = &config.Config{
+		DBName: "mysql", DBPath: connectionString,
+		MigrationsPath: "../db/db_mysql/migrations",
+	}
+	if err := migrateDatabase(db.DB(), conf.DBName, conf.MigrationsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("DELETE FROM users").Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = db.Exec("DELETE FROM users").Error
+		_ = database.Close()
+	})
+
+	service := testAPIKeyService(t, "mysql-active", "mysql-active")
+	SetAPIKeyVerifier(service)
+	ctx := context.Background()
+	connection, err := db.DB().Conn(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = connection.Close() }()
+
+	multibyteToken := strings.Repeat("界", 255)
+	if len([]byte(multibyteToken)) <= 255 {
+		t.Fatal("MySQL multibyte token does not exceed 255 bytes")
+	}
+	if _, err := connection.ExecContext(ctx, "SET SESSION sql_mode = 'STRICT_TRANS_TABLES'"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.ExecContext(ctx,
+		"INSERT INTO users (username, hash, api_key) VALUES (?, ?, ?)",
+		"mysql-255-character-token", "synthetic-hash", multibyteToken,
+	); err != nil {
+		t.Fatalf("MySQL rejected 255 valid multibyte characters: %v", err)
+	}
+
+	overCharacterLimit := strings.Repeat("n", 256)
+	if _, err := connection.ExecContext(ctx,
+		"INSERT INTO users (username, hash, api_key) VALUES (?, ?, ?)",
+		"mysql-strict-over-limit", "synthetic-hash", overCharacterLimit,
+	); err == nil {
+		t.Fatal("strict MySQL accepted more than 255 token characters")
+	}
+	if _, err := connection.ExecContext(ctx, "SET SESSION sql_mode = ''"); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := connection.ExecContext(ctx,
+		"INSERT INTO users (username, hash, api_key) VALUES (?, ?, ?)",
+		"mysql-nonstrict-over-limit", "synthetic-hash", overCharacterLimit,
+	); err != nil {
+		t.Fatalf("non-strict MySQL over-limit behavior changed: %v", err)
+	}
+	var readableToken string
+	if err := connection.QueryRowContext(ctx,
+		"SELECT api_key FROM users WHERE username = ?",
+		"mysql-nonstrict-over-limit",
+	).Scan(&readableToken); err != nil {
+		t.Fatal(err)
+	}
+	if readableToken != strings.Repeat("n", 255) {
+		t.Fatalf("unexpected non-strict MySQL stored character count: %d", len([]rune(readableToken)))
+	}
+	if err := connection.Close(); err != nil {
+		t.Fatal(err)
+	}
+
+	result, err := MigrateAPIKeys(service)
+	if err != nil || result.Updated != 2 {
+		t.Fatalf("MySQL exact readable-token migration failed: result=%+v err=%v", result, err)
+	}
+	for username, token := range map[string]string{
+		"mysql-255-character-token":  multibyteToken,
+		"mysql-nonstrict-over-limit": readableToken,
+	} {
+		authenticated, err := GetUserByAPIKey(token)
+		if err != nil || authenticated.Username != username {
+			t.Fatalf("MySQL changed exact stored token for %s: %v", username, err)
+		}
+	}
+	if _, err := GetUserByAPIKey(overCharacterLimit); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatal("MySQL authenticated the pre-truncation over-character-limit value")
+	}
+	result, err = MigrateAPIKeys(service)
+	if err != nil || result.Updated != 0 || result.Unchanged != 2 {
+		t.Fatalf("MySQL character-boundary migration rerun was not idempotent: result=%+v err=%v", result, err)
 	}
 }

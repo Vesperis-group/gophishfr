@@ -9,8 +9,6 @@ import (
 	"github.com/Vesperis-group/gophishfr/internal/apikey"
 )
 
-const maxLegacyAPIKeyBytes = 255
-
 var ErrUnsupportedAPIKeyVerifierDB = errors.New("API verifier migration supports only sqlite3 and mysql")
 
 // APIKeyMigrationResult contains counts only; it intentionally cannot carry
@@ -154,7 +152,7 @@ func classifyAPIKeyMigrationRow(row legacyAPIKeyRow, verifier *apikey.Service) (
 	hasToken := row.token.Valid
 	hasVerifier := row.verifier != nil
 	hasKeyID := row.keyID.Valid
-	if hasToken && (row.token.String == "" || len([]byte(row.token.String)) > maxLegacyAPIKeyBytes) {
+	if hasToken && row.token.String == "" {
 		return 0, errors.New("invalid legacy API credential state")
 	}
 	switch {

@@ -157,6 +157,26 @@ plaintext reads and authentication fallbacks are zero.
   passed. Yarn audit was retried but the registry timed out. Dependency
   manifests remain byte-unchanged.
 
+## Iteration 6 exact legacy-token preservation
+
+- Offline migration no longer imposes a 255-byte preflight limit. Every
+  non-empty legacy value is converted directly from the database string to its
+  exact byte sequence for candidate generation, HMAC, guarded writes, and
+  readback; there is no trim, normalization, case folding, or truncation.
+- SQLite tests migrate and authenticate both a value longer than 255 bytes and
+  a 255-character multibyte value longer than 255 bytes. Byte-truncated variants
+  fail, and a second migration is a byte-preserving no-op.
+- Real MySQL tests migrate and authenticate exactly 255 multibyte characters
+  whose UTF-8 representation exceeds 255 bytes. They also characterize the
+  backend boundary: strict mode rejects 256 characters, while non-strict mode
+  truncates on insertion and migration hashes the exact 255-character value
+  subsequently readable from the database.
+- Full Go/race and migration/idempotence suites, clean real MySQL, browser, all
+  container suites, both 10-second fuzzers, scanners, and two-build frontend
+  reproducibility passed. Gosec retained 12 established findings; Zizmor had no
+  unsuppressed findings; Gitleaks, Retire.js, and actionlint passed. Yarn audit
+  was retried but the registry timed out. Dependency manifests are unchanged.
+
 ## Limitations
 
 HMAC protects token confidentiality after a read-only database leak, including

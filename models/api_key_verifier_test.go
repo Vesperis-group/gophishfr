@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"path/filepath"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -622,6 +623,51 @@ func TestOfflineAPIKeyMigrationAtomicIdempotentAndIrreversible(t *testing.T) {
 	}
 	if !plaintext.Valid || plaintext.String != "synthetic-rollback-token" {
 		t.Fatal("failed migration lost an earlier plaintext token")
+	}
+}
+
+func TestOfflineAPIKeyMigrationPreservesExactLongTokensSQLite(t *testing.T) {
+	service := testAPIKeyService(t, "active", "active")
+	setupAPIKeyDatabase(t, service)
+	role, err := GetRoleBySlug(RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tokens := []struct {
+		username string
+		value    string
+	}{
+		{username: "sqlite-long-byte-token", value: strings.Repeat("synthetic-long-token-", 20)},
+		{username: "sqlite-multibyte-token", value: strings.Repeat("界", 255)},
+	}
+	for _, token := range tokens {
+		if len([]byte(token.value)) <= 255 {
+			t.Fatal("test token does not exercise the legacy byte-length boundary")
+		}
+		if _, err := db.DB().Exec(
+			"INSERT INTO users (username, hash, api_key, role_id) VALUES (?, ?, ?, ?)",
+			token.username, "synthetic-hash", token.value, role.ID,
+		); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	result, err := MigrateAPIKeys(service)
+	if err != nil || result.Updated != len(tokens) || result.Unchanged != 1 {
+		t.Fatalf("SQLite exact long-token migration failed: result=%+v err=%v", result, err)
+	}
+	for _, token := range tokens {
+		authenticated, err := GetUserByAPIKey(token.value)
+		if err != nil || authenticated.Username != token.username {
+			t.Fatalf("SQLite changed exact stored token bytes for %s: %v", token.username, err)
+		}
+		if _, err := GetUserByAPIKey(string([]byte(token.value)[:255])); !errors.Is(err, ErrInvalidAPICredential) {
+			t.Fatalf("SQLite authenticated a byte-truncated token for %s", token.username)
+		}
+	}
+	result, err = MigrateAPIKeys(service)
+	if err != nil || result.Updated != 0 || result.Unchanged != len(tokens)+1 {
+		t.Fatalf("SQLite long-token migration rerun was not idempotent: result=%+v err=%v", result, err)
 	}
 }
 

@@ -1,7 +1,7 @@
 {
   "goal_id": "api-key-verifier",
-  "status": "inspecting",
-  "iteration": 5,
+  "status": "completed",
+  "iteration": 6,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "a28fcca62aa94d2b3b90e50e0d19f0ad87d210ef",
@@ -139,6 +139,27 @@
       "result": "pass",
       "completed_at": "2026-09-04T06:18:30+02:00",
       "summary": "Release-candidate security and code review findings from iteration 4 comprehensively corrected. (1) Active-key reset race fixed by adding atomic final-state query (ensureAPIKeyStateCurrent) validating exact user/lock/api_key-NULL/verifier-key-ID pair before returning authenticated user; concurrent reset/replacement/legacy-state/lock before this check rejects request generically. (2) Legacy JSON shapes preserved: create response uses top-level fields + top-level api_key; reset data remains token string. Refactored GetUserByAPIKey with test hook for deterministic races. New SQLite TestAPIKeyFinalStateLinearizesResetAndLockSQLite and real MySQL TestMySQLZZAPIKeyFinalStateLinearizesResetAndLock validate three scenarios (active reset race, lazy reset race, lazy lock race) proving stale tokens never execute handlers and lazy mutations prevented by concurrent locks. Response-shape test TestAPIKeyResponsesAreSecretFreeExceptImmediateReveal validates create top-level fields, reset token string, GET/list/PUT/settings secret-free, and persistent User cannot recover key. All 62 iteration-1 criteria remain satisfied; all prior fixes (verifier-only runtime, PutUser isolation, account-lock enforcement) verified compatible; all transports/migration/browser/Docker/race/fuzz/scanner gates confirmed. Yarn audit registry timed out; manifests unchanged. Production-ready for merge."
+    },
+    {
+      "iteration": 5,
+      "role": "security-review",
+      "result": "pass",
+      "completed_at": "2026-09-04T06:26:00+02:00",
+      "summary": "Final release security review found no remaining high-confidence security issue."
+    },
+    {
+      "iteration": 5,
+      "role": "code-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T06:26:00+02:00",
+      "summary": "Offline migration rejects valid legacy Unicode tokens by enforcing a 255-byte rather than backend-compatible character/storage contract."
+    },
+    {
+      "iteration": 6,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T06:44:00+02:00",
+      "summary": "Removed the incompatible legacy-token byte limit so migration HMACs exact non-empty stored bytes without normalization or truncation. Added SQLite coverage for long and multibyte values plus real-MySQL coverage for 255 multibyte characters and strict/non-strict over-character-limit behavior, including exact readable-value authentication and idempotence. Full Go/race, migration, clean MySQL, browser, Docker, fuzz, reproducibility, scanner, mode, and dependency-integrity gates passed; Yarn audit registry timed out while manifests remained unchanged."
     }
   ]
 }

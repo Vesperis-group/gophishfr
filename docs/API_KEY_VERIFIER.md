@@ -128,9 +128,17 @@ writes and exactly reads back the verifier/key ID before clearing plaintext,
 and then reads back the final state. Coherent legacy rows migrate under the
 active key; coherent verifier-only rows remain byte-for-byte unchanged; a
 controlled BOTH row is cleared only if HMAC verification succeeds. Empty,
-oversized, malformed, unknown-key, ambiguous, mismatched, truncated, collided,
-or concurrently changed rows roll back the whole transaction. Re-running a
-successful migration is a no-op.
+malformed, unknown-key, ambiguous, mismatched, verifier/key-ID-truncated,
+collided, or concurrently changed rows roll back the whole transaction.
+Re-running a successful migration is a no-op.
+
+Migration adds no token byte-length limit: it hashes the exact non-empty bytes
+read from the legacy column without trimming, normalization, case folding, or
+truncation. SQLite may contain values longer than its declared
+`VARCHAR(255)`. MySQL's limit is 255 characters, so valid multibyte values can
+exceed 255 bytes. Strict MySQL rejects values beyond the character limit;
+non-strict MySQL may already have truncated them on insertion. Migration
+preserves and hashes whatever exact value is readable from the database.
 
 **This operation is irreversible.** HMAC cannot reconstruct a token. There is
 no `--rollback-api-keys` command. Real rollback means restoring the tested
