@@ -61,9 +61,37 @@ done
 docker logs "${bootstrap}" 2>&1 | grep -q "Starting admin server"
 docker rm --force "${bootstrap}" >/dev/null
 
+# The bootstrap DB is owned by the image's non-root app UID. GitHub-hosted
+# runners use a different UID, so make only this synthetic database
+# host-writable before sqlite3 recreates a legacy row. Keep app ownership and
+# verify the exact mode so both the host mutation and later non-root app writes
+# remain covered without host sudo or broader keyring permissions.
+app_uid="$(docker run --rm --entrypoint /usr/bin/id "${image}" -u app)"
+app_gid="$(docker run --rm --entrypoint /usr/bin/id "${image}" -g app)"
+docker run --rm \
+    --user 0:0 \
+    --mount "type=bind,src=${workdir}/state,dst=/state" \
+    --entrypoint /usr/bin/chmod \
+    "${image}" \
+    0666 \
+    /state/gophish.db
+database_owner="$(stat --format '%u:%g' "${workdir}/state/gophish.db")"
+database_mode="$(stat --format '%a' "${workdir}/state/gophish.db")"
+if [ "${database_owner}" != "${app_uid}:${app_gid}" ] ||
+   [ "${database_mode}" != "666" ]; then
+    echo "container verifier database fixture is not app-owned with mode 0666" >&2
+    exit 1
+fi
+
 # Recreate a schema-upgraded legacy row; normal runtime must not authenticate it.
 sqlite3 "${workdir}/state/gophish.db" \
     "UPDATE users SET api_key='${legacy_token}', api_key_verifier=NULL, api_key_verifier_key_id=NULL WHERE username='admin';"
+legacy_state="$(sqlite3 "${workdir}/state/gophish.db" \
+    "SELECT api_key='${legacy_token}', api_key_verifier IS NULL, api_key_verifier_key_id IS NULL FROM users WHERE username='admin';")"
+if [ "${legacy_state}" != "1|1|1" ]; then
+    echo "host sqlite3 did not recreate the synthetic legacy API-key row" >&2
+    exit 1
+fi
 
 unmigrated="gophishfr-api-unmigrated-${suffix}"
 containers+=("${unmigrated}")

@@ -1,7 +1,7 @@
 {
   "goal_id": "api-key-verifier",
   "status": "completed",
-  "iteration": 7,
+  "iteration": 8,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "a28fcca62aa94d2b3b90e50e0d19f0ad87d210ef",
@@ -209,6 +209,20 @@
       "result": "pass",
       "completed_at": "2026-09-04T07:22:00+02:00",
       "summary": "Ultimate complete-diff code review found no remaining significant issue in the committed range."
+    },
+    {
+      "iteration": 7,
+      "role": "ci",
+      "result": "fail",
+      "completed_at": "2026-09-04T07:40:00+02:00",
+      "summary": "Container verifier harness host-side sqlite3 update failed because the database created by container user app was not writable by the GitHub runner UID."
+    },
+    {
+      "iteration": 8,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T07:49:31+02:00",
+      "summary": "Corrected only the verifier container test harness: a short-lived root container changes the synthetic database to mode 0666 while retaining app UID/GID ownership, explicit assertions cover both properties, host sqlite3 readback proves legacy-row mutation, and subsequent non-root migration/runtime writes pass. ShellCheck, the focused verifier lifecycle, all Docker suites, and the full Go/race verification passed with production behavior, keyring permissions, dependencies, and executable modes unchanged."
     }
   ]
 }

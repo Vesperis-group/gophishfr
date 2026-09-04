@@ -201,6 +201,24 @@ plaintext reads and authentication fallbacks are zero.
   retried and timed out against the registry. Dependencies and script modes are
   unchanged, and test containers were removed.
 
+## Iteration 8 container harness portability
+
+- Only the verifier container harness changed. After non-root bootstrap creates
+  the synthetic SQLite database, a task-owned short-lived container running as
+  root changes that file alone to mode `0666`; ownership remains the image's
+  `app` UID/GID.
+- Explicit host assertions compare the database owner to the image's numeric app
+  identity and require exact mode `0666`. Host `sqlite3` then performs and reads
+  back the synthetic LEGACY transition, while the following offline migration
+  and runtime lifecycle prove the non-root app can still write.
+- Keyring files remain read-only with their existing permissions. No host sudo,
+  production code, runtime behavior, schema, dependencies, or broad state
+  permission change was introduced.
+- Containerized ShellCheck passed for every project shell script. The focused
+  verifier lifecycle, the other four Docker regression suites, and
+  `./scripts/verify.sh` including all Go and race tests passed. Test containers
+  and task-built images were removed; executable script modes remain `100755`.
+
 ## Limitations
 
 HMAC protects token confidentiality after a read-only database leak, including
