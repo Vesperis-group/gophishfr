@@ -11,7 +11,7 @@ preserving app ownership, then asserting both host and container write paths suc
 
 ## Defect Found in Iteration 7 CI
 
-**Severity:** High (CI blocker; prod code unaffected)  
+**Severity:** High (CI blocker; prod code unaffected)
 **Affected:** Container lifecycle test harness only
 
 The bootstrap container in the API verifier test harness creates `/state/gophish.db`
@@ -149,7 +149,7 @@ The app container runs as user `app` (UID 1000, in the same image):
 
 - **Lines 11-21 (unchanged)**: Cleanup trap removes all containers and temporary directory
 - **Script mode (verified)**: File is `-rwxr-xr-x` (100755 = 755 permissions)
-  - Confirmed via `stat -c '%A'` 
+  - Confirmed via `stat -c '%A'`
 
 ### ✅ Shell script syntax and portability
 
@@ -256,4 +256,3 @@ remains owned by the image's non-root `app` UID; only its permission bits are ch
 to accommodate host-side SQLite fixture construction. All 62 acceptance criteria from
 prior iterations remain satisfied. All quality gates and regression suites pass.
 Production-ready for merge.
-
