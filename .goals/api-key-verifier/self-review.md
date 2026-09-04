@@ -135,6 +135,28 @@ plaintext reads and authentication fallbacks are zero.
   manifests are byte-unchanged and iteration 2's successful audit found zero
   vulnerabilities.
 
+## Iteration 5 final-state and response compatibility
+
+- Authentication now ends with one exact-pair query requiring the accepted user
+  ID, verifier bytes, verifier key ID, `api_key IS NULL`, and unlocked state.
+  The in-memory pair follows successful lazy CAS or its verified conflict reread,
+  so active and old-pepper paths share the same final linearization point.
+- Deterministic SQLite and real-MySQL tests mutate state after active/lazy
+  verification but before the final query. Active reset, lazy reset, and lazy
+  lock all reject the stale request before protected-handler execution; reset
+  replacement authentication and lazy resolution remain functional.
+- Explicit create/reset response objects preserve legacy wire compatibility:
+  create user fields and its one-time `api_key` are top-level, while reset
+  `data` is the one-time token string. Raw-body tests reject nested create
+  fields or object-shaped reset data and confirm persistent User, GET/list/PUT,
+  and settings surfaces remain secret-free.
+- Full Go/race, clean real-MySQL, browser, all container, migration/auth,
+  two 10-second fuzz, scanner, and two-build reproducibility gates passed.
+  Gosec retained its 12 pre-existing findings; Zizmor reported no unsuppressed
+  findings; Gitleaks found no production-diff leak; Retire.js and actionlint
+  passed. Yarn audit was retried but the registry timed out. Dependency
+  manifests remain byte-unchanged.
+
 ## Limitations
 
 HMAC protects token confidentiality after a read-only database leak, including

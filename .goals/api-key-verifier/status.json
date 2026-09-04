@@ -1,7 +1,7 @@
 {
   "goal_id": "api-key-verifier",
-  "status": "inspecting",
-  "iteration": 4,
+  "status": "completed",
+  "iteration": 5,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "a28fcca62aa94d2b3b90e50e0d19f0ad87d210ef",
@@ -111,6 +111,27 @@
       "result": "pass",
       "completed_at": "2026-09-04T05:44:25+02:00",
       "summary": "Security review finding from iteration 3 (locked accounts retain API access) comprehensively corrected. Account-lock state enforced across three-layer indexed lookup (line 99), defensive validation (lines 111-113), lazy-rekey CAS/reread (lines 388-391, 412-415), and final authentication linearization (lines 125-130 + ensureAPIKeyAccountUnlocked). New SQLite, real MySQL, and all-transport test coverage (TestLockedAccountRejectsAPIKeyAndLazyRekeySQLite, TestMySQLZZLockedAccountRejectsAPIKeyAndLazyRekey, TestLockedAccountsRejectEveryAPIKeyTransport) validates rejection of locked users/admins across Bearer/raw/query/form, unlock restoration of same token, create/reset while locked both fail authentication, concurrent lock during lazy-rekey rejects without state mutation, and error responses match invalid-key (no account leaks). Session behavior unchanged from PR #62. All prior iterations' criteria remain satisfied. Yarn audit registry timed out (temporary network issue); manifests unchanged. Production-ready for merge."
+    },
+    {
+      "iteration": 4,
+      "role": "security-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T05:52:00+02:00",
+      "summary": "Active-key authentication can complete after a concurrent reset because the final check validates only lock state, not the exact verifier pair."
+    },
+    {
+      "iteration": 4,
+      "role": "code-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T05:52:00+02:00",
+      "summary": "Create/reset reveal DTOs unnecessarily changed legacy JSON field locations and break existing clients."
+    },
+    {
+      "iteration": 5,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T06:15:00+02:00",
+      "summary": "Added an exact accepted-verifier/key-ID, verifier-only, unlocked final authentication query shared by active and lazy paths, with deterministic SQLite and real-MySQL reset/lock race coverage proving stale requests never reach handlers. Restored legacy create/reset JSON shapes through explicit reveal-only response DTOs while keeping persistent users and ordinary surfaces secret-free. Full Go/race, clean MySQL, browser, Docker, fuzz, reproducibility, scanner, mode, and dependency-integrity gates passed; Yarn audit registry timed out while manifests remained unchanged."
     }
   ]
 }

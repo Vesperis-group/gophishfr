@@ -139,7 +139,7 @@ create_json="$(curl --silent --fail --request POST \
     --data '{"username":"container-reveal-user","password":"synthetic-container-user-password","role":"user"}' \
     "${base}/api/users/")"
 created_token="$(jq -r '.api_key' <<<"${create_json}")"
-created_id="$(jq -r '.user.id' <<<"${create_json}")"
+created_id="$(jq -r '.id' <<<"${create_json}")"
 if ! grep -Eq '^[0-9a-f]{64}$' <<<"${created_token}" ||
    [ "$(grep -Fo "${created_token}" <<<"${create_json}" | wc -l)" -ne 1 ]; then
     echo "create did not reveal one generated token" >&2
@@ -147,7 +147,7 @@ if ! grep -Eq '^[0-9a-f]{64}$' <<<"${created_token}" ||
 fi
 reset_json="$(curl --silent --fail --request POST \
     --header "Authorization: ${legacy_token}" "${base}/api/reset")"
-reset_token="$(jq -r '.data.api_key' <<<"${reset_json}")"
+reset_token="$(jq -r '.data' <<<"${reset_json}")"
 if [ "$(curl --silent --output /dev/null --write-out '%{http_code}' \
     --header "Authorization: ${legacy_token}" "${base}/api/users/")" != "401" ]; then
     echo "old token remained valid after reset" >&2

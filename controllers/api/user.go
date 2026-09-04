@@ -47,8 +47,13 @@ type userResponse struct {
 }
 
 type userCreationResponse struct {
-	User   userResponse `json:"user"`
-	APIKey string       `json:"api_key"`
+	ID                     int64       `json:"id"`
+	Username               string      `json:"username"`
+	Role                   models.Role `json:"role"`
+	PasswordChangeRequired bool        `json:"password_change_required"`
+	AccountLocked          bool        `json:"account_locked"`
+	LastLogin              time.Time   `json:"last_login"`
+	APIKey                 string      `json:"api_key"`
 }
 
 func newUserResponse(user models.User) userResponse {
@@ -56,6 +61,15 @@ func newUserResponse(user models.User) userResponse {
 		ID: user.Id, Username: user.Username, Role: user.Role,
 		PasswordChangeRequired: user.PasswordChangeRequired,
 		AccountLocked:          user.AccountLocked, LastLogin: user.LastLogin,
+	}
+}
+
+func newUserCreationResponse(user models.User, apiKey string) userCreationResponse {
+	return userCreationResponse{
+		ID: user.Id, Username: user.Username, Role: user.Role,
+		PasswordChangeRequired: user.PasswordChangeRequired,
+		AccountLocked:          user.AccountLocked, LastLogin: user.LastLogin,
+		APIKey: apiKey,
 	}
 }
 
@@ -148,7 +162,7 @@ func (as *Server) Users(w http.ResponseWriter, r *http.Request) {
 			JSONResponse(w, models.Response{Success: false, Message: message}, status)
 			return
 		}
-		JSONResponse(w, userCreationResponse{User: newUserResponse(user), APIKey: apiKey}, http.StatusOK)
+		JSONResponse(w, newUserCreationResponse(user, apiKey), http.StatusOK)
 		return
 	}
 }

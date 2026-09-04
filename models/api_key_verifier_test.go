@@ -61,6 +61,27 @@ func setupAPIKeyDatabase(t *testing.T, service *apikey.Service) {
 	t.Cleanup(func() { closeBootstrapDB(t) })
 }
 
+func assertAPIKeyRaceRejectsBeforeHandler(t *testing.T, token string, mutate func() error) {
+	t.Helper()
+	handlerCalls := 0
+	var mutationErr error
+	_, err := getUserByAPIKey(token, func() {
+		mutationErr = mutate()
+	})
+	if mutationErr != nil {
+		t.Fatalf("race mutation failed: %v", mutationErr)
+	}
+	if err == nil {
+		handlerCalls++
+	}
+	if handlerCalls != 0 {
+		t.Fatal("stale-token request executed its protected handler")
+	}
+	if !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("stale credential race returned %v", err)
+	}
+}
+
 func TestAPIKeyVerifierCreateResetAndMissingKeyring(t *testing.T) {
 	service := testAPIKeyService(t, "active", "active")
 	setupAPIKeyDatabase(t, service)
@@ -458,6 +479,66 @@ func TestLockedAccountRejectsAPIKeyAndLazyRekeySQLite(t *testing.T) {
 	}
 	if _, err := GetUserByAPIKey(lazyToken); !errors.Is(err, ErrInvalidAPICredential) {
 		t.Fatalf("concurrently locked SQLite account authenticated: %v", err)
+	}
+}
+
+func TestAPIKeyFinalStateLinearizesResetAndLockSQLite(t *testing.T) {
+	service := testAPIKeyService(t, "active", "active", "old")
+	setupAPIKeyDatabase(t, service)
+	role, err := GetRoleBySlug(RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := func(username, token, keyID string) User {
+		t.Helper()
+		digest, err := service.Compute(keyID, []byte(token))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Exec(
+			"INSERT INTO users (username, hash, api_key, role_id, account_locked, "+
+				"api_key_verifier, api_key_verifier_key_id) VALUES (?, ?, NULL, ?, ?, ?, ?)",
+			username, "synthetic-hash", role.ID, false, digest[:], keyID,
+		).Error; err != nil {
+			t.Fatal(err)
+		}
+		user, err := GetUserByUsername(username)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return user
+	}
+
+	active := seed("sqlite-active-reset-race", "synthetic-sqlite-active-reset-race", "active")
+	var replacement string
+	assertAPIKeyRaceRejectsBeforeHandler(t, "synthetic-sqlite-active-reset-race", func() error {
+		var err error
+		replacement, err = ResetUserAPIKey(active.Id)
+		return err
+	})
+	if authenticated, err := GetUserByAPIKey(replacement); err != nil || authenticated.Id != active.Id {
+		t.Fatalf("active-race replacement did not authenticate: %v", err)
+	}
+
+	lazyReset := seed("sqlite-lazy-reset-race", "synthetic-sqlite-lazy-reset-race", "old")
+	assertAPIKeyRaceRejectsBeforeHandler(t, "synthetic-sqlite-lazy-reset-race", func() error {
+		_, err := ResetUserAPIKey(lazyReset.Id)
+		return err
+	})
+
+	lazyLock := seed("sqlite-lazy-lock-race", "synthetic-sqlite-lazy-lock-race", "old")
+	assertAPIKeyRaceRejectsBeforeHandler(t, "synthetic-sqlite-lazy-lock-race", func() error {
+		return db.Model(&User{}).Where("id = ?", lazyLock.Id).
+			Update("account_locked", true).Error
+	})
+	var keyID string
+	if err := db.Raw(
+		"SELECT api_key_verifier_key_id FROM users WHERE id = ?", lazyLock.Id,
+	).Row().Scan(&keyID); err != nil {
+		t.Fatal(err)
+	}
+	if keyID != "active" {
+		t.Fatal("lazy race did not reach active-key resolution before final lock check")
 	}
 }
 

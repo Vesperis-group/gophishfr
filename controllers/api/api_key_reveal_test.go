@@ -51,10 +51,27 @@ func TestAPIKeyResponsesAreSecretFreeExceptImmediateReveal(t *testing.T) {
 	if created.APIKey == "" || strings.Count(createResponse.Body.String(), created.APIKey) != 1 {
 		t.Fatal("creation did not reveal exactly one token value")
 	}
-	stored, err := models.GetUser(created.User.ID)
+	var createShape map[string]json.RawMessage
+	if err := json.Unmarshal(createResponse.Body.Bytes(), &createShape); err != nil {
+		t.Fatal(err)
+	}
+	for _, field := range []string{"id", "username", "role", "password_change_required", "account_locked", "last_login", "api_key"} {
+		if _, present := createShape[field]; !present {
+			t.Fatalf("legacy create response omitted top-level %q", field)
+		}
+	}
+	if _, nested := createShape["user"]; nested {
+		t.Fatal("create response unexpectedly nested legacy user fields")
+	}
+	stored, err := models.GetUser(created.ID)
 	if err != nil {
 		t.Fatal(err)
 	}
+	persistentJSON, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatal(err)
+	}
+	assertNoAPIKeyMetadata(t, persistentJSON)
 	if bytes.Contains(createResponse.Body.Bytes(), stored.APIKeyVerifier) ||
 		bytes.Contains(createResponse.Body.Bytes(), []byte(stored.APIKeyVerifierKeyID)) {
 		t.Fatal("creation response disclosed verifier metadata")
@@ -71,11 +88,23 @@ func TestAPIKeyResponsesAreSecretFreeExceptImmediateReveal(t *testing.T) {
 	if err := json.Unmarshal(resetResponse.Body.Bytes(), &reset); err != nil {
 		t.Fatal(err)
 	}
-	data, ok := reset.Data.(map[string]interface{})
-	if !ok {
-		t.Fatal("reset response has unexpected reveal DTO")
+	var resetShape struct {
+		Data json.RawMessage `json:"data"`
 	}
-	resetToken, _ := data["api_key"].(string)
+	if err := json.Unmarshal(resetResponse.Body.Bytes(), &resetShape); err != nil {
+		t.Fatal(err)
+	}
+	var rawResetToken string
+	if err := json.Unmarshal(resetShape.Data, &rawResetToken); err != nil {
+		t.Fatal("legacy reset data is not a raw JSON string")
+	}
+	resetToken, ok := reset.Data.(string)
+	if !ok {
+		t.Fatal("legacy reset data is not a token string")
+	}
+	if rawResetToken != resetToken || bytes.Contains(resetShape.Data, []byte(`"api_key"`)) {
+		t.Fatal("reset response changed its legacy data shape")
+	}
 	if resetToken == "" || strings.Count(resetResponse.Body.String(), resetToken) != 1 {
 		t.Fatal("reset did not reveal exactly one replacement token")
 	}

@@ -8,10 +8,6 @@ import (
 	"github.com/Vesperis-group/gophishfr/models"
 )
 
-type apiKeyRevealResponse struct {
-	APIKey string `json:"api_key"`
-}
-
 // Reset (/api/reset) resets the currently authenticated user's API key
 func (as *Server) Reset(w http.ResponseWriter, r *http.Request) {
 	switch {
@@ -30,7 +26,7 @@ func (as *Server) Reset(w http.ResponseWriter, r *http.Request) {
 			JSONResponse(w, models.Response{
 				Success: true,
 				Message: "API Key successfully reset!",
-				Data:    apiKeyRevealResponse{APIKey: apiKey},
+				Data:    apiKey,
 			}, http.StatusOK)
 		}
 	}

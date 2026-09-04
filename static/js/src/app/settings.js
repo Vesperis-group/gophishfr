@@ -104,7 +104,7 @@ document.addEventListener('DOMContentLoaded', function () {
         api.reset()
             .then(function (response) {
                 successFlash(response.message)
-                revealedAPIKey = response.data.api_key
+                revealedAPIKey = response.data
                 document.getElementById("apiKeyRevealValue").textContent = revealedAPIKey
                 document.getElementById("apiKeyReveal").classList.remove("d-none")
             }, function (error) {

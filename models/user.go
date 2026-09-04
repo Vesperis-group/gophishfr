@@ -85,6 +85,12 @@ func GetUsers() ([]User, error) {
 // GetUserByAPIKey authenticates through one bounded indexed verifier lookup.
 // It never reads or falls back to the legacy plaintext column.
 func GetUserByAPIKey(token string) (User, error) {
+	return getUserByAPIKey(token, nil)
+}
+
+// getUserByAPIKey keeps a narrow synchronization point for deterministic
+// backend race tests. Production callers always pass nil.
+func getUserByAPIKey(token string, beforeFinalCheck func()) (User, error) {
 	verifier, err := currentAPIKeyVerifier()
 	if err != nil {
 		return User{}, err
@@ -122,10 +128,13 @@ func GetUserByAPIKey(token string) (User, error) {
 			return User{}, err
 		}
 	}
-	// This final state check is the authentication linearization point. A lock
-	// committed before it rejects this request; a later lock applies to
-	// subsequent requests without changing session behavior.
-	if err := ensureAPIKeyAccountUnlocked(user.Id); err != nil {
+	if beforeFinalCheck != nil {
+		beforeFinalCheck()
+	}
+	// This exact-pair query is the authentication linearization point. A reset,
+	// replacement, legacy-state transition, or lock committed before it rejects
+	// this request; a later change applies to subsequent requests.
+	if err := ensureAPIKeyStateCurrent(&user); err != nil {
 		return User{}, err
 	}
 	return user, nil
@@ -367,10 +376,13 @@ func hmacEqual(left, right []byte) bool {
 		hmac.Equal(left, right)
 }
 
-func ensureAPIKeyAccountUnlocked(id int64) error {
+func ensureAPIKeyStateCurrent(user *User) error {
 	var count int
 	if err := db.Model(&User{}).
-		Where("id = ? AND (account_locked IS NULL OR account_locked = ?)", id, false).
+		Where("id = ? AND api_key IS NULL "+
+			"AND (account_locked IS NULL OR account_locked = ?) "+
+			"AND api_key_verifier_key_id = ? AND api_key_verifier = ?",
+			user.Id, false, user.APIKeyVerifierKeyID, user.APIKeyVerifier).
 		Count(&count).Error; err != nil {
 		return err
 	}

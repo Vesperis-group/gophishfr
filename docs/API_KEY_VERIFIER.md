@@ -95,13 +95,14 @@ An old-key match is conditionally upgraded to the active key with an exact
 user/old-pair CAS. If another writer wins, the presented token is checked
 against the current row: a concurrent upgrade may succeed, while a committed
 reset makes the old token fail. A non-conflict rekey database error may leave
-the already-validated old verifier and allow that request. Lock state is part
-of the initial indexed lookup, lazy-rekey CAS/reread, and final authentication
-check. A lock committed before that final check rejects the request without
-rekeying when it precedes the CAS; a lock committed after completed
-authentication follows normal per-request race semantics. Locked and unknown
-accounts return the same invalid-key response. Existing session behavior is
-unchanged.
+the already-validated old verifier and allow that request only while that exact
+pair remains current. After active-key verification or lazy resolution, one
+atomic final query requires the exact accepted user ID, verifier/key ID,
+`api_key IS NULL`, and unlocked state. A reset, replacement, legacy-state
+transition, or lock committed before that query rejects the request; a change
+committed after completed authentication follows normal per-request race
+semantics. Locked and unknown accounts return the same invalid-key response.
+Existing session behavior is unchanged.
 
 An old pepper may be retired only after no row references its ID, or affected
 users have authenticated (lazy upgrade) or reset. Offline bulk rekey is
@@ -149,11 +150,14 @@ Existing installations may start without the verifier keyring for session
 administration. API-key authentication, user creation, and reset fail closed.
 Legacy plaintext rows never authenticate at runtime; run the offline migration.
 
-User GET/PUT responses and ordinary settings pages contain no token, verifier,
-key ID, mask, last-four value, or presence oracle. User creation and reset
-return a new token only in that immediate successful response. Closing the
-dedicated reveal removes it from the DOM and retained JavaScript state where
-reasonable; reload cannot recover it. It is never placed in cookies,
+User GET/list/PUT responses and ordinary settings pages contain no token,
+verifier, key ID, mask, last-four value, or presence oracle. For legacy client
+compatibility, the immediate successful user-create response keeps user fields
+at top level and adds the one-time token at top-level `api_key`; successful
+reset keeps `data` as the one-time token string. No persistent model carries
+that plaintext. Closing the dedicated reveal removes it from the DOM and
+retained JavaScript state where reasonable; reload cannot recover it. It is
+never placed in cookies,
 `localStorage`, `sessionStorage`, global page state, logs, or later requests.
 JavaScript memory zeroization is not guaranteed. If the response is lost, there
 is no grace period: reset again through an authenticated session/admin.

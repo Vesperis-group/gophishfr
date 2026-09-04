@@ -275,6 +275,88 @@ func TestMySQLZZLockedAccountRejectsAPIKeyAndLazyRekey(t *testing.T) {
 	}
 }
 
+func TestMySQLZZAPIKeyFinalStateLinearizesResetAndLock(t *testing.T) {
+	connectionString := mysqlAPIKeyTestDSN(t)
+	database, err := openDatabase("mysql", connectionString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db = database
+	db.LogMode(false)
+	conf = &config.Config{
+		DBName: "mysql", DBPath: connectionString,
+		MigrationsPath: "../db/db_mysql/migrations",
+	}
+	if err := migrateDatabase(db.DB(), conf.DBName, conf.MigrationsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("DELETE FROM users").Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = db.Exec("DELETE FROM users").Error
+		_ = database.Close()
+	})
+
+	service := testAPIKeyService(t, "mysql-active", "mysql-active", "mysql-old")
+	SetAPIKeyVerifier(service)
+	role, err := GetRoleBySlug(RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	seed := func(username, token, keyID string) User {
+		t.Helper()
+		digest, err := service.Compute(keyID, []byte(token))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := db.Exec(
+			"INSERT INTO users (username, hash, api_key, role_id, account_locked, "+
+				"api_key_verifier, api_key_verifier_key_id) VALUES (?, ?, NULL, ?, ?, ?, ?)",
+			username, "synthetic-hash", role.ID, false, digest[:], keyID,
+		).Error; err != nil {
+			t.Fatal(err)
+		}
+		user, err := GetUserByUsername(username)
+		if err != nil {
+			t.Fatal(err)
+		}
+		return user
+	}
+
+	active := seed("mysql-active-reset-race", "synthetic-mysql-active-reset-race", "mysql-active")
+	var replacement string
+	assertAPIKeyRaceRejectsBeforeHandler(t, "synthetic-mysql-active-reset-race", func() error {
+		var err error
+		replacement, err = ResetUserAPIKey(active.Id)
+		return err
+	})
+	if authenticated, err := GetUserByAPIKey(replacement); err != nil || authenticated.Id != active.Id {
+		t.Fatalf("active-race replacement did not authenticate: %v", err)
+	}
+
+	lazyReset := seed("mysql-lazy-reset-race", "synthetic-mysql-lazy-reset-race", "mysql-old")
+	assertAPIKeyRaceRejectsBeforeHandler(t, "synthetic-mysql-lazy-reset-race", func() error {
+		_, err := ResetUserAPIKey(lazyReset.Id)
+		return err
+	})
+
+	lazyLock := seed("mysql-lazy-lock-race", "synthetic-mysql-lazy-lock-race", "mysql-old")
+	assertAPIKeyRaceRejectsBeforeHandler(t, "synthetic-mysql-lazy-lock-race", func() error {
+		return db.Model(&User{}).Where("id = ?", lazyLock.Id).
+			Update("account_locked", true).Error
+	})
+	var keyID string
+	if err := db.Raw(
+		"SELECT api_key_verifier_key_id FROM users WHERE id = ?", lazyLock.Id,
+	).Row().Scan(&keyID); err != nil {
+		t.Fatal(err)
+	}
+	if keyID != "mysql-active" {
+		t.Fatal("lazy race did not reach active-key resolution before final lock check")
+	}
+}
+
 func TestMySQLZZRuntimeRequiresVerifierOnlyState(t *testing.T) {
 	connectionString := mysqlAPIKeyTestDSN(t)
 	database, err := openDatabase("mysql", connectionString)

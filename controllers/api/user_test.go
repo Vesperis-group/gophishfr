@@ -94,11 +94,11 @@ func TestCreateUser(t *testing.T) {
 	if err != nil {
 		t.Fatalf("error decoding user payload: %v", err)
 	}
-	if got.User.Username != payload.Username {
-		t.Fatalf("unexpected username received. expected %s got %s", payload.Username, got.User.Username)
+	if got.Username != payload.Username {
+		t.Fatalf("unexpected username received. expected %s got %s", payload.Username, got.Username)
 	}
-	if got.User.Role.Slug != payload.Role {
-		t.Fatalf("unexpected role received. expected %s got %s", payload.Role, got.User.Role.Slug)
+	if got.Role.Slug != payload.Role {
+		t.Fatalf("unexpected role received. expected %s got %s", payload.Role, got.Role.Slug)
 	}
 	if got.APIKey == "" {
 		t.Fatal("creation response did not reveal the generated API key")
@@ -137,6 +137,7 @@ func TestModifyUser(t *testing.T) {
 	if w.Code != expected {
 		t.Fatalf("unexpected error code received. expected %d got %d", expected, w.Code)
 	}
+	assertNoAPIKeyMetadata(t, w.Body.Bytes())
 	if response.Username != newUsername {
 		t.Fatalf("unexpected username received. expected %s got %s", newUsername, response.Username)
 	}
