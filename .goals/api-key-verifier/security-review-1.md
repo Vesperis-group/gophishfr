@@ -7,8 +7,8 @@ high-confidence runtime state-validation flaw.
 
 ## Finding — Runtime accepts migrator-only BOTH state
 
-**Severity:** Medium  
-**Confidence:** 9/10  
+**Severity:** Medium
+**Confidence:** 9/10
 **Affected path:** `models/user.go`
 
 Runtime verifier lookup filters by key ID and verifier but does not require the

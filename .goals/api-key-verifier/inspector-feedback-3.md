@@ -14,7 +14,7 @@ and all ordinary updates persist correctly.
 
 ## Defect Found in Iteration 2
 
-**Severity:** Medium  
+**Severity:** Medium
 **Affected path:** `models/user.go::PutUser` (before correction)
 
 The original implementation used GORM v1 full-row `Save`:
@@ -216,4 +216,3 @@ MIGRATED verifiers resist overwrite attempts while ordinary fields persist corre
 All call sites remain compatible. All security gates (migration, bootstrap, auth matrix,
 browser, container, race, fuzz, reproducibility, scanners) passed. Production-ready for
 merge.
-

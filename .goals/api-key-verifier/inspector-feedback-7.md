@@ -10,7 +10,7 @@ that serializes reset submissions and prevents reveal overwrite.
 
 ## Defect Found in Iteration 6
 
-**Severity:** Medium (reveals revoked token to user in specific race condition)  
+**Severity:** Medium (reveals revoked token to user in specific race condition)
 **Affected paths:** Settings reset form user interaction
 
 The reset form remained enabled during request dispatch. Multiple rapid submissions
@@ -341,4 +341,3 @@ remain independent. All 62 acceptance criteria remain satisfied. All prior
 iterations' fixes verified compatible. All quality gates passed. Frontend assets
 regenerated with confirmed reproducibility. Yarn audit registry unavailable;
 manifests unchanged. **Production-ready for merge.**
-

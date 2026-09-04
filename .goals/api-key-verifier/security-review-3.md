@@ -7,8 +7,8 @@ gap.
 
 ## Finding — Locked accounts retain API-key access
 
-**Severity:** High  
-**Confidence:** 9/10  
+**Severity:** High
+**Confidence:** 9/10
 **Affected path:** `models/user.go` / API-key authentication
 
 Verifier lookup returns users regardless of `account_locked`. A locked

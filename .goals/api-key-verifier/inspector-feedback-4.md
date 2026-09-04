@@ -14,7 +14,7 @@ token. Session behavior remains unchanged from PR #62.
 
 ## Defect Found in Iteration 3
 
-**Severity:** High  
+**Severity:** High
 **Affected path:** `models/user.go::GetUserByAPIKey` and lazy-rekey paths
 
 API-key authentication returned users regardless of `account_locked` state. A locked
@@ -306,4 +306,3 @@ matching invalid-key responses. Unlock restores the same token. Session authenti
 remains independent of API-key lock state. All quality gates (project build, backend
 tests, browser, container, race, fuzz, verify, scanners) passed. Yarn audit registry
 temporarily unavailable but manifests unchanged. Production-ready for merge.
-

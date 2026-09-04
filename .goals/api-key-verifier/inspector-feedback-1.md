@@ -161,7 +161,7 @@
   - `models/api_key_migration.go` (offline transformation logic, preflight, atomicity)
   - `models/user.go` (bootstrap, create, reset, authentication, lazy upgrade)
   - Schema migrations (SQLite rebuild, MySQL ALTER, guarded Down)
-  - API controllers (user.go, reset.go, api_key_reveal_test.go) 
+  - API controllers (user.go, reset.go, api_key_reveal_test.go)
   - Frontend reveal UI (settings.js, users.js)
   - Docker integration (docker/run.sh)
   - Test coverage (api_key_verifier_test.go: 480 lines, verifier_test.go: 221 lines)

@@ -75,17 +75,17 @@ transition to CONTROLLED_BOTH as auth failure without attempting rekey.
 
 ### Iteration 1 tests preserved
 
-- `TestAPIKeyVerifierCreateResetAndMissingKeyring` — fresh admin bootstrap  
-- `TestFreshBootstrapMissingVerifierIsAtomic` — missing keyring atomicity  
-- `TestOfflineAPIKeyMigrationAtomicIdempotentAndIrreversible` — migration lifecycle  
-- `TestSQLiteAPIKeySchemaRebuildPreservesLegacyState` — SQLite rebuild and sequence  
+- `TestAPIKeyVerifierCreateResetAndMissingKeyring` — fresh admin bootstrap
+- `TestFreshBootstrapMissingVerifierIsAtomic` — missing keyring atomicity
+- `TestOfflineAPIKeyMigrationAtomicIdempotentAndIrreversible` — migration lifecycle
+- `TestSQLiteAPIKeySchemaRebuildPreservesLegacyState` — SQLite rebuild and sequence
 
 ### Iteration 2 NEW test: `TestRuntimeRequiresVerifierOnlyState` (SQLite)
 
 **Test 1a: CONTROLLED_BOTH initial state rejects before migration**
 - Create user with matching plaintext + verifier + key ID (CONTROLLED_BOTH state)
 - Verify `GetUserByAPIKey()` returns `ErrInvalidAPICredential` (zero matches from `WHERE api_key IS NULL`)
-- Verify no attempt to authenticate or rekey  
+- Verify no attempt to authenticate or rekey
 - Call `MigrateAPIKeys()`, verify `Updated=1`
 
 **Test 1b: After migration (plaintext cleared), same token authenticates**
@@ -230,4 +230,3 @@ focused, and preserves all existing functionality (migration, lazy upgrade, rese
 session fallback). Test coverage for SQLite and real MySQL validates that LEGACY, CONTROLLED_BOTH,
 and all-absent states are rejected while normal MIGRATED, lazy-upgrade, and reset flows remain
 correct. Production-ready for merge.
-

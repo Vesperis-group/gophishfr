@@ -11,7 +11,7 @@ migration and subsequent authentication.
 
 ## Defect Found in Iteration 5
 
-**Severity:** High (blocks migration for any legacy tokens beyond 255 bytes)  
+**Severity:** High (blocks migration for any legacy tokens beyond 255 bytes)
 **Affected path:** `models/api_key_migration.go::classifyAPIKeyMigrationRow` (line 157)
 
 The migration's preflight validation rejected any legacy token with byte length >255,
@@ -89,7 +89,7 @@ tokens := []struct{
     username string
     value    string
 }{
-    {username: "sqlite-long-byte-token", 
+    {username: "sqlite-long-byte-token",
      value: strings.Repeat("synthetic-long-token-", 20)},  // >255 bytes
     ...
 }
@@ -106,7 +106,7 @@ tokens := []struct{
 **Test 2: Multibyte token (255 characters, >255 bytes)**
 
 ```go
-{username: "sqlite-multibyte-token", 
+{username: "sqlite-multibyte-token",
  value: strings.Repeat("界", 255)},  // 255 chars × 3 bytes = 765 bytes
 ```
 
@@ -278,4 +278,3 @@ strict/non-strict boundary cases. Migration atomicity, idempotence, and all
 prior security fixes verified compatible. All quality gates passed. Yarn audit
 registry unavailable (temporary); manifests unchanged. **Production-ready
 for merge.**
-

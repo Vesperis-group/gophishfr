@@ -9,7 +9,7 @@ one real migration-integrity defect.
 
 ## Finding — General user updates corrupt LEGACY verifier state
 
-**Severity:** Medium  
+**Severity:** Medium
 **Affected path:** `models/user.go`
 
 `PutUser` uses GORM v1 full-row `Save`. A LEGACY row loads nullable verifier

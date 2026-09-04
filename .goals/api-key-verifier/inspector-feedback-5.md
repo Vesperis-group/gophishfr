@@ -445,4 +445,3 @@ verified compatible. Full SQLite, real MySQL, all-transport, migration,
 browser, Docker, race, fuzz, and scanner coverage confirmed. Yarn audit
 registry temporarily unavailable; manifests unchanged. **Production-ready
 for merge.**
-
