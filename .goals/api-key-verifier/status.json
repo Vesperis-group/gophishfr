@@ -230,6 +230,13 @@
       "result": "pass",
       "completed_at": "2026-09-04T07:55:42+02:00",
       "summary": "CI blocker from iteration 7 (host sqlite3 unable to write database owned by non-runner UID) comprehensively corrected with a surgical harness-only fix. Builder added: (1) numeric UID/GID extraction from container image, (2) root helper container invoking chmod 0666 on test database only, (3) dual assertions verifying ownership remains app UID/GID and mode is exactly 0666, (4) follow-up assertion that host sqlite3 can write and read back synthetic legacy row. All production code unchanged; keyring permissions remain 0444 readonly; all non-root container writes to mode-0666 database succeed (verified by migration/runtime/lazy-upgrade tests). Script syntax sound; idempotent; deterministic across CI UID variations. All prior 62 acceptance criteria and 7 iterations' fixes verified compatible. Full gates confirmed: Go/race, focused harness, Docker regressions, verify.sh, shell linting. Production-ready for merge."
+    },
+    {
+      "iteration": 8,
+      "role": "code-review",
+      "result": "pass",
+      "completed_at": "2026-09-04T07:58:00+02:00",
+      "summary": "Focused review confirmed the ownership/mode adjustment is confined to synthetic test state, preserves keyrings and production behavior, and cleans resources safely."
     }
   ]
 }

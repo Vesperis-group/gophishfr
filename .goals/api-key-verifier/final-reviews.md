@@ -17,3 +17,11 @@ secret-exposure, or data-loss issue.
 
 The ultimate committed-range code review found no significant correctness,
 compatibility, backend, frontend, Docker, test, CI, or scope issue.
+
+## CI Harness Re-review: PASS
+
+After GitHub Actions exposed a runner/image UID mismatch, a focused review and
+Inspector pass confirmed the correction changes only the synthetic test
+database mode, retains image-app ownership, preserves keyring/production
+permissions, and supports both host fixture mutation and later non-root runtime
+writes.

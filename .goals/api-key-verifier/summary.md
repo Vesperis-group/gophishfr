@@ -58,6 +58,9 @@ multi-pepper lookup, and reveals new/reset tokens only once.
 6. Removed an incompatible 255-byte migration limit and preserved exact legacy
    Unicode/multibyte bytes.
 7. Serialized first-party reset submissions to prevent stale reveal overwrite.
+8. Aligned only the synthetic verifier-container database permissions across
+   differing runner/image UIDs so the real CI lifecycle can construct legacy
+   fixtures without changing production ownership or keyring permissions.
 
 Each correction received independent tests and Inspector verification. The
 ultimate security and code reviews returned PASS.
