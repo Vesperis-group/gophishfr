@@ -1,7 +1,7 @@
 {
   "goal_id": "api-key-verifier",
-  "status": "inspecting",
-  "iteration": 3,
+  "status": "completed",
+  "iteration": 4,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "a28fcca62aa94d2b3b90e50e0d19f0ad87d210ef",
@@ -83,6 +83,27 @@
       "result": "completed",
       "completed_at": "2026-09-04T00:46:02+02:00",
       "summary": "Replaced PutUser full-row persistence with an explicit ordinary-field allowlist so login, password, role, profile, and lock updates cannot mutate legacy or verifier state. SQLite and real-MySQL tests prove LEGACY state survives ordinary updates and remains migratable, MIGRATED verifier bytes/key ID survive malicious and normal DTO values, ordinary fields persist, no-op updates remain valid, and dedicated reset remains atomic. Full project, backend, browser, Docker, race, fuzz, scanner, mode, dependency, and reproducibility validation was rerun; Yarn audit was temporarily unavailable with HTTP 503 while manifests remained unchanged."
+    },
+    {
+      "iteration": 3,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-04T00:50:59+02:00",
+      "summary": "PutUser allowlist and SQLite/MySQL verifier-state isolation independently verified."
+    },
+    {
+      "iteration": 3,
+      "role": "security-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T00:55:00+02:00",
+      "summary": "API-key authentication accepts account_locked users, allowing locked administrators to retain API access."
+    },
+    {
+      "iteration": 4,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T05:45:00+02:00",
+      "summary": "Enforced account-lock state throughout indexed API-key lookup, defensive validation, lazy-rekey CAS/reread, and final authentication linearization while preserving generic failures and unchanged session behavior. Added SQLite, real-MySQL, and all-transport coverage for locked users/admins, unlock restoration, locked create/reset, and concurrent lock-before-rekey rejection. Full project, backend, browser, Docker, race, fuzz, scanner, mode, dependency-integrity, and reproducibility validation passed; Yarn audit registry timed out while manifests remained unchanged."
     }
   ]
 }

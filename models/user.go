@@ -96,7 +96,7 @@ func GetUserByAPIKey(token string) (User, error) {
 	query, arguments := candidateWhere(candidates)
 	users := make([]User, 0, 2)
 	err = db.Select(runtimeUserColumns).Preload("Role").
-		Where("api_key IS NULL").
+		Where("api_key IS NULL AND (account_locked IS NULL OR account_locked = ?)", false).
 		Where(query, arguments...).Limit(2).Find(&users).Error
 	if err != nil {
 		return User{}, err
@@ -108,6 +108,9 @@ func GetUserByAPIKey(token string) (User, error) {
 		return User{}, ErrAmbiguousAPICredential
 	}
 	user := users[0]
+	if user.AccountLocked {
+		return User{}, ErrInvalidAPICredential
+	}
 	if err := validateMigratedAPIKeyState(user.APIKeyVerifierKeyID, user.APIKeyVerifier); err != nil {
 		return User{}, err
 	}
@@ -118,6 +121,12 @@ func GetUserByAPIKey(token string) (User, error) {
 		if err := lazyUpgradeAPIKeyVerifier(&user, []byte(token), verifier); err != nil {
 			return User{}, err
 		}
+	}
+	// This final state check is the authentication linearization point. A lock
+	// committed before it rejects this request; a later lock applies to
+	// subsequent requests without changing session behavior.
+	if err := ensureAPIKeyAccountUnlocked(user.Id); err != nil {
+		return User{}, err
 	}
 	return user, nil
 }
@@ -358,14 +367,28 @@ func hmacEqual(left, right []byte) bool {
 		hmac.Equal(left, right)
 }
 
+func ensureAPIKeyAccountUnlocked(id int64) error {
+	var count int
+	if err := db.Model(&User{}).
+		Where("id = ? AND (account_locked IS NULL OR account_locked = ?)", id, false).
+		Count(&count).Error; err != nil {
+		return err
+	}
+	if count != 1 {
+		return ErrInvalidAPICredential
+	}
+	return nil
+}
+
 func lazyUpgradeAPIKeyVerifier(user *User, token []byte, verifier *apikey.Service) error {
 	activeID, activeVerifier, err := verifier.ComputeActive(token)
 	if err != nil {
 		return ErrAPIKeyVerifierUnavailable
 	}
 	result := db.Model(&User{}).
-		Where("id = ? AND api_key IS NULL AND api_key_verifier_key_id = ? AND api_key_verifier = ?",
-			user.Id, user.APIKeyVerifierKeyID, user.APIKeyVerifier).
+		Where("id = ? AND api_key IS NULL AND (account_locked IS NULL OR account_locked = ?) "+
+			"AND api_key_verifier_key_id = ? AND api_key_verifier = ?",
+			user.Id, false, user.APIKeyVerifierKeyID, user.APIKeyVerifier).
 		Updates(map[string]interface{}{
 			"api_key_verifier_key_id": activeID,
 			"api_key_verifier":        activeVerifier[:],
@@ -388,7 +411,8 @@ func lazyUpgradeAPIKeyVerifier(user *User, token []byte, verifier *apikey.Servic
 	}
 	if err := db.Raw(
 		"SELECT api_key_verifier, api_key_verifier_key_id FROM users "+
-			"WHERE id = ? AND api_key IS NULL", user.Id,
+			"WHERE id = ? AND api_key IS NULL "+
+			"AND (account_locked IS NULL OR account_locked = ?)", user.Id, false,
 	).Scan(&current).Error; err != nil {
 		return ErrInvalidAPICredential
 	}

@@ -207,6 +207,10 @@ func TestPutUserIsolatesAPIKeyStateSQLite(t *testing.T) {
 		!updated.AccountLocked || !updated.LastLogin.Equal(loginTime) {
 		t.Fatal("ordinary SQLite user fields did not persist")
 	}
+	legacy.AccountLocked = false
+	if err := PutUser(&legacy); err != nil {
+		t.Fatal(err)
+	}
 	migration, err := MigrateAPIKeys(service)
 	if err != nil || migration.Updated != 1 {
 		t.Fatalf("SQLite LEGACY row failed migration after PutUser: result=%+v err=%v", migration, err)
@@ -246,6 +250,10 @@ func TestPutUserIsolatesAPIKeyStateSQLite(t *testing.T) {
 	}
 	if err := PutUser(&admin); err != nil {
 		t.Fatalf("no-op SQLite user update failed: %v", err)
+	}
+	admin.AccountLocked = false
+	if err := PutUser(&admin); err != nil {
+		t.Fatal(err)
 	}
 
 	resetToken, err := ResetUserAPIKey(admin.Id)
@@ -355,6 +363,101 @@ func TestRuntimeRequiresVerifierOnlyState(t *testing.T) {
 	}
 	if transitionKeyID != "old" {
 		t.Fatal("transition to controlled BOTH was lazily rekeyed")
+	}
+}
+
+func TestLockedAccountRejectsAPIKeyAndLazyRekeySQLite(t *testing.T) {
+	service := testAPIKeyService(t, "active", "active", "old")
+	setupAPIKeyDatabase(t, service)
+	role, err := GetRoleBySlug(RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	const lockedToken = "synthetic-sqlite-locked-migrated-token"
+	lockedVerifier, _ := service.Compute("active", []byte(lockedToken))
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key, role_id, account_locked, "+
+			"api_key_verifier, api_key_verifier_key_id) VALUES (?, ?, NULL, ?, ?, ?, ?)",
+		"sqlite-locked-migrated", "synthetic-hash", role.ID, true,
+		lockedVerifier[:], "active",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	locked, err := GetUserByUsername("sqlite-locked-migrated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey(lockedToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("locked SQLite verifier authenticated: %v", err)
+	}
+	locked.AccountLocked = false
+	if err := PutUser(&locked); err != nil {
+		t.Fatal(err)
+	}
+	if authenticated, err := GetUserByAPIKey(lockedToken); err != nil || authenticated.Id != locked.Id {
+		t.Fatalf("unlock did not restore the same SQLite token: %v", err)
+	}
+
+	createdLocked := User{
+		Username: "sqlite-created-locked", Hash: "synthetic-hash",
+		RoleID: role.ID, AccountLocked: true,
+	}
+	createdToken, err := CreateUserWithAPIKey(&createdLocked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey(createdToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatal("SQLite create made a locked user's token usable")
+	}
+	resetToken, err := ResetUserAPIKey(createdLocked.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey(resetToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatal("SQLite reset made a locked user's token usable")
+	}
+	createdLocked.AccountLocked = false
+	if err := PutUser(&createdLocked); err != nil {
+		t.Fatal(err)
+	}
+	if authenticated, err := GetUserByAPIKey(resetToken); err != nil || authenticated.Id != createdLocked.Id {
+		t.Fatalf("unlock did not restore reset SQLite token: %v", err)
+	}
+
+	const lazyToken = "synthetic-sqlite-lock-during-lazy-token"
+	oldVerifier, _ := service.Compute("old", []byte(lazyToken))
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key, role_id, account_locked, "+
+			"api_key_verifier, api_key_verifier_key_id) VALUES (?, ?, NULL, ?, ?, ?, ?)",
+		"sqlite-lock-during-lazy", "synthetic-hash", role.ID, false,
+		oldVerifier[:], "old",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	staleUnlocked, err := GetUserByUsername("sqlite-lock-during-lazy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(
+		"UPDATE users SET account_locked = ? WHERE id = ?", true, staleUnlocked.Id,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := lazyUpgradeAPIKeyVerifier(&staleUnlocked, []byte(lazyToken), service); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("SQLite lazy rekey accepted a concurrently locked account: %v", err)
+	}
+	var keyID string
+	if err := db.Raw(
+		"SELECT api_key_verifier_key_id FROM users WHERE id = ?", staleUnlocked.Id,
+	).Row().Scan(&keyID); err != nil {
+		t.Fatal(err)
+	}
+	if keyID != "old" {
+		t.Fatal("SQLite concurrent lock allowed lazy verifier update")
+	}
+	if _, err := GetUserByAPIKey(lazyToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("concurrently locked SQLite account authenticated: %v", err)
 	}
 }
 

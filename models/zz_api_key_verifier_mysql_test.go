@@ -98,6 +98,10 @@ func TestMySQLZZPutUserIsolatesAPIKeyState(t *testing.T) {
 		!updated.AccountLocked || !updated.LastLogin.Equal(loginTime) {
 		t.Fatal("ordinary MySQL user fields did not persist")
 	}
+	user.AccountLocked = false
+	if err := PutUser(&user); err != nil {
+		t.Fatal(err)
+	}
 	migration, err := MigrateAPIKeys(service)
 	if err != nil || migration.Updated != 1 {
 		t.Fatalf("MySQL LEGACY row failed migration after PutUser: result=%+v err=%v", migration, err)
@@ -150,6 +154,124 @@ func TestMySQLZZPutUserIsolatesAPIKeyState(t *testing.T) {
 	}
 	if authenticated, err := GetUserByAPIKey(resetToken); err != nil || authenticated.Id != migrated.Id {
 		t.Fatalf("dedicated MySQL reset token did not authenticate: %v", err)
+	}
+}
+
+func TestMySQLZZLockedAccountRejectsAPIKeyAndLazyRekey(t *testing.T) {
+	connectionString := mysqlAPIKeyTestDSN(t)
+	database, err := openDatabase("mysql", connectionString)
+	if err != nil {
+		t.Fatal(err)
+	}
+	db = database
+	db.LogMode(false)
+	conf = &config.Config{
+		DBName: "mysql", DBPath: connectionString,
+		MigrationsPath: "../db/db_mysql/migrations",
+	}
+	if err := migrateDatabase(db.DB(), conf.DBName, conf.MigrationsPath); err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec("DELETE FROM users").Error; err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		_ = db.Exec("DELETE FROM users").Error
+		_ = database.Close()
+	})
+
+	service := testAPIKeyService(t, "mysql-active", "mysql-active", "mysql-old")
+	SetAPIKeyVerifier(service)
+	role, err := GetRoleBySlug(RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	const lockedToken = "synthetic-mysql-locked-migrated-token"
+	lockedVerifier, _ := service.Compute("mysql-active", []byte(lockedToken))
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key, role_id, account_locked, "+
+			"api_key_verifier, api_key_verifier_key_id) VALUES (?, ?, NULL, ?, ?, ?, ?)",
+		"mysql-locked-migrated", "synthetic-hash", role.ID, true,
+		lockedVerifier[:], "mysql-active",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	locked, err := GetUserByUsername("mysql-locked-migrated")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey(lockedToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("locked MySQL verifier authenticated: %v", err)
+	}
+	locked.AccountLocked = false
+	locked.LastLogin = time.Date(2026, time.September, 4, 3, 0, 0, 0, time.UTC)
+	if err := PutUser(&locked); err != nil {
+		t.Fatal(err)
+	}
+	if authenticated, err := GetUserByAPIKey(lockedToken); err != nil || authenticated.Id != locked.Id {
+		t.Fatalf("unlock did not restore the same MySQL token: %v", err)
+	}
+
+	createdLocked := User{
+		Username: "mysql-created-locked", Hash: "synthetic-hash",
+		RoleID: role.ID, AccountLocked: true,
+		LastLogin: time.Date(2026, time.September, 4, 3, 1, 0, 0, time.UTC),
+	}
+	createdToken, err := CreateUserWithAPIKey(&createdLocked)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey(createdToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatal("MySQL create made a locked user's token usable")
+	}
+	resetToken, err := ResetUserAPIKey(createdLocked.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := GetUserByAPIKey(resetToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatal("MySQL reset made a locked user's token usable")
+	}
+	createdLocked.AccountLocked = false
+	if err := PutUser(&createdLocked); err != nil {
+		t.Fatal(err)
+	}
+	if authenticated, err := GetUserByAPIKey(resetToken); err != nil || authenticated.Id != createdLocked.Id {
+		t.Fatalf("unlock did not restore reset MySQL token: %v", err)
+	}
+
+	const lazyToken = "synthetic-mysql-lock-during-lazy-token"
+	oldVerifier, _ := service.Compute("mysql-old", []byte(lazyToken))
+	if err := db.Exec(
+		"INSERT INTO users (username, hash, api_key, role_id, account_locked, "+
+			"api_key_verifier, api_key_verifier_key_id) VALUES (?, ?, NULL, ?, ?, ?, ?)",
+		"mysql-lock-during-lazy", "synthetic-hash", role.ID, false,
+		oldVerifier[:], "mysql-old",
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	staleUnlocked, err := GetUserByUsername("mysql-lock-during-lazy")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := db.Exec(
+		"UPDATE users SET account_locked = ? WHERE id = ?", true, staleUnlocked.Id,
+	).Error; err != nil {
+		t.Fatal(err)
+	}
+	if err := lazyUpgradeAPIKeyVerifier(&staleUnlocked, []byte(lazyToken), service); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("MySQL lazy rekey accepted a concurrently locked account: %v", err)
+	}
+	var keyID string
+	if err := db.Raw(
+		"SELECT api_key_verifier_key_id FROM users WHERE id = ?", staleUnlocked.Id,
+	).Row().Scan(&keyID); err != nil {
+		t.Fatal(err)
+	}
+	if keyID != "mysql-old" {
+		t.Fatal("MySQL concurrent lock allowed lazy verifier update")
+	}
+	if _, err := GetUserByAPIKey(lazyToken); !errors.Is(err, ErrInvalidAPICredential) {
+		t.Fatalf("concurrently locked MySQL account authenticated: %v", err)
 	}
 }
 

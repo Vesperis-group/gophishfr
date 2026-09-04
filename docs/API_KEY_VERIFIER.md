@@ -83,6 +83,7 @@ Normal runtime accepts only:
 api_key IS NULL
 verifier is exactly 32 bytes
 key ID is structurally valid and present in the loaded keyring
+account_locked is not true
 ```
 
 It computes one candidate per accepted pepper and performs one bounded,
@@ -94,7 +95,13 @@ An old-key match is conditionally upgraded to the active key with an exact
 user/old-pair CAS. If another writer wins, the presented token is checked
 against the current row: a concurrent upgrade may succeed, while a committed
 reset makes the old token fail. A non-conflict rekey database error may leave
-the already-validated old verifier and allow that request.
+the already-validated old verifier and allow that request. Lock state is part
+of the initial indexed lookup, lazy-rekey CAS/reread, and final authentication
+check. A lock committed before that final check rejects the request without
+rekeying when it precedes the CAS; a lock committed after completed
+authentication follows normal per-request race semantics. Locked and unknown
+accounts return the same invalid-key response. Existing session behavior is
+unchanged.
 
 An old pepper may be retired only after no row references its ID, or affected
 users have authenticated (lazy upgrade) or reset. Offline bulk rekey is

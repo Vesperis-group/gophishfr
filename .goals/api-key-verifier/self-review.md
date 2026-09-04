@@ -112,6 +112,29 @@ plaintext reads and authentication fallbacks are zero.
   attempts; manifests are unchanged and the iteration-2 audit found zero
   vulnerabilities.
 
+## Iteration 4 account-lock enforcement
+
+- Indexed verifier lookup rejects locked accounts without changing the generic
+  invalid-key response. Defensive loaded-user validation, lazy-rekey CAS and
+  conflict reread, and the final account-state linearization check all enforce
+  the same rule without selecting, comparing, or logging legacy plaintext.
+- A lock committed before authentication completes rejects the request. A lock
+  committed before lazy rekey also prevents verifier mutation; a lock committed
+  after completed authentication retains normal per-request race semantics.
+  Existing session selection behavior is deliberately unchanged.
+- SQLite and clean real MySQL tests cover locked migrated users and
+  administrators, Bearer/raw/query/form transports, byte-identical invalid-key
+  responses, unlock restoration of the same token, locked verifier-only
+  create/reset, and lock-before-lazy-CAS rejection without rekey. The full PR
+  #62 transport/auth matrix and normal migration/lazy/reset behavior remain
+  covered.
+- Final `./scripts/verify.sh`, race tests, real-MySQL suite, browser, all five
+  container suites, two 10-second fuzzers, scanners, and two-build frontend
+  reproducibility passed. Gosec and Zizmor retained only their established
+  baselines. Yarn audit was retried but the registry timed out; dependency
+  manifests are byte-unchanged and iteration 2's successful audit found zero
+  vulnerabilities.
+
 ## Limitations
 
 HMAC protects token confidentiality after a read-only database leak, including

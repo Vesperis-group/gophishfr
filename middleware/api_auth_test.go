@@ -159,6 +159,134 @@ func TestExplicitAPICredentialExtraction(t *testing.T) {
 	}
 }
 
+func TestLockedAccountsRejectEveryAPIKeyTransport(t *testing.T) {
+	testCtx := setupTest(t)
+	admin, err := models.GetUser(1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	role, err := models.GetRoleBySlug(models.RoleUser)
+	if err != nil {
+		t.Fatal(err)
+	}
+	lockedUser := models.User{
+		Username:      "locked-api-transport-user",
+		Hash:          "synthetic-locked-user-hash",
+		RoleID:        role.ID,
+		AccountLocked: true,
+	}
+	lockedUserToken := createTestUserWithAPIKey(t, &lockedUser)
+	admin.AccountLocked = true
+	if err := models.PutUser(&admin); err != nil {
+		t.Fatal(err)
+	}
+
+	requests := []struct {
+		name string
+		make func(string) *http.Request
+	}{
+		{
+			name: "bearer",
+			make: func(token string) *http.Request {
+				request := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+				request.Header.Set("Authorization", "Bearer "+token)
+				return request
+			},
+		},
+		{
+			name: "raw",
+			make: func(token string) *http.Request {
+				request := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+				request.Header.Set("Authorization", token)
+				return request
+			},
+		},
+		{
+			name: "query",
+			make: func(token string) *http.Request {
+				return httptest.NewRequest(http.MethodGet, "/api/test?api_key="+url.QueryEscape(token), nil)
+			},
+		},
+		{
+			name: "form",
+			make: func(token string) *http.Request {
+				request := httptest.NewRequest(
+					http.MethodPost, "/api/test",
+					strings.NewReader(url.Values{"api_key": {token}}.Encode()),
+				)
+				request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				return request
+			},
+		},
+	}
+
+	invalidResponse := httptest.NewRecorder()
+	invalidRequest := httptest.NewRequest(http.MethodGet, "/api/test", nil)
+	invalidRequest.Header.Set("Authorization", "synthetic-invalid-locked-comparison")
+	RequireAPIKey(successHandler).ServeHTTP(invalidResponse, invalidRequest)
+
+	for _, identity := range []struct {
+		name  string
+		token string
+	}{
+		{name: "admin", token: testCtx.apiKey},
+		{name: "user", token: lockedUserToken},
+	} {
+		for _, transport := range requests {
+			t.Run(identity.name+"/"+transport.name, func(t *testing.T) {
+				response := httptest.NewRecorder()
+				RequireAPIKey(successHandler).ServeHTTP(response, transport.make(identity.token))
+				if response.Code != http.StatusUnauthorized {
+					t.Fatalf("locked account authenticated with status %d", response.Code)
+				}
+				if response.Body.String() != invalidResponse.Body.String() {
+					t.Fatalf("locked-account response differs from invalid-key response: %q", response.Body.String())
+				}
+			})
+		}
+	}
+
+	// Issuing a replacement while locked is allowed for session administration,
+	// but it must not make API-key authentication usable.
+	resetToken, err := models.ResetUserAPIKey(lockedUser.Id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	response := httptest.NewRecorder()
+	RequireAPIKey(successHandler).ServeHTTP(response, requests[0].make(resetToken))
+	if response.Code != http.StatusUnauthorized || response.Body.String() != invalidResponse.Body.String() {
+		t.Fatal("reset made a locked user's API key usable or revealed lock state")
+	}
+
+	admin.AccountLocked = false
+	if err := models.PutUser(&admin); err != nil {
+		t.Fatal(err)
+	}
+	lockedUser.AccountLocked = false
+	if err := models.PutUser(&lockedUser); err != nil {
+		t.Fatal(err)
+	}
+	for name, token := range map[string]string{"admin": testCtx.apiKey, "user": resetToken} {
+		t.Run("unlock/"+name, func(t *testing.T) {
+			response := httptest.NewRecorder()
+			RequireAPIKey(successHandler).ServeHTTP(response, requests[0].make(token))
+			if response.Code != http.StatusOK {
+				t.Fatalf("unlock did not restore same token: %d %s", response.Code, response.Body.String())
+			}
+		})
+	}
+
+	// Session selection intentionally remains unchanged by API-key lock policy.
+	admin.AccountLocked = true
+	admin.PasswordChangeRequired = false
+	sessionRequest := ctx.Set(httptest.NewRequest(http.MethodGet, "/api/test", nil), "user", admin)
+	sessionResponse := httptest.NewRecorder()
+	RequireAPIKey(successHandler).ServeHTTP(sessionResponse, sessionRequest)
+	if sessionResponse.Code != http.StatusOK {
+		t.Fatal("API-key lock enforcement changed existing session selection behavior")
+	}
+}
+
 func TestAPIAuthenticationMechanismSelection(t *testing.T) {
 	testCtx := setupTest(t)
 	sessionUser, err := models.GetUser(1)
