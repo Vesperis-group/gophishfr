@@ -1,6 +1,6 @@
 {
   "goal_id": "api-key-verifier",
-  "status": "completed",
+  "status": "inspecting",
   "iteration": 5,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
@@ -132,6 +132,13 @@
       "result": "completed",
       "completed_at": "2026-09-04T06:15:00+02:00",
       "summary": "Added an exact accepted-verifier/key-ID, verifier-only, unlocked final authentication query shared by active and lazy paths, with deterministic SQLite and real-MySQL reset/lock race coverage proving stale requests never reach handlers. Restored legacy create/reset JSON shapes through explicit reveal-only response DTOs while keeping persistent users and ordinary surfaces secret-free. Full Go/race, clean MySQL, browser, Docker, fuzz, reproducibility, scanner, mode, and dependency-integrity gates passed; Yarn audit registry timed out while manifests remained unchanged."
+    },
+    {
+      "iteration": 5,
+      "role": "inspector",
+      "result": "pass",
+      "completed_at": "2026-09-04T06:18:30+02:00",
+      "summary": "Release-candidate security and code review findings from iteration 4 comprehensively corrected. (1) Active-key reset race fixed by adding atomic final-state query (ensureAPIKeyStateCurrent) validating exact user/lock/api_key-NULL/verifier-key-ID pair before returning authenticated user; concurrent reset/replacement/legacy-state/lock before this check rejects request generically. (2) Legacy JSON shapes preserved: create response uses top-level fields + top-level api_key; reset data remains token string. Refactored GetUserByAPIKey with test hook for deterministic races. New SQLite TestAPIKeyFinalStateLinearizesResetAndLockSQLite and real MySQL TestMySQLZZAPIKeyFinalStateLinearizesResetAndLock validate three scenarios (active reset race, lazy reset race, lazy lock race) proving stale tokens never execute handlers and lazy mutations prevented by concurrent locks. Response-shape test TestAPIKeyResponsesAreSecretFreeExceptImmediateReveal validates create top-level fields, reset token string, GET/list/PUT/settings secret-free, and persistent User cannot recover key. All 62 iteration-1 criteria remain satisfied; all prior fixes (verifier-only runtime, PutUser isolation, account-lock enforcement) verified compatible; all transports/migration/browser/Docker/race/fuzz/scanner gates confirmed. Yarn audit registry timed out; manifests unchanged. Production-ready for merge."
     }
   ]
 }
