@@ -167,8 +167,17 @@ that plaintext. Closing the dedicated reveal removes it from the DOM and
 retained JavaScript state where reasonable; reload cannot recover it. It is
 never placed in cookies,
 `localStorage`, `sessionStorage`, global page state, logs, or later requests.
-JavaScript memory zeroization is not guaranteed. If the response is lost, there
-is no grace period: reset again through an authenticated session/admin.
+The first-party Settings form permits only one reset request at a time, disables
+its reset controls before dispatch, and keeps them disabled while the one-time
+reveal is open. A failed request re-enables retry; closing a successful reveal
+clears the plaintext and re-enables an intentional later reset. JavaScript
+memory zeroization is not guaranteed.
+
+This browser serialization does not change the API's concurrency semantics.
+Independent clients can still reset concurrently, and each committed reset
+immediately invalidates every earlier token. There is no grace period or
+two-phase activation. A client that loses a response or receives a token made
+stale by another caller must reset again through an authenticated session/admin.
 
 Bearer, raw Authorization, query, and form transports remain compatible.
 Session/API-key selection, explicit-invalid no-fallback, RBAC, view-only, CSRF,

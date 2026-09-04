@@ -1,7 +1,7 @@
 {
   "goal_id": "api-key-verifier",
-  "status": "inspecting",
-  "iteration": 6,
+  "status": "completed",
+  "iteration": 7,
   "builder_model": "Claude:Sonnet-4.6",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "a28fcca62aa94d2b3b90e50e0d19f0ad87d210ef",
@@ -167,6 +167,27 @@
       "result": "pass",
       "completed_at": "2026-09-04T06:46:15+02:00",
       "summary": "Code-review finding from iteration 5 (255-byte migration limit rejecting valid legacy tokens) comprehensively corrected. Migration removed maxLegacyAPIKeyBytes constant and now accepts any non-empty legacy value, computing HMAC over exact byte sequence without normalization/truncation/case-folding. New SQLite TestOfflineAPIKeyMigrationPreservesExactLongTokensSQLite validates tokens >255 bytes and 255-character multibyte (765 bytes) migrate and authenticate exactly, byte-truncated variants reject, rerun is idempotent no-op. Real MySQL TestMySQLZZOfflineAPIKeyMigrationPreservesCharacterBoundary validates 255 multibyte characters (765 bytes, >255) accepted by strict MySQL and migrate/authenticate exactly; characterizes strict-mode rejection of 256+ characters; characterizes non-strict-mode insertion truncation to 255 characters; proves migration hashes exact readable value (accounting for any truncation already present). Documentation updated explaining byte vs character limits and backend-specific behavior. All 62 acceptance criteria remain satisfied; all prior iterations (verifier-only, PutUser, account-lock, final-state, response-shapes) verified compatible. Full Go/race, migration idempotence/atomicity, clean MySQL, browser, Docker, container, fuzz, reproducibility, and scanner gates confirmed. Yarn audit registry timed out; manifests unchanged. Production-ready for merge."
+    },
+    {
+      "iteration": 6,
+      "role": "security-review",
+      "result": "pass",
+      "completed_at": "2026-09-04T06:53:00+02:00",
+      "summary": "Final consolidated security review found no remaining high-confidence security issue."
+    },
+    {
+      "iteration": 6,
+      "role": "code-review",
+      "result": "fail",
+      "completed_at": "2026-09-04T06:53:00+02:00",
+      "summary": "Concurrent settings reset submissions can display an earlier token already invalidated by a later reset."
+    },
+    {
+      "iteration": 7,
+      "role": "builder",
+      "result": "completed",
+      "completed_at": "2026-09-04T07:10:01+02:00",
+      "summary": "Serialized first-party Settings resets with a synchronous in-flight/reveal guard, disabled pending and revealed-state controls, failure retry recovery, and plaintext clearing before controls reopen. Deterministic deferred/out-of-order/rapid-submit browser coverage proves one request, no stale overwrite, and successful retry. Full Go/race, clean MySQL, browser, Docker, fuzz, reproducibility, scanner, mode, and dependency-integrity gates passed; Yarn audit registry timed out while manifests remained unchanged."
     }
   ]
 }

@@ -85,10 +85,24 @@ function postSettingsForm(form) {
 document.addEventListener('DOMContentLoaded', function () {
     bsInitTooltips();
     let revealedAPIKey = ""
+    let apiResetRequest
+    let apiKeyRevealOpen = false
+    const apiResetForm = document.getElementById("apiResetForm")
+    const apiResetControls = apiResetForm.querySelectorAll("button, input")
+    const setAPIResetControlsDisabled = function (disabled) {
+        apiResetControls.forEach(function (control) {
+            control.disabled = disabled
+        })
+        apiResetForm.setAttribute("aria-busy", disabled ? "true" : "false")
+    }
     const clearAPIKeyReveal = function () {
         revealedAPIKey = ""
         document.getElementById("apiKeyRevealValue").replaceChildren()
         document.getElementById("apiKeyReveal").classList.add("d-none")
+        apiKeyRevealOpen = false
+        if (!apiResetRequest) {
+            setAPIResetControlsDisabled(false)
+        }
     }
     document.getElementById("closeApiKeyReveal").addEventListener("click", clearAPIKeyReveal)
     document.getElementById("copyApiKey").addEventListener("click", function () {
@@ -96,18 +110,42 @@ document.addEventListener('DOMContentLoaded', function () {
             navigator.clipboard.writeText(revealedAPIKey)
         }
     })
-    document.getElementById("apiResetForm").addEventListener("submit", function (e) {
+    apiResetForm.addEventListener("submit", function (e) {
         // The previous handler returned false, which cancelled the browser's
         // own submission as well as further propagation.
         e.preventDefault()
         e.stopPropagation()
-        api.reset()
-            .then(function (response) {
+        if (apiResetRequest || apiKeyRevealOpen) {
+            return
+        }
+        const resetAttempt = {}
+        apiResetRequest = resetAttempt
+        setAPIResetControlsDisabled(true)
+        let request
+        try {
+            request = api.reset()
+        } catch (error) {
+            apiResetRequest = undefined
+            setAPIResetControlsDisabled(false)
+            errorFlash(requestErrorMessage(error))
+            return
+        }
+        request.then(function (response) {
+                if (apiResetRequest !== resetAttempt) {
+                    return
+                }
+                apiResetRequest = undefined
+                apiKeyRevealOpen = true
                 successFlash(response.message)
                 revealedAPIKey = response.data
                 document.getElementById("apiKeyRevealValue").textContent = revealedAPIKey
                 document.getElementById("apiKeyReveal").classList.remove("d-none")
             }, function (error) {
+                if (apiResetRequest !== resetAttempt) {
+                    return
+                }
+                apiResetRequest = undefined
+                setAPIResetControlsDisabled(false)
                 errorFlash(requestErrorMessage(error))
             })
     })

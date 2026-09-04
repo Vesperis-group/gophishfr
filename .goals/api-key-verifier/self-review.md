@@ -177,6 +177,30 @@ plaintext reads and authentication fallbacks are zero.
   unsuppressed findings; Gitleaks, Retire.js, and actionlint passed. Yarn audit
   was retried but the registry timed out. Dependency manifests are unchanged.
 
+## Iteration 7 serialized settings reset
+
+- The Settings reset handler establishes its request guard and disables every
+  reset-form control before dispatch. Click, submit, keyboard, and programmatic
+  submissions cannot start another request while the first is pending.
+- Failure clears the guard and restores the controls for retry. Success keeps
+  the reset path closed while its single reveal is visible; closing removes the
+  plaintext from retained JavaScript state and the DOM before reopening the
+  reset control.
+- Deterministic browser routes hold the first response while rapid duplicate
+  submissions attempt to overtake it. Tests prove exactly one request is sent,
+  no later/stale response can overwrite the reveal, controls expose their busy
+  state, close clears the value, and a deferred failure permits one successful
+  retry.
+- External API clients retain immediate invalidation semantics: concurrent
+  committed resets have no grace period, and a client with a lost or stale
+  response must rotate again through authenticated administration.
+- `./scripts/verify.sh`, clean real MySQL 8.4.6, the 13-test browser suite, all
+  five container suites, both 10-second fuzzers, and two-build frontend
+  reproducibility passed. Govulncheck, Gitleaks, actionlint, Zizmor, and
+  Retire.js passed; Gosec retained its 12 established findings. Yarn audit was
+  retried and timed out against the registry. Dependencies and script modes are
+  unchanged, and test containers were removed.
+
 ## Limitations
 
 HMAC protects token confidentiality after a read-only database leak, including

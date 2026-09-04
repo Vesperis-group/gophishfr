@@ -2763,19 +2763,85 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
     await expectJQueryGlobalsAbsent(page);
     await expect(page).toHaveURL(/\/settings$/);
 
+    const resetButton = page.locator("#apiResetForm button");
+    const resetForm = page.locator("#apiResetForm");
+    let resetRequests = 0;
+    let releaseDeferredReset!: () => void;
+    const deferredReset = new Promise<void>((resolve) => {
+      releaseDeferredReset = resolve;
+    });
+    await page.route("**/api/reset", async (route) => {
+      resetRequests += 1;
+      if (resetRequests === 1) {
+        await deferredReset;
+        await route.fulfill({
+          body: JSON.stringify({
+            data: "deferred-valid-reset-token",
+            message: "synthetic reset success",
+          }),
+          contentType: "application/json",
+          status: 200,
+        });
+        return;
+      }
+      // If the UI regresses, later requests complete first and would make the
+      // deferred response overwrite a newer token.
+      await route.fulfill({
+        body: JSON.stringify({
+          data: "must-not-be-revealed",
+          message: "unexpected duplicate reset",
+        }),
+        contentType: "application/json",
+        status: 200,
+      });
+    });
+    await resetButton.click();
+    await expect(resetButton).toBeDisabled();
+    await expect(resetForm).toHaveAttribute("aria-busy", "true");
+    await resetForm.dispatchEvent("submit");
+    await resetForm.dispatchEvent("submit");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => resetRequests).toBe(1);
+    releaseDeferredReset();
+    await expect(page.locator("#apiKeyRevealValue")).toHaveText(
+      "deferred-valid-reset-token",
+    );
+    await expect(resetButton).toBeDisabled();
+    await resetForm.dispatchEvent("submit");
+    await page.keyboard.press("Enter");
+    await expect.poll(() => resetRequests).toBe(1);
+    await expect(page.locator("#apiKeyRevealValue")).not.toHaveText(
+      "must-not-be-revealed",
+    );
+    await page.locator("#closeApiKeyReveal").click();
+    await expect(page.locator("#apiKeyReveal")).toBeHidden();
+    await expect(page.locator("#apiKeyRevealValue")).toBeEmpty();
+    await expect(resetButton).toBeEnabled();
+    await expect(resetForm).toHaveAttribute("aria-busy", "false");
+    await page.unroute("**/api/reset");
+
     const resetConsoleErrorsBefore = consoleErrors.length;
     const resetFailedResponsesBefore = failedLocalResponses.length;
-    await page.route("**/api/reset", (route) =>
-      route.fulfill({
+    let releaseFailedReset!: () => void;
+    const failedReset = new Promise<void>((resolve) => {
+      releaseFailedReset = resolve;
+    });
+    await page.route("**/api/reset", async (route) => {
+      await failedReset;
+      await route.fulfill({
         body: JSON.stringify({ message: "synthetic reset failure" }),
         contentType: "application/json",
         status: 400,
-      }),
-    );
-    await page.locator("#apiResetForm button").click();
+      });
+    });
+    await resetButton.click();
+    await expect(resetButton).toBeDisabled();
+    releaseFailedReset();
     await expect(page.locator('[id="flashes"]').first()).toContainText(
       "synthetic reset failure",
     );
+    await expect(resetButton).toBeEnabled();
+    await expect(resetForm).toHaveAttribute("aria-busy", "false");
     await page.unroute("**/api/reset");
     expect(
       consoleErrors
@@ -2787,6 +2853,28 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       "400 /api/reset",
     ]);
     failedLocalResponses.length = resetFailedResponsesBefore;
+
+    let retryRequests = 0;
+    await page.route("**/api/reset", async (route) => {
+      retryRequests += 1;
+      await route.fulfill({
+        body: JSON.stringify({
+          data: "retry-valid-reset-token",
+          message: "synthetic retry success",
+        }),
+        contentType: "application/json",
+        status: 200,
+      });
+    });
+    await resetButton.click();
+    await expect(page.locator("#apiKeyRevealValue")).toHaveText(
+      "retry-valid-reset-token",
+    );
+    expect(retryRequests).toBe(1);
+    await page.locator("#closeApiKeyReveal").click();
+    await expect(page.locator("#apiKeyRevealValue")).toBeEmpty();
+    await expect(resetButton).toBeEnabled();
+    await page.unroute("**/api/reset");
 
     await assertSettingsFormContract(
       page,
