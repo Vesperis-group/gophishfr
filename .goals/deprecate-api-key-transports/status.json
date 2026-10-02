@@ -1,7 +1,7 @@
 {
     "goal_id":  "deprecate-api-key-transports",
     "status":  "inspecting",
-    "iteration":  8,
+    "iteration":  9,
     "builder_model":  "Claude:Sonnet-5",
     "inspector_model":  "Claude:Haiku-4.5",
     "initial_sha":  "99c9a50848e8a826360ea7585a57d7e6f753a34c",
@@ -356,6 +356,41 @@
                                         "feedback_file":  ".goals/deprecate-api-key-transports/inspector-feedback-8.md",
                                         "summary":  "Both iteration-7 code-review findings fixed and verified: (1) Sentence-scoped context — enclosingSentence() bounds deprecation-context checks to the sentence containing each candidate recommendation match (split on .!?), not the whole paragraph. An unrelated deprecation keyword in a different sentence no longer suppresses a live recommendation elsewhere in the same paragraph. (2) Direct-negation logic — hasAffirmativeDeprecationContext() tightened to check negation words only within negationProximityWords (3) words before the deprecation-context keyword, on the near side of negationBoundaryPattern ([.!?;—–]|--). A negation governing an earlier verb or crossing a boundary does not suppress the deprecation. 'Do not use ... it is deprecated' still correctly identifies as no violation (negation governs use, not deprecated); 'is not deprecated' still violates (negation directly governs deprecated). New fixtures: TestScanTextContextIsSentenceScopedNotParagraphWide (4 cases), TestScanTextNegationMustDirectlyGovernDeprecationWord (7 cases); all 40+ prior fixtures pass unchanged. Docs gate: 0 violations across 28 shipped Markdown files. Full test suite: all packages pass with race detector. No runtime/auth/middleware/version/dependency changes. Ready for release.",
                                         "completed_at":  "2026-10-02T16:15:00+02:00"
+                    },
+                    {
+                                        "iteration":  8,
+                                        "role":  "code-review",
+                                        "verdict":  "FAIL",
+                                        "feedback_file":  ".goals/deprecate-api-key-transports/review-feedback-8.md",
+                                        "summary":  "Security review passed. internal/docsguard had two bounded parser gaps: (1) sentence splitting treated periods inside dotted numeric versions such as 0.13.0 as sentence boundaries, excluding the removal-version context from the sentence containing a recommendation; (2) direct recommendation verbs such as recommend/recommended were not part of the prose candidate detector. Required treating dots between digits as part of a dotted version rather than a sentence boundary, adding a fixture where 0.13.0 is the only affirmative context after a recommendation, detecting recommend* near api_key plus query/form/parameter/credential anchors, and adding positive and negative historical/internal/deprecated recommendation fixtures, without a broader parser redesign."
+                    },
+                    {
+                                        "iteration":  9,
+                                        "role":  "builder",
+                                        "model":  "Claude:Sonnet-5",
+                                        "commit_sha":  "PENDING",
+                                        "commit_title":  "fix(docs): [B] handle versioned transport guidance",
+                                        "summary":  "Fixed both iteration-8 review findings in internal/docsguard, test/docs-only, both narrow bounded corrections with no broader parser redesign. (1) Dotted-version-aware sentence splitting: added isDottedVersionPeriod (a '.' flanked by an ASCII digit on both sides is never a sentence boundary) and nextSentenceTerminator/prevSentenceTerminator, which scan for a real terminator while skipping any such period; enclosingSentence now uses these instead of a bare strings.IndexAny/LastIndexAny over '.!?'. A sentence such as 'Use the api_key query parameter only until 0.13.0.' is no longer split at the version's internal dots, stranding the removal-version context away from the recommendation it qualifies. (2) Recommend-verb detection: added recommend\\w* (recommend/recommends/recommended/recommending) to the existing weakRecommendationVerbPattern verb alternation, governed by the same proximity-to-api_key bound and the same anchor-word (parameter/param/query/field/header/credential) requirement as the other weak verbs -- no new, looser code path. Added TestScanTextDottedVersionNotSentenceBoundary (0.13.0 as the sole same-sentence context for a recommendation, mid-sentence/trailing/wrapped placements, does not violate; 0.13.0 context in an unrelated sentence still does not suppress a different sentence's unqualified recommendation) and TestScanTextRecommendVerb (each inflection paired with an anchor word violates, including wrapped; a historical recommended statement with same-sentence deprecation context, an anchor-less internal recommends mention, a no-longer-recommend-it-is-deprecated statement, and a recommend with no api_key mention do not). All prior fixtures, rules, redacted diagnostics, fail-closed scanner, and CI wiring preserved and still fully tested. Searched all shipped Markdown with the extended gate: 0 violations across 28 files, no doc wording changed. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
+                                        "validation":  {
+                                           "verify_sh":  "pass",
+                                           "go_test":  "pass (including 2 new docsguard test functions covering dotted-version sentence scoping and the recommend-verb candidate set; all prior fixtures unchanged and passing)",
+                                           "go_test_race":  "pass",
+                                           "go_vet":  "pass",
+                                           "go_build":  "pass",
+                                           "golangci_lint":  "0 issues",
+                                           "govulncheck":  "pass (0 reachable vulnerabilities)",
+                                           "gosec":  "12 pre-existing findings, same baseline; no new finding",
+                                           "gitleaks":  "1 pre-existing finding from 2026-09-03 history, unrelated to this PR; current working tree clean (--no-git); no new finding",
+                                           "actionlint":  "pass",
+                                           "zizmor":  "pass (2 pre-existing documented suppressions)",
+                                           "yarn_audit":  "4 pre-existing moderate findings in transitive webpack devDependency, lockfile unchanged",
+                                           "retire_js":  "pass",
+                                           "browser_tests":  "pass (scripts/test-browser.sh)",
+                                           "docker_compat_tests":  "pass (scripts/test-container-api-session-auth.sh, scripts/test-container-api-key-verifier.sh)",
+                                           "docs_gate_sanity_check":  "scripts/verify-docs-canonical-examples.sh reports 0 violations across all 28 tracked shipped Markdown files",
+                                           "git_diff_check":  "clean",
+                                           "lockfiles_unchanged":  true
+                                       }
                     }
                 ]
 }

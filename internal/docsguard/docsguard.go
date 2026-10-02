@@ -175,17 +175,67 @@ func hasAffirmativeDeprecationContext(block string) bool {
 // that paragraph.
 const sentenceTerminators = ".!?"
 
+// isDottedVersionPeriod reports whether the '.' at text[idx] sits between
+// two ASCII digits, as in the removal version "0.13.0". Such a period is
+// part of a dotted version number, never a sentence boundary: treating it as
+// one would split "...targeted for removal in 0.13.0." into a fragment
+// ending at "0" and a separate fragment starting at "13.0.", stranding the
+// removal-version context away from whatever recommendation sentence it was
+// meant to qualify.
+func isDottedVersionPeriod(text string, idx int) bool {
+	if idx <= 0 || idx+1 >= len(text) || text[idx] != '.' {
+		return false
+	}
+	isDigit := func(b byte) bool { return b >= '0' && b <= '9' }
+	return isDigit(text[idx-1]) && isDigit(text[idx+1])
+}
+
+// nextSentenceTerminator returns the index of the first real sentence
+// terminator in text at or after fromIdx, skipping any '.' that is part of a
+// dotted version number (see isDottedVersionPeriod). It returns -1 if none
+// is found.
+func nextSentenceTerminator(text string, fromIdx int) int {
+	for i := fromIdx; i < len(text); i++ {
+		if !strings.ContainsRune(sentenceTerminators, rune(text[i])) {
+			continue
+		}
+		if text[i] == '.' && isDottedVersionPeriod(text, i) {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
+// prevSentenceTerminator returns the index of the last real sentence
+// terminator in text at or before fromIdx, skipping any '.' that is part of
+// a dotted version number (see isDottedVersionPeriod). It returns -1 if none
+// is found.
+func prevSentenceTerminator(text string, fromIdx int) int {
+	for i := fromIdx; i >= 0; i-- {
+		if !strings.ContainsRune(sentenceTerminators, rune(text[i])) {
+			continue
+		}
+		if text[i] == '.' && isDottedVersionPeriod(text, i) {
+			continue
+		}
+		return i
+	}
+	return -1
+}
+
 // enclosingSentence returns the sentence of text containing byte offset pos,
-// bounded by the nearest sentenceTerminators character on each side (or the
-// start/end of text if none is found).
+// bounded by the nearest real sentence terminator on each side (or the
+// start/end of text if none is found). A '.' inside a dotted version number
+// such as "0.13.0" is never treated as that boundary.
 func enclosingSentence(text string, pos int) string {
 	start := 0
-	if idx := strings.LastIndexAny(text[:pos], sentenceTerminators); idx != -1 {
+	if idx := prevSentenceTerminator(text, pos-1); idx != -1 {
 		start = idx + 1
 	}
 	end := len(text)
-	if idx := strings.IndexAny(text[pos:], sentenceTerminators); idx != -1 {
-		end = pos + idx + 1
+	if idx := nextSentenceTerminator(text, pos); idx != -1 {
+		end = idx + 1
 	}
 	return text[start:end]
 }
@@ -223,13 +273,14 @@ var strongRecommendationPattern = regexp.MustCompile(
 )
 
 // weakRecommendationVerbPattern matches common, much more generic verbs --
-// "use", "via", "with", "accept" -- within recommendationProximity words of
+// "use", "via", "with", "accept", "recommend" (recommend/recommends/
+// recommended/recommending) -- within recommendationProximity words of
 // `api_key`. These words are far too common in ordinary prose (including
 // this package's own documentation) to use unbounded across a whole
 // paragraph; requiring proximity to `api_key`, in addition to the
 // recommendationAnchorPattern check below, is what keeps this narrow.
 var weakRecommendationVerbPattern = regexp.MustCompile(
-	`(?i)\b(?:use\w*|via|with|accept\w*)\b` + recommendationProximity + `api_key\b|\bapi_key\b` + recommendationProximity + `\b(?:use\w*|via|with|accept\w*)\b`,
+	`(?i)\b(?:use\w*|via|with|accept\w*|recommend\w*)\b` + recommendationProximity + `api_key\b|\bapi_key\b` + recommendationProximity + `\b(?:use\w*|via|with|accept\w*|recommend\w*)\b`,
 )
 
 // recommendationAnchorPattern matches a word that anchors a weak

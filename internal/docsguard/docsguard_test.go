@@ -386,3 +386,96 @@ func containsKind(violations []Violation, kind Kind) bool {
 	}
 	return false
 }
+
+// TestScanTextDottedVersionNotSentenceBoundary proves the dots inside a
+// dotted removal version such as "0.13.0" are never read as sentence
+// boundaries: splitting a sentence at an internal version dot would strand
+// the removal-version context away from the recommendation it was meant to
+// qualify, incorrectly treating a correctly bounded "use it only until
+// 0.13.0" statement as an unqualified, violating recommendation.
+func TestScanTextDottedVersionNotSentenceBoundary(t *testing.T) {
+	negative := []string{
+		// "0.13.0" is the *only* affirmative context in the sentence -- no
+		// "deprecated"/"legacy"/"removal" word at all -- so this exercises
+		// the version-dot fix in isolation, not the ordinary
+		// deprecat*/legacy context words already covered elsewhere.
+		"Use the api_key query parameter only until 0.13.0.",
+		"Authenticate via the api_key parameter until 0.13.0.",
+		// The version sits mid-sentence, followed by more prose, so a
+		// buggy split at its internal dots would strand two fragments on
+		// either side of the recommendation instead of one.
+		"Use the api_key form field until 0.13.0, after which it stops working.",
+		// Wrapped across physical lines.
+		"Use the api_key\nquery parameter only\nuntil 0.13.0.\n",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("unexpected violation when 0.13.0 is the sole, same-sentence removal context %q: %v", text, violations)
+			}
+		})
+	}
+
+	// For contrast: a *different* sentence's "0.13.0" must not leak in and
+	// suppress an unrelated, unqualified recommendation -- the dotted
+	// version does not get special cross-sentence treatment, only correct
+	// in-sentence treatment.
+	positive := []string{
+		"Legacy session cookies were phased out in 0.13.0 for unrelated reasons. Use the api_key query parameter for authentication.",
+	}
+	for _, text := range positive {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if !containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("expected a violation when 0.13.0 context is in an unrelated sentence %q, got %v", text, violations)
+			}
+		})
+	}
+}
+
+// TestScanTextRecommendVerb proves "recommend" (and its inflections:
+// recommends, recommended, recommending) is detected as a recommendation
+// signal when it co-occurs with `api_key` and a transport anchor word
+// (query/form/parameter/credential), the same way the other weak verbs
+// (use/via/with/accept) already are.
+func TestScanTextRecommendVerb(t *testing.T) {
+	positive := []string{
+		"We recommend the api_key query parameter for authentication.",
+		"This guide recommends the api_key form field.",
+		"The recommended approach is an api_key credential in the query string.",
+		"The team is recommending the api_key parameter to new integrators.",
+		// Wrapped across physical lines.
+		"We recommend\nthe api_key query\nparameter for authentication.\n",
+	}
+	for _, text := range positive {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if !containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("expected a recommend-verb violation for %q, got %v", text, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// Historical: recommended in the past, already carrying affirmative
+		// deprecation context in the same sentence.
+		"Earlier releases recommended the api_key query parameter; it is now deprecated.",
+		// Internal/non-transport use of "recommend", with no anchor word
+		// nearby to tie it to the api_key authentication mechanism.
+		"The scheduler recommends a retry backoff for the api_key rotation job.",
+		// A genuine, same-sentence deprecation notice despite using
+		// "recommend" to describe the *former* guidance.
+		"We no longer recommend the api_key form parameter; it is deprecated and targeted for removal in 0.13.0.",
+		// "Recommend" with no api_key mention at all.
+		"We recommend enabling two-factor authentication for all admin accounts.",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("unexpected recommend-verb violation for %q: %v", text, violations)
+			}
+		})
+	}
+}

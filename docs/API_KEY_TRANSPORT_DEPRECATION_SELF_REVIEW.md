@@ -525,6 +525,65 @@ iteration 5–7 fixture, pass unchanged.
 A full run of `scripts/verify-docs-canonical-examples.sh` against every
 tracked Markdown file found 0 violations; no doc wording changed.
 
+## Iteration 9: independent review findings and fixes
+
+[`review-feedback-8.md`](../.goals/deprecate-api-key-transports/review-feedback-8.md)
+returned a FAIL on iteration 8. Security review passed; code review found
+two bounded parser gaps in `internal/docsguard`'s sentence-scoping and
+recommendation-detection logic.
+
+### Finding 1 — a dotted version number's internal periods were read as sentence boundaries
+
+`enclosingSentence` treated every `.` as a sentence terminator, including
+the two periods inside a removal version like `0.13.0`. A sentence such as
+"Use the `api_key` query parameter only until `0.13.0`." would be split at
+the first internal dot, stranding the removal-version context in a
+fragment the recommendation's own enclosing-sentence lookup never saw —
+incorrectly treating a correctly version-bounded statement as an
+unqualified, violating recommendation.
+
+Fixed by adding `isDottedVersionPeriod` (a `.` flanked by an ASCII digit on
+both sides is never a sentence boundary) and `nextSentenceTerminator`/
+`prevSentenceTerminator`, which scan for a real terminator while skipping
+any such period. Only the genuine sentence-ending period after `0.13.0.`
+is treated as a boundary; the version's own internal dots are not.
+
+New fixture: `TestScanTextDottedVersionNotSentenceBoundary` — several
+phrasings where `0.13.0` is the *sole* affirmative context (no
+"deprecated"/"legacy"/"removal" word at all) qualifying a recommendation
+in the same sentence, including mid-sentence and wrapped placements, must
+not violate; a contrasting case proves `0.13.0` context in an *unrelated*
+sentence still does not suppress a different sentence's unqualified
+recommendation (the sentence-scoping from iteration 8 is unaffected).
+
+### Finding 2 — "recommend" was not part of the recommendation-verb candidate set
+
+`weakRecommendationVerbPattern` covered `use`/`via`/`with`/`accept` but not
+`recommend` (and its inflections: recommends, recommended, recommending),
+so prose like "We recommend the `api_key` query parameter" went
+undetected.
+
+Fixed by adding `recommend\w*` to the same verb alternation, so it is
+governed by the same proximity-to-`api_key` bound and the same
+`recommendationAnchorPattern` (parameter/param/query/field/header/
+credential) requirement as the other weak verbs — no new, looser code
+path was introduced.
+
+New fixture: `TestScanTextRecommendVerb` — positive cases cover each
+inflection paired with an anchor word, including a wrapped form; negative
+cases cover a historical "recommended" statement already carrying
+same-sentence deprecation context, an internal/non-transport "recommends"
+with no anchor word nearby, a "no longer recommend ... it is deprecated"
+statement, and "recommend" with no `api_key` mention at all.
+
+Both fixes are narrow, bounded corrections to the existing line-scanning/
+paragraph-grouping/sentence-scoping design from iterations 7–8 — no
+broader Markdown or natural-language parser was introduced. All prior
+fixtures, rules, the redacted diagnostics, and the fail-closed scanner are
+unchanged. A full run of `scripts/verify-docs-canonical-examples.sh`
+against every tracked Markdown file found 0 violations; no doc wording
+changed.
+
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |
@@ -674,6 +733,23 @@ tracked Markdown file found 0 violations; no doc wording changed.
   directly-governed negation logic.
 - `./scripts/verify-docs-canonical-examples.sh` re-run against every
   tracked Markdown file after the iteration-8 fixes: 0 violations across
+  28 shipped Markdown files, no doc wording changed.
+- `TestScanTextDottedVersionNotSentenceBoundary` (iteration 9, new):
+  `0.13.0` as the sole, same-sentence affirmative context for a
+  recommendation — mid-sentence, trailing, and wrapped placements — is not
+  a violation; `0.13.0` context in an unrelated sentence still does not
+  suppress a different, unqualified recommendation.
+- `TestScanTextRecommendVerb` (iteration 9, new): `recommend`/`recommends`/
+  `recommended`/`recommending` paired with an anchor word and no
+  affirmative context violates (plain and wrapped forms); a historical
+  "recommended ... it is deprecated" statement, an anchor-less internal
+  "recommends" mention, a "no longer recommend ... deprecated" statement,
+  and a `recommend` with no `api_key` mention at all do not. All prior
+  `internal/docsguard` fixtures, including every iteration 5–8 fixture,
+  pass unchanged under the dotted-version-aware sentence scoping and the
+  extended verb set.
+- `./scripts/verify-docs-canonical-examples.sh` re-run against every
+  tracked Markdown file after the iteration-9 fixes: 0 violations across
   28 shipped Markdown files, no doc wording changed.
 
 ## Why a bounded deprecation window instead of immediate removal
