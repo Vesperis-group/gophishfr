@@ -43,41 +43,57 @@ in this release. See API_AUTHENTICATION.md for that unchanged behaviour and
 Replace every query or form `api_key` usage, and every raw `Authorization`
 header, with `Authorization: Bearer <token>`.
 
+Every example below targets the same real, documented business operation so
+the migration is provably equivalent and not just syntactically similar:
+`POST /api/campaigns/{id}/complete` — the API endpoint that ends an existing
+campaign (see "Campaign completion" in
+[API authentication](API_AUTHENTICATION.md)). The route has **no trailing
+slash**; its handler reads only the numeric campaign ID from the path and the
+caller's identity, so it needs no request body at all, which is what makes it
+usable with every transport below without inventing a fictitious business
+contract. Replace `42` with a real campaign ID and
+`REPLACE_WITH_YOUR_TOKEN` with a real token; never a real token in
+documentation. `controllers/api/campaign_transport_deprecation_test.go` is an
+executable regression that dispatches the old and new requests below through
+the real API router (including `RequireAPIKey` and the real route table, not
+a direct handler call) and asserts both authenticate and both actually
+complete the same campaign.
+
 ### Query parameter → Bearer
 
 Before (deprecated, removal targeted for `0.13.0`):
 
 ```bash
-curl "https://gophishfr.example/api/campaigns/summary?api_key=REPLACE_WITH_YOUR_TOKEN"
+curl -X POST \
+  "https://gophishfr.example/api/campaigns/42/complete?api_key=REPLACE_WITH_YOUR_TOKEN"
 ```
 
 After (canonical):
 
 ```bash
-curl -H "Authorization: Bearer REPLACE_WITH_YOUR_TOKEN" \
-  "https://gophishfr.example/api/campaigns/summary"
+curl -X POST "https://gophishfr.example/api/campaigns/42/complete" \
+  -H "Authorization: Bearer REPLACE_WITH_YOUR_TOKEN" # gitleaks:allow -- synthetic placeholder, not a real token
 ```
 
 ### Form parameter → Bearer
 
-Before (deprecated, removal targeted for `0.13.0`). The business form body is
-unchanged; only the credential moves to a header:
+Before (deprecated, removal targeted for `0.13.0`). The credential is the
+entire request body; `api_key` is a form-body transport for the credential
+itself, not a business field, so there is no separate business payload to
+preserve here:
 
 ```bash
-curl -X POST \
+curl -X POST "https://gophishfr.example/api/campaigns/42/complete" \
   -H "Content-Type: application/x-www-form-urlencoded" \
-  --data "api_key=REPLACE_WITH_YOUR_TOKEN&name=example-campaign" \
-  "https://gophishfr.example/api/campaigns"
+  --data "api_key=REPLACE_WITH_YOUR_TOKEN"
 ```
 
-After (canonical):
+After (canonical): the credential moves from the form body to the
+`Authorization` header, so the request becomes a plain, bodyless `POST`:
 
 ```bash
-curl -X POST \
-  -H "Authorization: Bearer REPLACE_WITH_YOUR_TOKEN" \
-  -H "Content-Type: application/x-www-form-urlencoded" \
-  --data "name=example-campaign" \
-  "https://gophishfr.example/api/campaigns"
+curl -X POST "https://gophishfr.example/api/campaigns/42/complete" \
+  -H "Authorization: Bearer REPLACE_WITH_YOUR_TOKEN" # gitleaks:allow -- synthetic placeholder, not a real token
 ```
 
 ### Raw `Authorization` → Bearer
@@ -85,8 +101,23 @@ curl -X POST \
 Before (deprecated legacy, no removal version announced): the header carries
 only the token, with no scheme prefix.
 
+```bash
+curl -X POST "https://gophishfr.example/api/campaigns/42/complete" \
+  -H "Authorization: REPLACE_WITH_YOUR_TOKEN" # gitleaks:allow -- synthetic placeholder, not a real token
+```
+
 After (canonical): prefix the same token with the standard `Bearer` scheme.
 No other part of the request changes.
+
+```bash
+curl -X POST "https://gophishfr.example/api/campaigns/42/complete" \
+  -H "Authorization: Bearer REPLACE_WITH_YOUR_TOKEN" # gitleaks:allow -- synthetic placeholder, not a real token
+```
+
+The documented legacy completion `GET` (see API_AUTHENTICATION.md) works the
+same way for query, raw, and Bearer credentials — a `GET` request cannot
+carry a form-urlencoded body, so the form transport specifically requires
+`POST` as shown above.
 
 ## What changes in `0.13.0`
 

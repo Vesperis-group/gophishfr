@@ -1,7 +1,7 @@
 {
     "goal_id":  "deprecate-api-key-transports",
     "status":  "inspecting",
-    "iteration":  1,
+    "iteration":  2,
     "builder_model":  "Claude:Sonnet-5",
     "inspector_model":  "Claude:Haiku-4.5",
     "initial_sha":  "99c9a50848e8a826360ea7585a57d7e6f753a34c",
@@ -42,6 +42,45 @@
                         "role":  "inspector",
                         "summary":  "All acceptance criteria verified met. Documentation comprehensive and accurate. No runtime behavior changed. Docs gate working. Synthetic values only. RFC header rationale explicit. Release note ready. Scope properly bounded.",
                         "completed_at":  "2026-10-01T18:29:33.4810253Z"
+                    },
+                    {
+                        "iteration":  1,
+                        "role":  "security-review",
+                        "verdict":  "FAIL",
+                        "summary":  "The documented form migration example does not match a real executable API business contract."
+                    },
+                    {
+                        "iteration":  1,
+                        "role":  "code-review",
+                        "verdict":  "FAIL",
+                        "summary":  "The documentation gate is not wired into CI and misses common form/raw syntaxes while rejecting unrelated Authorization schemes."
+                    },
+                    {
+                        "iteration":  2,
+                        "role":  "builder",
+                        "model":  "Claude:Sonnet-5",
+                        "commit_sha":  "PENDING",
+                        "commit_title":  "test(api): [B] enforce deprecation guidance",
+                        "summary":  "Fixed all three iteration-1 review findings, docs/test/CI-only: (1) replaced the non-executable form migration example with real query/form/raw/Bearer examples against POST /api/campaigns/{id}/complete (exact route, method, no trailing slash) and added controllers/api/campaign_transport_deprecation_test.go, an executable regression dispatching every transport through the real API router and asserting each one authenticates and actually completes its campaign, plus a trailing-slash negative case; (2) replaced the grep-based docs gate with internal/docsguard, a stdlib-only Go package with fixture-based positive/negative table tests covering every supported deprecated syntax (query api_key, curl -d/--data/--data-raw/--data-urlencode/-F/--form, standalone api_key=) and every legitimate Authorization scheme (Bearer/Basic/Digest/Negotiate/NTLM) case-insensitively, wired through a new cmd/docsguard CLI and scripts/verify-docs-canonical-examples.sh; (3) added a blocking docs-guard job to .github/workflows/ci.yml, wired into ci-success, reusing already-pinned action SHAs and the repository's default minimal permissions. No runtime auth/middleware/header/status/warning/version/dependency change. VERSION unchanged (0.12.1).",
+                        "validation":  {
+                                           "verify_sh":  "pass",
+                                           "go_test":  "pass (including new internal/docsguard, cmd/docsguard, controllers/api/campaign_transport_deprecation_test.go)",
+                                           "go_test_race":  "pass",
+                                           "go_vet":  "pass",
+                                           "go_build":  "pass",
+                                           "golangci_lint":  "0 issues",
+                                           "govulncheck":  "pass (0 reachable vulnerabilities)",
+                                           "gosec":  "12 pre-existing findings (same baseline as iteration 1); 2 new narrow #nosec annotations added (G101 label-name false positive, G304 CLI-argv file read), matching existing repository style",
+                                           "gitleaks":  "1 pre-existing finding from 2026-09-03 history, unrelated to this PR; 5 new synthetic-placeholder false positives in docs/API_KEY_TRANSPORT_DEPRECATION.md and internal/docsguard/docsguard_test.go suppressed with narrow, justified inline gitleaks:allow comments",
+                                           "actionlint":  "pass (including new docs-guard job)",
+                                           "zizmor":  "pass (2 pre-existing documented suppressions; including new docs-guard job)",
+                                           "yarn_audit":  "4 pre-existing moderate findings in transitive webpack devDependency, lockfile unchanged",
+                                           "retire_js":  "pass",
+                                           "browser_tests":  "pass (scripts/test-browser.sh)",
+                                           "docker_compat_tests":  "pass (scripts/test-container-api-session-auth.sh, scripts/test-container-api-key-verifier.sh)",
+                                           "git_diff_check":  "clean",
+                                           "lockfiles_unchanged":  true
+                                       }
                     }
                 ]
 }

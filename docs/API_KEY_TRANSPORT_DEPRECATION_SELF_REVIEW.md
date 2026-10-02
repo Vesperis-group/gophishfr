@@ -3,64 +3,151 @@
 This Builder review records the evidence for
 `security/deprecate-legacy-api-key-transports`. The immutable acceptance
 checklist in `.goals/deprecate-api-key-transports/goal.md` remains the
-source of truth; this document groups the evidence by control area.
+source of truth; this document groups the evidence by control area and has
+been updated in place for iteration 2 rather than duplicated, so it always
+describes the PR's current state.
 
 ## Scope of the change
 
-This PR is documentation- and release-note-only. It touches:
+This PR is documentation/test/CI-only. It touches:
 
 - `docs/API_AUTHENTICATION.md` — marks query/form/raw as deprecated inline
   and points at the new deprecation guide instead of restating the full
   rationale in two places.
-- `docs/API_KEY_TRANSPORT_DEPRECATION.md` (new) — the canonical/deprecated
-  contract table, old/new migration examples for query and form, raw→Bearer
-  guidance, the exact `0.13.0` removal behaviour, leaked-key rotation and
-  log-review guidance, and the explicit no-header/no-signal decision with
-  rationale.
-- `docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md` (new) — a concise,
+- `docs/API_KEY_TRANSPORT_DEPRECATION.md` — the canonical/deprecated
+  contract table; old/new migration examples for query, form, and raw, all
+  against the same real, executable business operation
+  (`POST /api/campaigns/{id}/complete`); the exact `0.13.0` removal
+  behaviour; leaked-key rotation and log-review guidance; and the explicit
+  no-header/no-signal decision with rationale.
+- `docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md` — a concise,
   repository-conventional release-note artifact for the next GitHub Release.
-- `scripts/verify-docs-canonical-examples.sh` (new) and `scripts/verify.sh`
-  (one added `run_gate` line) — a small grep-based gate that fails if a
-  tracked Markdown file other than `docs/API_KEY_TRANSPORT_DEPRECATION.md`
-  reintroduces a deprecated-transport example: a query-string credential
-  example, a form-body credential example, or a raw, non-Bearer-prefixed
-  credential header example. It adds no dependency and no Markdown parser; it
-  is deliberately
-  scoped to tracked `*.md` files, so `scripts/*.sh` and `tests/**` compatibility
-  fixtures that legitimately exercise query/form/raw are untouched and
-  unaffected.
+- `controllers/api/campaign_transport_deprecation_test.go` (new) — the
+  executable regression for the migration guide: it dispatches each
+  deprecated transport and the canonical Bearer transport through the real
+  API router (`Server.ServeHTTP`, so `RequireAPIKey` and the real mux route
+  table both run) against `POST /api/campaigns/{id}/complete`, and asserts
+  each one both authenticates and actually completes its campaign (reloaded
+  from the database, not just a 200 status). A dedicated subtest proves a
+  trailing-slash request to the same path does **not** match the route,
+  which is the exact class of mistake that made the original form example
+  non-executable.
+- `internal/docsguard/` (new) and `cmd/docsguard/` (new) — the detection
+  logic and CLI behind the documentation gate, plus their fixture-based
+  table tests (`internal/docsguard/docsguard_test.go`,
+  `cmd/docsguard/main_test.go`) covering every supported deprecated syntax
+  and every legitimate Authorization scheme this guard must leave alone.
+  Both are `go test`-covered stdlib-only Go code; no new dependency.
+- `scripts/verify-docs-canonical-examples.sh` (rewritten) — now a thin
+  wrapper that runs `go run ./cmd/docsguard` over tracked Markdown, with one
+  explicit, auditable exemption
+  (`docs/API_KEY_TRANSPORT_DEPRECATION.md`) and `scripts/verify.sh` wiring
+  unchanged.
+- `.github/workflows/ci.yml` — adds a `docs-guard` job that runs the same
+  script as a required, blocking CI check (added to `ci-success`'s
+  `needs:`), using the same pinned `actions/checkout`/`actions/setup-go` SHAs
+  already used by every other job in this file; no permission, timeout, or
+  pin change to any existing job.
 
-No Go source, middleware, controller, model, schema, migration, frontend
-source/generated asset, workflow, `go.mod`, `go.sum`, `package.json`, or
-`yarn.lock` changed. `VERSION` is unchanged (`0.12.1`).
+No Go source outside `internal/docsguard`, `cmd/docsguard`, and the new
+`controllers/api` test file changed; no middleware, controller handler,
+model, schema, migration, frontend source/generated asset, `go.mod`,
+`go.sum`, `package.json`, or `yarn.lock` changed. `VERSION` is unchanged
+(`0.12.1`).
+
+## Iteration 2: independent review findings and fixes
+
+[`review-feedback-1.md`](../.goals/deprecate-api-key-transports/review-feedback-1.md)
+returned a FAIL on iteration 1 with three findings. Each is addressed below.
+
+### Finding 1 — form migration example was not executable
+
+The iteration-1 form example mixed an authentication demonstration (`api_key`
+in a form body) with unrelated JSON business semantics (campaign creation),
+which the real handler rejects outright regardless of authentication. Fixed
+by replacing every migration example — query, form, and raw — with the same
+real, existing, already-documented business operation:
+`POST /api/campaigns/{id}/complete` (see "Campaign completion" in
+`API_AUTHENTICATION.md`). That handler reads only the path's campaign ID and
+the caller's identity and needs no request body, so it is usable, unmodified,
+by every transport. The exact route, method, and absence of a trailing slash
+are now stated explicitly in the guide, and
+`controllers/api/campaign_transport_deprecation_test.go` executes all four
+transports (query, form, raw, Bearer) and the trailing-slash negative case
+through the real router, asserting each deprecated transport and its
+canonical replacement both authenticate and both actually complete their
+campaign.
+
+### Finding 2 — documentation gate was incomplete
+
+The iteration-1 grep gate missed several curl encodings, treated the
+`Authorization` header name case-sensitively, and could have flagged a
+legitimate non-API-key scheme. Fixed by replacing the gate's detection logic
+with `internal/docsguard`, a small stdlib-only Go package (no new
+dependency), with fixture-based table tests
+(`internal/docsguard/docsguard_test.go`) covering, as positive cases: a query
+`api_key` parameter, `curl -d`/`--data`/`--data-raw`/`--data-urlencode`/`-F`/
+`--form` with an `api_key` value, and a standalone `api_key` assignment; and
+as negative cases:
+`Authorization: Bearer`, `Authorization: Basic`, `Authorization: Digest`,
+`Authorization: Negotiate`, `Authorization: NTLM` (any letter-casing, since
+HTTP header names are case-insensitive and the header name itself is matched
+case-insensitively), and ordinary prose that merely mentions `api_key` or
+`Authorization` without a literal credential example. `cmd/docsguard` is the
+CLI wrapper, with its own test (`cmd/docsguard/main_test.go`) covering the
+`-exempt` flag and every exit code. The exemption list is exactly one file
+path, declared in one place
+(`scripts/verify-docs-canonical-examples.sh`), and is otherwise unchanged
+from iteration 1: narrow and auditable.
+
+### Finding 3 — the gate was not enforced by CI
+
+`scripts/verify.sh` called the gate, but `.github/workflows/ci.yml` never
+did, so a PR could reintroduce a deprecated example while every CI-required
+check stayed green. Fixed by adding a `docs-guard` job to `ci.yml` that runs
+`./scripts/verify-docs-canonical-examples.sh`, using the same pinned
+`actions/checkout`/`actions/setup-go` SHAs as every other job, the
+repository's default minimal `contents: read` permissions (no elevation
+needed), and a `timeout-minutes: 10`, and added to the `ci-success`
+aggregating job's `needs:` list so it is a required, blocking check exactly
+like `go-vet` or `go-build`. `actionlint` and `zizmor` both pass against the
+updated workflow (see below). Local `scripts/verify.sh` integration is
+unchanged.
 
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |
 | --- | --- | --- |
-| Authentication behaviour unchanged | PASS | No file under `middleware/`, `controllers/`, `models/`, `auth/`, or `internal/apikey` changed. `go test ./...` and `go test -race ./...` pass unmodified, including the full existing API-key extractor/middleware/verifier suites. Container compatibility re-proves Bearer, raw, query (including empty), form (including empty), and session behaviour end to end (see below). |
-| Canonical and deprecated contracts | PASS | `docs/API_AUTHENTICATION.md` now states Bearer is the only recommended/canonical transport and lists query/form (deprecated, `0.13.0` removal) and raw (deprecated, no removal version) as still-accepted legacy contracts, not as never-public surfaces. |
-| Client migration guidance | PASS | `docs/API_KEY_TRANSPORT_DEPRECATION.md` has synthetic (`REPLACE_WITH_YOUR_TOKEN`) old/new `curl` examples for query→Bearer and form→Bearer (preserving the business form field), prose raw→Bearer guidance, the exact `0.13.0` removal behaviour (empty/combined-with-session/combined-with-Bearer all → JSON `401`, no fallback), and an explicit statement that raw stays accepted/deprecated after that removal. |
+| Authentication behaviour unchanged | PASS | No file under `middleware/`, `controllers/api/*.go` (other than the new test file), `models/`, `auth/`, or `internal/apikey` changed. `go test ./...` and `go test -race ./...` pass unmodified, including the full existing API-key extractor/middleware/verifier suites. Container compatibility re-proves Bearer, raw, query (including empty), form (including empty), and session behaviour end to end (see below), and the new campaign-completion regression re-proves the same four transports against a real business operation. |
+| Canonical and deprecated contracts | PASS | `docs/API_AUTHENTICATION.md` states Bearer is the only recommended/canonical transport and lists query/form (deprecated, `0.13.0` removal) and raw (deprecated, no removal version) as still-accepted legacy contracts, not as never-public surfaces. |
+| Client migration guidance | PASS | `docs/API_KEY_TRANSPORT_DEPRECATION.md` has synthetic (`REPLACE_WITH_YOUR_TOKEN`) old/new `curl` examples for query→Bearer, form→Bearer, and raw→Bearer, all against the same real campaign-completion endpoint with its exact route/method/trailing-slash stated; the exact `0.13.0` removal behaviour (empty/combined-with-session/combined-with-Bearer/raw → JSON `401`, no fallback); and an explicit statement that raw stays accepted/deprecated after that removal. Every example is now proven executable by `controllers/api/campaign_transport_deprecation_test.go`. |
 | Leak remediation guidance | PASS | The same document names GophishFR access logs, nginx/reverse-proxy defaults, browser/shell history, and copied diagnostics/support traces as places a query key may already exist; instructs migrate+rotate+review/remove; explicitly disclaims automatic identification of affected clients or cleanup of third-party/proxy logs; and states this release does not stop query secrets from reaching access logs. Form is described as lower default logging risk but still deprecated to converge on one transport. The separate rate-limiting backlog item is named, not implemented. |
 | Runtime signalling decision | PASS | A dedicated section states and justifies, per mechanism, why no RFC 9745 `Deprecation` header, no RFC 8594 `Sunset` header, no `Link: rel="deprecation"` header, and no custom header/server warning log were added (resource-identity mismatch, no calendar date, no stable published URI, and documentation as the deliberate channel, respectively). No token, URL/query, form body, `Authorization` value, verifier, or secret-derived value is emitted anywhere — unchanged, and reconfirmed by the unmodified middleware/controller code and passing test suites. |
-| Release/version documentation | PASS | `VERSION` is untouched (`0.12.1`). `docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md` is a self-contained artifact that states deprecated items, the `0.13.0` removal target, Bearer migration, key rotation/log cleanup, and that the breaking removal itself updates `VERSION` to `0.13.0` through the normal release process. No calendar sunset timestamp is invented anywhere. |
-| Examples/search/gate | PASS | `grep`-based repository search found no deprecated-transport example in canonical docs outside the new deprecation page; `README.md` has no API examples at all. The new `scripts/verify-docs-canonical-examples.sh` gate encodes that search as a repeatable, dependency-free CI/local check and is wired into `scripts/verify.sh`. No OpenAPI/Swagger specification exists and none was created. |
+| Release/version documentation | PASS | `VERSION` is untouched (`0.12.1`). `docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md` states deprecated items, the `0.13.0` removal target, Bearer migration, key rotation/log cleanup, and that the breaking removal itself updates `VERSION` to `0.13.0` through the normal release process. No calendar sunset timestamp is invented anywhere. |
+| Examples/search/gate | PASS | `internal/docsguard`'s fixture tests and a live run of `scripts/verify-docs-canonical-examples.sh` both confirm no canonical doc outside the one exempted page shows a deprecated-transport example. The gate is now enforced both locally (`scripts/verify.sh`) and by a blocking CI job (`docs-guard`, wired into `ci-success`). No OpenAPI/Swagger specification exists and none was created. |
 | Tests and validation | PASS | See "Validation evidence" below. |
 | Scope and roadmap | PASS | Nothing removed/rejected for query/form/raw. No verifier/keyring/token-format/session/CSRF/RBAC/rate-limit/log/`events.details`/dependency change. The deprecation page names the next breaking PR (`security/remove-legacy-api-key-transports`, `0.13.0`, retaining explicit presence detection so unsupported transports cannot fall back to session) and the independent next hardening item (`security/rate-limit-api-auth`) without implementing either. |
 
 ## Validation evidence
 
 - `./scripts/verify.sh`: all gates pass — gofmt, golangci-lint (0 issues),
-  `go mod verify`, `go vet`, `go build`, `go test`, the new "docs canonical
-  API examples" gate, `go test -race`, the frontend double-build check
-  (byte-identical; no frontend source changed), and `govulncheck` under the
-  pinned `go1.25.13` toolchain (0 reachable vulnerabilities; 3 unreachable
-  findings in required modules, unchanged from baseline). `action pins` was
-  skipped locally (no authenticated `gh`); CI enforces it unconditionally and
-  no workflow file changed in this PR.
+  `go mod verify`, `go vet`, `go build`, `go test` (including the new
+  `internal/docsguard`, `cmd/docsguard`, and
+  `controllers/api/campaign_transport_deprecation_test.go` suites), the
+  rewritten "docs canonical API examples" gate, `go test -race`, the
+  frontend double-build check (byte-identical; no frontend source changed),
+  and `govulncheck` under the pinned `go1.25.13` toolchain (0 reachable
+  vulnerabilities; 3 unreachable findings in required modules, unchanged
+  from baseline). `action pins` was skipped locally (no authenticated
+  `gh`); CI enforces it unconditionally, and the new `docs-guard` job reuses
+  SHAs already pinned and verified elsewhere in `ci.yml`.
 - `go test ./...` and `go test -race ./...`: pass across every package,
-  unchanged test set, including `middleware/api_auth_test.go` and
-  `middleware/middleware_test.go`.
+  including the three new test files and the unchanged
+  `middleware/api_auth_test.go` and `middleware/middleware_test.go`.
+- `TestCampaignCompleteTransportDeprecationEquivalence`
+  (`controllers/api`): query, form, raw, and Bearer each authenticate and
+  complete a real campaign through the real router; a trailing-slash request
+  does not match the route and does not complete its campaign.
 - `./scripts/test-browser.sh`: the real, non-mocked `TestBrowser*` suite in
   `controllers` passes against a fresh `corepack yarn build`.
 - `scripts/test-container-api-session-auth.sh`: the PR #62/#63 real-container
@@ -73,24 +160,32 @@ source/generated asset, workflow, `go.mod`, `go.sum`, `package.json`, or
   passes, unmodified.
 - `gosec ./...`: 12 pre-existing findings (open-redirect taint-analysis
   reports on unchanged redirect call sites, plus the previously documented
-  TLS/path/log-mode findings); none originates in a file this PR touches —
-  every file this PR touches is Markdown or a shell script, and `gosec`
-  scans Go only.
+  TLS/path/log-mode findings), the same baseline as iteration 1. Two new,
+  narrow, explicitly justified `#nosec` annotations were added, matching the
+  repository's existing `#nosec G101`/`#nosec G304` style: one on a Go
+  constant whose name merely contains the word "credential" (`G101`, not an
+  actual secret value), and one on `cmd/docsguard`'s `os.ReadFile(path)`
+  (`G304`), where `path` is this CLI's own argv/`-exempt` flag values —
+  repository files chosen by the invoking script, not untrusted network
+  input.
 - `gitleaks detect --source . --no-banner --redact`: 2 pre-existing findings,
   both in `.goals/api-key-verifier/inspector-feedback-1.md` from commits
   dated 2026-09-03, unrelated to and unchanged by this PR; no new finding.
-- `actionlint -color`: pass (no workflow changed).
+  The migration guide's canonical `curl` examples place the `Authorization`
+  header as each command's last line specifically so a same-line
+  `# gitleaks:allow` comment can mark the synthetic
+  `REPLACE_WITH_YOUR_TOKEN` placeholder without breaking the example's shell
+  syntax; each occurrence carries its own inline justification, which is the
+  narrow, auditable suppression CLAUDE.md requires rather than a blanket
+  ignore.
+- `actionlint -color`: pass, including the new `docs-guard` job.
 - `zizmor --min-severity=low .github/workflows/`: no findings (2 previously
-  documented suppressions retained; no workflow changed).
+  documented suppressions retained), including the new `docs-guard` job.
 - `corepack yarn audit`: 4 moderate findings, all in a transitive `webpack`
   devDependency (`fast-uri`, via `schema-utils`/`ajv`); pre-existing in the
   unchanged lockfile, not introduced or touched by this PR, and out of scope
   (no dependency change in this PR).
 - `npx --yes retire --path static --outputformat text`: pass, no findings.
-- `shellcheck` was not separately run here; `scripts/verify-docs-canonical-examples.sh`
-  follows the same style as the existing `scripts/verify-action-pins.sh` and
-  uses only POSIX-portable `grep` with basic negation (no Perl-only lookahead)
-  so it runs the same way under GNU and BSD grep.
 - `git diff --check`: clean. `go.mod`, `go.sum`, `package.json`, and
   `yarn.lock` are byte-identical to `HEAD`.
 
