@@ -280,7 +280,7 @@
                                         "iteration":  7,
                                         "role":  "builder",
                                         "model":  "Claude:Sonnet-5",
-                                        "commit_sha":  "PENDING",
+                                        "commit_sha":  "2d54b26f5f04faa6283ce330a23748b72ef5aee7",
                                         "commit_title":  "fix(docs): [B] redact and normalize guard findings",
                                         "summary":  "Fixed both iteration-6 review findings in internal/docsguard, test/docs-only. (1) Paragraph/negation bypass: added paragraph/paragraphsFromLines to group and normalize wrapped Markdown lines into one continuous string for the recommendation-prose check (table-row and credential-syntax checks stay per-line, since those are inherently single-line syntax); added negationWordPattern and hasAffirmativeDeprecationContext so only non-negated deprecation-context words suppress a violation. Widening the scope to whole paragraphs initially introduced a false positive in docs/API_AUTHENTICATION.md, where two unrelated sentences in the same paragraph each independently mention 'api_key' and 'authentication' with no recommendation relationship; fixed by bounding the strong/weak recommendation patterns to require the trigger word within a small word-proximity window of the api_key mention (recommendationProximity) rather than merely co-occurring anywhere in the paragraph. Added TestScanTextWrappedRecommendation and TestScanTextNegatedContextDoesNotSuppress; all prior fixtures, including iteration 6's 8 positive/6 negative recommendation-prose cases, pass unchanged. (2) Diagnostic secret echo: Violation no longer carries any document text -- replaced Line/Text with StartLine/EndLine, and added Kind.Explanation() returning a fixed, generic, non-sensitive description per Kind, computed independently of scanned text. cmd/docsguard's print loop now emits only path:StartLine[-EndLine]: FORBIDDEN (Kind): <Explanation>, never source text. rawAuthorization no longer returns a reason string containing the actual token. Added a CLI-level test embedding a distinctive synthetic secret in both a flagged api_key value and a flagged raw Authorization value, asserting it never appears in stdout/stderr while the correct FORBIDDEN (Kind) and path:line diagnostics do. Searched all shipped Markdown with the extended gate: 0 violations across 28 files, no doc wording changed. All prior rules (encoded-parameter, Bearer-casing, scanner-error fail-closed, table, alternative-wording, recommendation-prose) preserved and still fully tested. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
                                         "validation":  {
@@ -303,6 +303,15 @@
                                            "git_diff_check":  "clean",
                                            "lockfiles_unchanged":  true
                                        }
+                    },
+                    {
+                                        "iteration":  7,
+                                        "role":  "inspector",
+                                        "model":  "Claude:Haiku-4.5",
+                                        "verdict":  "PASS",
+                                        "feedback_file":  ".goals/deprecate-api-key-transports/inspector-feedback-7.md",
+                                        "summary":  "Both iteration-6 review findings fixed: (1) Paragraph/negation bypass — paragraphsFromLines() groups wrapped Markdown lines into normalized blocks; hasAffirmativeDeprecationContext() checks for negation words before deprecation-context keywords, so 'not deprecated' remains a violation; proximity-bounded recommendation patterns prevent false positives from co-occurring 'api_key' and 'authentication' mentions in unrelated sentences. (2) Diagnostic secret echo — Violation no longer carries source text (StartLine/EndLine only); Kind.Explanation() returns fixed, non-sensitive descriptions; CLI outputs only location and kind, never source text. Synthetic secret test passes: distinctive string sk-SYNTH7f3c9a1b-not-a-real-credential-9e2d4f embedded in both parameter_credential and raw_authorization violations is absent from stdout/stderr; FORBIDDEN lines with correct locations and kinds are present. All 40+ test cases pass (including 2 new docsguard functions + CLI secret-leak subtest). Docs gate: 0 violations across 28 shipped Markdown files. Full gate: PASS. No runtime/auth/dependency changes. VERSION unchanged (0.12.1). Ready for release candidate.",
+                                        "completed_at":  "2026-10-02T15:30:00+02:00"
                     }
                 ]
 }
