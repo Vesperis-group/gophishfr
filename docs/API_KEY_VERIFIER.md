@@ -97,7 +97,7 @@ against the current row: a concurrent upgrade may succeed, while a committed
 reset makes the old token fail. A non-conflict rekey database error may leave
 the already-validated old verifier and allow that request only while that exact
 pair remains current. After active-key verification or lazy resolution, one
-atomic final query requires the exact accepted user ID, verifier/key ID,
+atomic final query requires the exact validated user ID, verifier/key ID,
 `api_key IS NULL`, and unlocked state. A reset, replacement, legacy-state
 transition, or lock committed before that query rejects the request; a change
 committed after completed authentication follows normal per-request race

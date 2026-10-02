@@ -155,7 +155,7 @@ func TestScanTextUndeprecatedParameterMention(t *testing.T) {
 	positive := []string{
 		"| Authentication | API key, as an `Authorization: Bearer` header or an `api_key` parameter |",
 		"Authentication can use a Bearer header or an api_key parameter.",
-		"| Auth | api_key |",
+		"| Auth | api_key |\n| --- | --- |\n",
 		"Clients may authenticate with Bearer or an API_KEY parameter.",
 		// Ordinary recommendation prose: a verb ("use"/"via"/"with"/
 		// "accept"/"authenticate") governing api_key as a live
@@ -452,6 +452,174 @@ func containsKind(violations []Violation, kind Kind) bool {
 	return false
 }
 
+// TestScanTextBareVersionRequiresConstruction proves the bare removal
+// version number "0.13.0", on its own, is never sufficient affirmative
+// deprecation context: it must be accompanied by an explicit deprecation/
+// removal construction word (see deprecationConstructionWordPattern). A
+// sentence that merely names the version -- as part of a release-notes
+// reference, not a deprecation/removal statement -- is not itself an
+// assertion that anything is deprecated.
+func TestScanTextBareVersionRequiresConstruction(t *testing.T) {
+	positive := []string{
+		// "0.13.0" is mentioned, but nothing nearby says it is being
+		// deprecated or removed -- just that it exists as a release.
+		"Use the api_key query parameter; see the 0.13.0 release notes for details.",
+		"Use the api_key query parameter, part of the 0.13.0 release.",
+	}
+	for _, text := range positive {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if !containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("expected a violation when 0.13.0 has no accompanying construction word %q, got %v", text, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// "0.13.0" accompanied by an explicit construction word ("removed",
+		// "deprecated") continues to count as affirmative context.
+		"Use the api_key query parameter only until it is removed in 0.13.0.",
+		"The api_key query parameter is deprecated and targeted for removal in 0.13.0.",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("unexpected violation when 0.13.0 has an accompanying construction word %q: %v", text, violations)
+			}
+		})
+	}
+}
+
+// TestScanTextTransportMismatchDoesNotSuppress proves a deprecation notice
+// about one specific api_key transport (form, raw, or a response/body
+// field) cannot suppress a live recommendation of a *different* transport
+// (query): docsguard binds affirmative context to the specific transport
+// the recommendation names, not merely "some api_key mention nearby".
+func TestScanTextTransportMismatchDoesNotSuppress(t *testing.T) {
+	positive := []string{
+		// A deprecated form parameter must not qualify a live, separate
+		// query-parameter recommendation in the same sentence.
+		"The api_key form parameter is deprecated; use the api_key query parameter instead.",
+		// A deprecated raw Authorization header must not qualify a live
+		// query-parameter recommendation.
+		"The raw api_key Authorization header is deprecated; use the api_key query parameter for authentication.",
+		// A deprecated response/body field must not qualify a live
+		// query-parameter recommendation -- a different kind of api_key
+		// mention entirely, not a request transport at all.
+		"The api_key response field is deprecated; use the api_key query parameter for authentication.",
+		// Same mismatch, wrapped across physical lines.
+		"The api_key form\nparameter is deprecated;\nuse the api_key query\nparameter instead.\n",
+	}
+	for _, text := range positive {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if !containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("expected a violation when the context names a different transport %q, got %v", text, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// The deprecation notice and the recommendation name the *same*
+		// transport, so it correctly still suppresses.
+		"The api_key query parameter is deprecated; use the api_key query parameter only for legacy integrations.",
+		"The api_key form parameter is deprecated; use the api_key form parameter only for legacy integrations.",
+		// Neither side names a specific transport (ambiguous on both
+		// sides), so the prior, transport-agnostic behavior applies.
+		"The api_key parameter is deprecated; use the api_key parameter only for legacy integrations.",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("unexpected violation when the context names the same transport %q: %v", text, violations)
+			}
+		})
+	}
+}
+
+// TestScanTextStructuralParsingCorrectness proves this package's reliance on
+// a real CommonMark/GFM parser (goldmark) for Markdown structure, rather
+// than hand-written approximations, correctly resolves several subtle
+// rendering rules: fenced-code open/close validity (character, length, and
+// closing-length-at-least-opening-length), list-item continuation
+// indentation versus a genuine indented code block, and a code span's
+// variable-length backtick delimiter with an embedded shorter backtick run.
+func TestScanTextStructuralParsingCorrectness(t *testing.T) {
+	// A closing fence shorter than its opening fence does not close it:
+	// per CommonMark, the embedded "~~~" line is code content, not a
+	// closing delimiter, so the literal api_key=TOKEN two lines below is
+	// still inside the (still-open) fenced block and must still be caught.
+	t.Run("short closing fence does not close the block", func(t *testing.T) {
+		text := "~~~~\n" +
+			"curl -d \"api_key=TOKEN\" https://gophishfr.example/api/campaigns/42/complete\n" +
+			"~~~\n" +
+			"curl -d \"api_key=TOKEN\" https://gophishfr.example/api/campaigns/42/complete\n" +
+			"~~~~\n"
+		violations := mustScan(t, text)
+		if !containsKind(violations, KindParameterCredential) {
+			t.Fatalf("expected a parameter-credential violation for %q, got %v", text, violations)
+		}
+	})
+
+	// An unclosed fence runs to the end of the document and is still code
+	// content throughout, per CommonMark.
+	t.Run("unclosed fence still scans as code to EOF", func(t *testing.T) {
+		text := "```\n" +
+			"curl -d \"api_key=TOKEN\" https://gophishfr.example/api/campaigns/42/complete\n"
+		violations := mustScan(t, text)
+		if !containsKind(violations, KindParameterCredential) {
+			t.Fatalf("expected a parameter-credential violation for %q, got %v", text, violations)
+		}
+	})
+
+	// A continuation line of a list item, indented only because it follows
+	// the bullet's own indentation, is ordinary prose (with escapes
+	// decoded), not an indented code block -- so an escaped api_key here is
+	// still a live, violating recommendation once decoded.
+	t.Run("list-item continuation indentation is not a code block", func(t *testing.T) {
+		text := "- Some introductory text that continues onto the next\n" +
+			"  line: use the api\\_key query parameter for authentication.\n"
+		violations := mustScan(t, text)
+		if !containsKind(violations, KindUndeprecatedParameterMention) {
+			t.Fatalf("expected a violation for list-continuation prose %q, got %v", text, violations)
+		}
+	})
+
+	// A code span delimited by a double-backtick run, containing a literal
+	// single backtick elsewhere in its content, keeps that backtick as
+	// ordinary content (per CommonMark's variable code-span-delimiter
+	// rule) rather than ending the span early -- and a genuine credential
+	// example appearing later in that same span, unaffected by the
+	// embedded backtick, is still detected. (A backtick immediately
+	// between the key name and its "=" would instead make the literal key
+	// name "api_key`", not "api_key", which correctly would not match: that
+	// is not something this case is testing.)
+	t.Run("variable-length code span delimiter with an embedded backtick", func(t *testing.T) {
+		text := "Use `` ` is a literal backtick; see api_key=TOKEN `` as an example."
+		violations := mustScan(t, text)
+		if !containsKind(violations, KindParameterCredential) {
+			t.Fatalf("expected a parameter-credential violation for %q, got %v", text, violations)
+		}
+	})
+
+	// A code span's content spanning multiple source lines is normalized
+	// to one line (internal newlines become a single space) before being
+	// matched, exactly as CommonMark renders it, so a credential wrapped
+	// across lines purely by the code span's own line-wrapping is still
+	// caught -- as long as the inserted space does not itself fall exactly
+	// between the key and its "=" (which would, correctly, no longer
+	// render as a working credential at all).
+	t.Run("multi-line code span content is normalized and still matched", func(t *testing.T) {
+		text := "Use `api_key=TOKEN\nvalue` in the request."
+		violations := mustScan(t, text)
+		if !containsKind(violations, KindParameterCredential) {
+			t.Fatalf("expected a parameter-credential violation for %q, got %v", text, violations)
+		}
+	})
+}
+
 // TestScanTextDottedVersionNotSentenceBoundary proves the dots inside a
 // dotted removal version such as "0.13.0" are never read as sentence
 // boundaries: splitting a sentence at an internal version dot would strand
@@ -460,18 +628,21 @@ func containsKind(violations []Violation, kind Kind) bool {
 // 0.13.0" statement as an unqualified, violating recommendation.
 func TestScanTextDottedVersionNotSentenceBoundary(t *testing.T) {
 	negative := []string{
-		// "0.13.0" is the *only* affirmative context in the sentence -- no
-		// "deprecated"/"legacy"/"removal" word at all -- so this exercises
-		// the version-dot fix in isolation, not the ordinary
-		// deprecat*/legacy context words already covered elsewhere.
-		"Use the api_key query parameter only until 0.13.0.",
-		"Authenticate via the api_key parameter until 0.13.0.",
+		// "0.13.0"'s internal dots must not be read as sentence boundaries,
+		// stranding the removal-version context away from the
+		// recommendation it qualifies. A bare version number is no longer
+		// sufficient context on its own (see
+		// TestScanTextBareVersionRequiresConstruction), so each of these
+		// also pairs it with an explicit removal/deprecation construction
+		// word, keeping the focus here on the dot-splitting fix itself.
+		"Use the api_key query parameter only until it is removed in 0.13.0.",
+		"Authenticate via the api_key parameter until it is deprecated in 0.13.0.",
 		// The version sits mid-sentence, followed by more prose, so a
 		// buggy split at its internal dots would strand two fragments on
 		// either side of the recommendation instead of one.
-		"Use the api_key form field until 0.13.0, after which it stops working.",
+		"Use the api_key form field until it is removed in 0.13.0, after which it stops working.",
 		// Wrapped across physical lines.
-		"Use the api_key\nquery parameter only\nuntil 0.13.0.\n",
+		"Use the api_key\nquery parameter only\nuntil it is removed\nin 0.13.0.\n",
 	}
 	for _, text := range negative {
 		t.Run(text, func(t *testing.T) {
@@ -591,7 +762,7 @@ func TestScanTextRenderedEscapeNormalization(t *testing.T) {
 		// ones.
 		{`Use the api\_key query parameter for authentication.`, KindUndeprecatedParameterMention},
 		{`Use the api&#95;key query parameter for authentication.`, KindUndeprecatedParameterMention},
-		{`| Auth | api\_key |`, KindUndeprecatedParameterMention},
+		{"| Auth | api\\_key |\n| --- | --- |\n", KindUndeprecatedParameterMention},
 	}
 	for _, c := range positive {
 		t.Run(c.text, func(t *testing.T) {
@@ -643,7 +814,7 @@ func TestScanTextContextBoundToTransportSyntax(t *testing.T) {
 		// Table row variant: the row recommends api_key with no close
 		// context; the deprecation-sounding words describe something else
 		// entirely, much further along in the same cell.
-		"| `api_key` query parameter | see the separate, fully unrelated legacy billing migration and removal notes for other systems elsewhere |",
+		"| `api_key` query parameter | see the separate, fully unrelated legacy billing migration and removal notes for other systems elsewhere |\n| --- | --- |\n",
 		// Wrapped across physical lines.
 		"Use the api_key query\nparameter for authentication purposes\nin production environments; our\nlegacy billing system also\nneeds migration, with removal\nof old servers scheduled separately.\n",
 	}
@@ -756,41 +927,51 @@ func TestScanTextCodeAwareNormalization(t *testing.T) {
 	}
 }
 
-// TestScanTextRenderedMarkupSplit proves a Markdown emphasis delimiter or a
-// safe inline HTML tag that splits one of this package's protected anchors
-// -- `api<em>_</em>key=TOKEN`, `Authorization<em>:</em> TOKEN`, "Use the
-// api<em>_</em>key query parameter..." -- is caught the same way the
-// unsplit form is, across the parameter-credential, raw-authorization,
-// table-row, and recommendation-prose checks, while unrelated or malformed
-// markup never creates a false positive.
+// TestScanTextRenderedMarkupSplit proves a safe inline HTML tag, an HTML
+// comment, or a Markdown link that splits one of this package's protected
+// anchors -- `api<em>_</em>key=TOKEN`, `api<!-- -->_key=TOKEN`,
+// `[api](url)_key=TOKEN` -- is caught the same way the unsplit form is,
+// across the parameter-credential, raw-authorization, table-cell, and
+// recommendation-prose checks, while unrelated or non-rendering markup
+// never creates a false positive. A Markdown emphasis/strong/strikethrough
+// delimiter run wrapping a single punctuation character does not need (or
+// get) any special handling here: CommonMark's own delimiter-flanking
+// rules mean such a run is never parsed as emphasis in the first place --
+// goldmark leaves it as plain, literal text, exactly like a browser would
+// render it -- so those forms are covered below as negative cases instead,
+// proving this package does not flag something that was never a real
+// rendering bypass to begin with.
 func TestScanTextRenderedMarkupSplit(t *testing.T) {
 	positive := []struct {
 		text string
 		kind Kind
 	}{
-		// The exact examples from the finding, across every anchor this
+		// The finding's exact HTML-tag example, across every anchor this
 		// package protects.
 		{`curl -d "api<em>_</em>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
 		{`curl -H "Authorization<em>:</em> TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
 		{"Use the api<em>_</em>key query parameter for authentication.", KindUndeprecatedParameterMention},
-		{"| Auth | api<em>_</em>key |", KindUndeprecatedParameterMention},
+		{"| Auth | api<em>_</em>key |\n| --- | --- |\n", KindUndeprecatedParameterMention},
 		// Other safe inline tags on the allow-list, and a case variant.
 		{`curl -d "api<b>_</b>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
 		{`curl -H "Authorization<span>:</span> TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
 		{`curl -d "api<EM>_</EM>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
 		// A tag with an attribute.
 		{`curl -d "api<em class='x'>_</em>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
-		// Markdown emphasis/strong/strikethrough delimiters, each wrapping
-		// exactly the protected punctuation character.
-		{`curl -d "api*_*key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
-		{`curl -H "Authorization**:** TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
-		{`curl -H "Authorization_:_ TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
-		{`curl -d "api~_~key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
-		// Mismatched delimiter run lengths on each side.
-		{`curl -d "api**_*key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
-		// Combinations: a safe tag wrapping emphasis-wrapped content, and a
-		// safe tag wrapping an HTML character reference.
-		{`curl -d "api<em>*_*</em>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		// An HTML comment splitting an anchor.
+		{`curl -d "api<!-- -->_key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		// A Markdown link splitting an anchor: only the visible link text
+		// remains, the destination URL is dropped.
+		{`curl -d "[api](https://example.com)_key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		{`curl -H "Author[ization](https://example.com): TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
+		// Genuine, whole-word strong emphasis around api_key does not hide
+		// it -- CommonMark's flanking rules allow this one (unlike wrapping
+		// a single punctuation character) and goldmark reconstructs the
+		// plain text correctly either way.
+		{`curl -d "**api_key**=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		// Nested combinations: a safe tag wrapping a link, and a tag
+		// wrapping an HTML character reference.
+		{"Use the api<em>[_](https://example.com)</em>key query parameter for authentication.", KindUndeprecatedParameterMention},
 		{`curl -d "api<em>&#95;</em>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
 	}
 	for _, c := range positive {
@@ -803,23 +984,30 @@ func TestScanTextRenderedMarkupSplit(t *testing.T) {
 	}
 
 	negative := []string{
-		// An unrelated, non-whitelisted tag must not be touched, and is
+		// An unrelated, non-allow-listed tag must not be touched, and is
 		// harmless regardless since nothing here relates to api_key.
 		"Press <kbd>Ctrl</kbd> to copy the value.",
-		// A table row using only a non-whitelisted tag, no api_key at all.
-		"| Shortcut | <kbd>Ctrl</kbd>+<kbd>C</kbd> |",
-		// Malformed/unmatched emphasis: a single opening asterisk with no
-		// matching close anywhere nearby renders as a *literal* asterisk
-		// character in CommonMark, not as emphasis, so the text never
-		// actually renders as "api_key".
-		`curl -d "api*_key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`,
-		// Ordinary emphasis around a whole, unrelated word must not be
-		// touched (it wraps more than the single protected-character shape
-		// this package recognizes, and has nothing to do with api_key
-		// regardless).
-		"This is *emphasized* text, not a credential example.",
+		// A table using only a non-allow-listed tag, no api_key at all.
+		"| Shortcut | <kbd>Ctrl</kbd>+<kbd>C</kbd> |\n| --- | --- |\n",
 		// A tag outside the allow-list, unrelated to api_key.
 		"Avoid embedding <script> tags in documentation examples.",
+		// Ordinary emphasis around a whole, unrelated word, unrelated to
+		// api_key regardless.
+		"This is *emphasized* text, not a credential example.",
+		// A Markdown emphasis/strong/strikethrough delimiter run wrapping a
+		// single punctuation character does not actually form valid
+		// emphasis per CommonMark's delimiter-flanking rules in any of
+		// these positions, so none of these render any differently from
+		// their literal source text -- they correctly do not violate.
+		`curl -d "api*_*key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`,
+		`curl -H "Authorization**:** TOKEN" https://gophishfr.example/api/campaigns/42/complete`,
+		`curl -H "Authorization_:_ TOKEN" https://gophishfr.example/api/campaigns/42/complete`,
+		`curl -d "api~_~key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`,
+		`curl -d "api**_*key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`,
+		// A single opening asterisk with no matching closing run anywhere
+		// nearby renders as a literal asterisk character in CommonMark, not
+		// as emphasis, so this never actually renders as "api_key" either.
+		`curl -d "api*_key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`,
 	}
 	for _, text := range negative {
 		t.Run(text, func(t *testing.T) {

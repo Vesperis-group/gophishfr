@@ -840,6 +840,163 @@ authentication/middleware/header/status/version/dependency behavior
 changed. A full run of `scripts/verify-docs-canonical-examples.sh` against
 every tracked Markdown file found 0 violations; no doc wording changed.
 
+## Iteration 13: root-cause rewrite to a structured (AST-based) parser
+
+Final independent reviews of the iteration-12 state concluded the bounded
+regex/heuristic approach in `internal/docsguard` was fundamentally
+insufficient: iterations 11-12 each closed a specific bypass, but kept
+reopening new ones, confirming it could not be made complete this way (see
+`.goals/deprecate-api-key-transports/review-feedback-12.md`). This iteration
+replaces that approach with a deterministic CommonMark+GFM AST-based scanner.
+
+### Dependency decision
+
+Added `github.com/yuin/goldmark/v2 v2.1.6` as the package's sole new direct
+dependency (clean `go mod tidy` diff; `check_dependency_vulnerabilities`
+reports 0 known vulnerabilities for this version).
+
+- **Need**: correctly flattening rendered inline text (Markdown links, raw
+  HTML tags/comments, emphasis/strong/strikethrough around whole or partial
+  anchors, nested combinations) and applying CommonMark's exact code-span,
+  fenced-code, and list-continuation-vs-indented-code rules requires a real,
+  spec-conformant parser. Go's `regexp` package (RE2) has no backreferences,
+  so "a closing code-span delimiter run of the same length as the opening
+  run" cannot even be expressed as a single regex — the iteration-12 manual
+  scanner for this was already a simplified workaround for that same gap.
+- **Alternative considered**: continuing to extend the bounded regex
+  heuristics, as iterations 11 and 12 each did. Rejected: each fix reliably
+  closed its one specific case while reliably reopening another (rendered
+  markup splitting → code-span false positives → context decoupling →
+  transport/version ambiguity), which is the final reviews' own stated
+  reason a structural rewrite is required instead.
+- **Why goldmark v2, not v1**: v1's AST text nodes carry raw, *undecoded*
+  bytes (escape/entity resolution happens only in its separate HTML
+  renderer), which would have required re-implementing decode logic outside
+  the parser. v2 introduces `text.Value`/`text.Decoder`: every leaf node is
+  bound to a decoder at parse time — regular text decodes backslash escapes
+  and the full HTML5 named-entity table; code spans and raw HTML are bound
+  to an `IdentityDecoder` and are never decoded — which is exactly the
+  semantics this package needs, with no extra code.
+- **Security impact**: parsing is read-only, local, in-process (no network
+  access, no code execution, no template evaluation); the scanned content is
+  this repository's own tracked Markdown, not untrusted external input.
+- **Maintenance impact**: one pinned, deterministic dependency replaces
+  roughly 500 lines of increasingly complex hand-rolled pattern logic
+  (`decodeRenderedMarkup`, `inlineCodeSpanRanges`, the fenced-code-state
+  tracker) with a spec-conformant parser; goldmark is a long-established,
+  actively maintained project.
+
+### Implementation
+
+- `docsguard.go`: `ScanText` now parses the input with a shared
+  `parser.New(parser.WithExtensions(extension.GFMParser))` instance and
+  walks the resulting AST, dispatching each block to the matching scan
+  function; a `recover()` around the walk, together with an explicit
+  maximum-line-length fail-closed guard (replacing the old
+  `bufio.Scanner` buffer-limit mechanism, which goldmark has no equivalent
+  of), ensures any parser panic or internal error fails closed rather than
+  silently passing.
+- `scan.go`: `flattenInline` recursively flattens `Text`/`CodeSpan`/
+  `RawHTML`/`AutoLink` nodes per real CommonMark rendering semantics —
+  this single function is what makes links, raw HTML tags, HTML comments,
+  and emphasis/strong/strikethrough "just work" via real parsing instead of
+  regex splitting, with no special-casing needed for any of them.
+  `flattenInlineByLine` preserves per-line credential-match precision
+  across a paragraph wrapped over several physical source lines. Three
+  block kinds are scanned differently: a code block's raw lines (credential
+  checks only — code blocks are examples, not prose), a GFM table cell
+  (credential checks plus a lenient cell-contains-`api_key` check plus
+  recommendation-prose scoped to that one cell), and ordinary prose
+  (credential checks plus recommendation-prose scoped per sentence/clause).
+- `credential.go`: `hasParameterCredential`/`rawAuthorization`, ported with
+  minimal change (operating on already-flattened text rather than a raw
+  line).
+- `context.go`: all prior negation/adversative-boundary/sentence-and-clause
+  scoping logic ported, plus two new mechanisms the final reviews required:
+  a bare-version-requires-construction-word check (a lone `0.13.0` no longer
+  counts as affirmative deprecation context without an explicit nearby
+  removal/deprecation construction word), and transport-specific context
+  binding (`transportKindNear`/`nearestAPIKeyOccurrence` classify which
+  transport — query, form, raw, or response field — a given `api_key`
+  mention is actually about, so a deprecation notice about one transport
+  cannot suppress a live recommendation of a different one).
+
+### Bugs found and fixed via end-to-end verification against real shipped docs and new adversarial tests
+
+Running the rewritten scanner against all 28 real tracked Markdown files,
+and against new adversarial regression fixtures written specifically to
+exercise the required cases, surfaced four genuine, narrow bugs (none a
+runtime behavior change):
+
+1. A coincidental false-positive match in `docs/API_KEY_VERIFIER.md`'s
+   unrelated, pre-existing historical database-query prose ("...requires the
+   exact accepted user ID..."), where `weakRecommendationVerbPattern`'s
+   `use\w*` incidentally matched the noun "user", not just the verb "use".
+   Fixed by tightening the pattern to explicit inflections
+   (`use|uses|used|using`), and separately reworded that one sentence
+   ("accepted" → "validated", meaning preserved) since it is a genuinely
+   different, historical feature outside this PR's scope.
+2. A real panic (`slice bounds out of range`) when a recommendation
+   match's span extended past its detected sentence boundary. Fixed with
+   defensive index clamping throughout the context-scoping arithmetic
+   (`hasAffirmativeDeprecationContext`, `recommendationMention`,
+   `hasNearbyConstructionWord`, `transportKindNear`), consistent with this
+   package's fail-closed design.
+3. `nearestAPIKeyOccurrence` measured distance in raw bytes, while its
+   sibling proximity check (`deprecationContextProximityDistance`) measured
+   in words. In a sentence naming two different transports close together
+   ("The api_key form parameter is deprecated; use the api_key query
+   parameter instead."), the two metrics could disagree about which
+   `api_key` mention a given context word actually describes — silently
+   misclassifying its transport and wrongly suppressing a live
+   recommendation. Fixed by unifying both functions on word-distance.
+4. The transport-word matching window (originally 40 characters either
+   side of an `api_key` mention) was wide enough, in a short sentence
+   naming two transports, to catch *both* transport words from within one
+   mention's window, making that mention's classification wrongly
+   ambiguous instead of identifying its own, nearer word. Narrowed to 20
+   characters, enough for a transport word immediately adjacent to its
+   mention without reaching a different mention's own word.
+
+### New tests
+
+`TestScanTextBareVersionRequiresConstruction`,
+`TestScanTextTransportMismatchDoesNotSuppress`, and
+`TestScanTextStructuralParsingCorrectness` were added, covering every
+required case: transport-specific binding across form/query/raw/response-
+field pairings; a bare `0.13.0` with no construction word, and the same
+version paired with one; variable-length code-span delimiters with an
+embedded literal backtick elsewhere in the span; multi-line code-span
+content normalization (including the case where the inserted space falls
+exactly between a key and its `=`, which correctly does not decode as a
+working credential either); short/unclosed fences; and list-continuation
+indentation versus genuine indented code.
+
+`TestScanTextRenderedMarkupSplit` was rewritten: real-parser smoke-testing
+disproved iteration-12's premise that single-punctuation-character
+emphasis/strong/strikethrough wrapping (`api*_*key`, `Authorization_:_`,
+`api~_~key`) renders as a split anchor — real CommonMark delimiter-flanking
+rules leave these as literal, unprocessed text — so those cases moved from
+positive to negative fixtures with corrected comments, and new positive
+cases were added for the genuine splitting vectors confirmed by the real
+parser: HTML comments, Markdown links (including `Author[ization](url):`),
+nested tag+link/tag+entity combinations, and genuine whole-word strong
+emphasis (`**api_key**`).
+
+All prior fixtures (iterations 1-12) pass unchanged except where they
+depended on a bare single-row table (now a real two-row GFM table, since
+the new engine parses actual tables rather than matching `"| ... |"` text)
+or a bare `0.13.0` with no construction word nearby (now paired with an
+explicit "removed"/"deprecated" word, per the new bare-version rule).
+
+The nonconforming historical commit flagged separately by the reviewers is
+intentionally **not** touched in this iteration; the orchestrator will seek
+explicit user authorization for that separately. No runtime authentication/
+middleware/header/status/version change. `VERSION` unchanged (`0.12.1`).
+`scripts/verify-docs-canonical-examples.sh` re-run against every tracked
+Markdown file: 0 violations across 28 files, no doc wording changed other
+than the one `API_KEY_VERIFIER.md` sentence noted above.
+
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |
@@ -1065,6 +1222,44 @@ every tracked Markdown file found 0 violations; no doc wording changed.
 - `./scripts/verify-docs-canonical-examples.sh` re-run against every
   tracked Markdown file after the iteration-12 fixes: 0 violations across
   28 shipped Markdown files, no doc wording changed.
+- Iteration 13 (root-cause rewrite): `internal/docsguard` rewritten to an
+  AST-based scanner using `github.com/yuin/goldmark/v2 v2.1.6` (0 known
+  vulnerabilities). `TestScanTextBareVersionRequiresConstruction`,
+  `TestScanTextTransportMismatchDoesNotSuppress`, and
+  `TestScanTextStructuralParsingCorrectness` (all new) cover: a bare
+  `0.13.0` with no construction word does not suppress, while the same
+  version paired with "removed"/"deprecated" does; a deprecation notice
+  about one transport (form, raw, response field) does not suppress a live
+  recommendation naming a *different* transport (query), while a notice
+  and recommendation naming the *same* transport, or a bare `api_key` with
+  no named transport at all, continue to suppress as before; a
+  double-backtick code span containing an embedded literal backtick
+  elsewhere in its content is parsed as one span and a genuine credential
+  later in that same span is still detected; a code span's content wrapped
+  across two physical source lines is normalized (newline becomes a
+  single space) and a credential elsewhere in that content is still
+  detected, while a credential whose own key/`=` boundary is exactly where
+  that normalization inserts a space correctly does not decode as working
+  either; a too-short closing fence does not close the block; an unclosed
+  fence still scans as code to end-of-file; and genuine list-item
+  continuation indentation is correctly distinguished from indented code.
+  `TestScanTextRenderedMarkupSplit` rewritten: real-parser testing
+  confirmed single-punctuation-character emphasis/strong/strikethrough
+  wrapping (the iteration-12 finding's premise) renders as literal text
+  under real CommonMark flanking rules, not a split anchor, so those cases
+  moved to negative fixtures; new positive cases cover HTML comments,
+  Markdown links, and nested tag+link/tag+entity combinations as the
+  genuine splitting vectors. All prior `internal/docsguard` fixtures
+  (iterations 1-12) and the full repository test suite (`go test ./...`)
+  pass unchanged, except fixtures updated to use real two-row GFM tables
+  (where bare `"| ... |"` text previously sufficed) or a bare `0.13.0`
+  paired with an explicit construction word (per the new bare-version
+  rule). `./scripts/verify-docs-canonical-examples.sh` re-run against
+  every tracked Markdown file after the rewrite: 0 violations across 28
+  shipped Markdown files, with one unrelated, pre-existing sentence in
+  `docs/API_KEY_VERIFIER.md` reworded ("accepted" → "validated", meaning
+  preserved) to remove a coincidental false-positive trigger surfaced by
+  the new, more thorough end-to-end scanning.
 
 ## Why a bounded deprecation window instead of immediate removal
 

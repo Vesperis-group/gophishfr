@@ -4,43 +4,95 @@
 // exist so a future documentation change cannot silently reintroduce a
 // `?api_key=`/form `api_key` example, a raw (non-scheme) Authorization
 // header example, or ordinary prose recommending a deprecated transport
-// (a table row, an "or an api_key" alternative, or a sentence like "use the
+// (a table cell, an "or an api_key" alternative, or a sentence like "use the
 // api_key query parameter", even one wrapped across several Markdown lines)
 // as if it were a canonical, recommended transport.
 //
-// This package intentionally does not parse Markdown. It scans plain text
-// for the literal substrings that would make an example authenticate
-// against the real credential extractor in
-// middleware.extractExplicitAPICredential: the query/form parameter is named
-// exactly "api_key" (decoded, since Go's URL/form parsing percent-decodes
-// parameter names before comparing them), and the Authorization header is
-// read by name case-insensitively per RFC 9110, but its value is matched
-// against the runtime's exact, case-sensitive "Bearer " prefix. Matching that
-// same literal contract is what keeps false positives and false negatives
-// both low without a real HTTP/Markdown parser.
+// # Why a real Markdown/GFM parser
 //
-// Before any of that matching happens, every line is normalized (see
-// normalizeRenderedEscapes) to undo the one class of disguise a canonical
-// *source* Markdown file could use to hide a functional example from a
-// literal scanner while still rendering it in full: a CommonMark backslash
-// escape (`api\_key`) or an HTML numeric/narrow-named character reference
-// (`api&#95;key`, `Authorization&#58;`). This is a single, bounded,
-// documented transformation, not a general HTML/Markdown parser.
+// Earlier iterations of this package scanned plain text with an ever-growing
+// set of hand-written regular expressions approximating Markdown rendering:
+// backslash escapes, HTML character references, inline HTML tags, emphasis
+// delimiters, code-span/fence boundaries, and indented-code detection were
+// each bolted on as rendering-bypass findings were discovered one at a time.
+// That approach is fundamentally unable to keep up: CommonMark/GFM rendering
+// has real, interacting structural rules (delimiter-run flanking for
+// emphasis, matching fence character/length, list-continuation indentation
+// versus a genuine indented code block, variable-length code-span
+// delimiters) that a flat set of regexes cannot soundly approximate without
+// either missing real bypasses or inventing false ones.
+//
+// This package instead parses each document with goldmark
+// (github.com/yuin/goldmark/v2), a tested, widely used, actively maintained
+// CommonMark/GFM-compliant parser, and analyzes the resulting syntax tree.
+// goldmark's AST nodes already carry the *decoded* text a renderer would
+// actually display (backslash escapes and HTML character references are
+// resolved once, at parse time, by a pluggable text.Decoder -- see
+// flattenInline) and already encode every one of the structural rules above
+// correctly, so this package no longer needs to reimplement any of them.
+//
+// # What is scanned, and how
+//
+// Three kinds of block are scanned, each according to how it actually
+// renders:
+//
+//   - A code block (indented or fenced, backtick or tilde, with or without
+//     an info string) renders every line completely literally: no
+//     backslash escape, character reference, emphasis, or raw HTML is ever
+//     processed inside one. Its lines are matched against
+//     hasParameterCredential/rawAuthorization verbatim, with no decoding.
+//   - A paragraph, heading, or GFM table cell's inline content is flattened
+//     into the plain text it would actually render as (see flattenInline),
+//     then checked for both credential syntax
+//     (hasParameterCredential/rawAuthorization) and documentation-accuracy
+//     recommendation prose (recommendationMention, tableCellMention),
+//     exactly as it would read to a person or a client copying the example.
+//   - An inline code span's content, even though it sits inside a
+//     paragraph's otherwise-decoded text, renders literally (same rule as a
+//     code block) and is included in the flattened text unmodified, so a
+//     literal forbidden example inside one is still caught while a
+//     backslash-escaped or character-referenced one -- which never actually
+//     decodes there -- is not.
+//
+// A raw inline HTML tag or comment, and a Markdown link's destination, never
+// contribute visible text and are dropped entirely during flattening; an
+// emphasis/strong/strikethrough delimiter that does not actually form valid
+// emphasis per CommonMark's own delimiter-run rules (for example a single
+// punctuation character wrapped in intraword asterisks) is never parsed as
+// one in the first place, and so already appears in the flattened text as
+// the literal, un-rendered source -- no special-case handling is needed for
+// either of these: they fall directly out of using a real parser.
+//
+// # Credential-syntax contract
+//
+// The query/form parameter name and the Authorization scheme are matched
+// against the same literal contract the real credential extractor in
+// middleware.extractExplicitAPICredential uses: the parameter name is
+// exactly "api_key" (percent-decoded, since Go's URL/form parsing
+// percent-decodes parameter names before comparing them), and the
+// Authorization header's value is matched against the runtime's exact,
+// case-sensitive "Bearer " prefix (the header *name* stays case-insensitive,
+// per RFC 9110).
+//
+// # Diagnostics
 //
 // Every reported Violation carries only a file-relative line range and a
 // Kind; it never carries the matched text, so a forbidden example that
 // happens to contain a real secret is never echoed by a caller that prints
 // violations (see Kind.Explanation, which returns a fixed, generic
-// description instead).
+// description instead). If the document fails to parse (which the
+// underlying parser does not do for any input in practice, but this package
+// still checks defensively), ScanText returns an error and callers must fail
+// closed rather than trust an empty violation list.
 package docsguard
 
 import (
-	"bufio"
 	"fmt"
-	"net/url"
-	"regexp"
-	"strconv"
-	"strings"
+
+	"github.com/yuin/goldmark/v2/ast"
+	"github.com/yuin/goldmark/v2/extension"
+	extast "github.com/yuin/goldmark/v2/extension/ast"
+	"github.com/yuin/goldmark/v2/parser"
 )
 
 // Kind identifies which deprecated transport a Violation demonstrates.
@@ -63,29 +115,33 @@ const (
 	// value is not the runtime's exact, case-sensitive canonical form. The
 	// real extractor only strips a literal "Bearer " prefix
 	// (strings.TrimPrefix is case-sensitive); any other casing of the word
-	// "bearer" is therefore not recognized as Bearer at runtime and falls
+	// "bearer" is therefore not recognized as canonical at runtime and falls
 	// into the same raw/legacy bucket as a bare token, so it is flagged
 	// here too. Other real schemes such as `Authorization: Basic ...` are
 	// matched case-insensitively, per RFC 7235, and are not flagged.
 	KindRawAuthorization Kind = "raw_authorization"
 
-	// KindUndeprecatedParameterMention covers a Markdown table row, a
+	// KindUndeprecatedParameterMention covers a GFM table cell, a
 	// "presented as an alternative" sentence, or ordinary recommendation
 	// prose (e.g. "use the api_key query parameter", "authenticate via
 	// api_key") -- including one wrapped across several physical lines --
 	// that presents `api_key` as an ordinary, currently supported
-	// authentication option with no *affirmative* deprecation context in
-	// the same sentence. A deprecation-context word elsewhere in the
-	// paragraph, about an unrelated subject, does not suppress this. Nor
-	// does a negated context ("not deprecated", "no longer legacy") where
-	// the negation directly governs it: that means the surrounding text is
-	// actively asserting the opposite of the real contract, which is
-	// itself the violation. A negation that instead governs the
-	// recommendation verb -- "do NOT use the api_key parameter; it is
-	// deprecated" -- is a legitimate warning and does not violate. Unlike
-	// KindParameterCredential, this has no `=` sign and would never
-	// authenticate anything -- it is a documentation-accuracy
-	// check, not a credential-syntax check.
+	// authentication option with no *affirmative* deprecation context that
+	// (a) is in the same sentence/clause, (b) is not separated from it by an
+	// adversative connector, (c) is close enough to an actual `api_key`
+	// mention to describe that transport specifically, (d) describes the
+	// same specific transport (query/form/raw) rather than a different one,
+	// and (e) if the only context is the bare removal version number, is
+	// accompanied by an explicit deprecation/removal construction word
+	// rather than standing alone. A negated context ("not deprecated", "no
+	// longer legacy") where the negation directly governs it does not
+	// suppress this: it means the surrounding text is actively asserting the
+	// opposite of the real contract, which is itself the violation. A
+	// negation that instead governs the recommendation verb -- "do NOT use
+	// the api_key parameter; it is deprecated" -- is a legitimate warning
+	// and does not violate. Unlike KindParameterCredential, this has no `=`
+	// sign and would never authenticate anything -- it is a
+	// documentation-accuracy check, not a credential-syntax check.
 	KindUndeprecatedParameterMention Kind = "undeprecated_parameter_mention"
 )
 
@@ -108,285 +164,6 @@ func (k Kind) Explanation() string {
 	}
 }
 
-// deprecationContextPattern matches any of the words/strings that can show a
-// nearby `api_key` mention already carries its required deprecation context
-// (the removal version, the word "deprecated"/"deprecation", "legacy",
-// "sunset", or "migrat(e/ion)"). A match here is only treated as *affirmative*
-// context if hasAffirmativeDeprecationContext also confirms it is not
-// negated (see negationWordPattern). This list is deliberately short: every
-// entry is a plain-language signal a human reviewer would also accept as
-// "this is clearly marked deprecated", which is what keeps the policy narrow
-// and auditable rather than a loophole.
-var deprecationContextPattern = regexp.MustCompile(`(?i)deprecat\w*|0\.13\.0|remov\w*|sunset\w*|migrat\w*|legacy`)
-
-// negationWordPattern matches common negation words/contractions. A match
-// only counts as negating a particular deprecationContextPattern match when
-// it is within negationProximityWords words of it, on the near side of any
-// negationBoundaryPattern punctuation (see hasAffirmativeDeprecationContext):
-// "not deprecated" and "no longer legacy" assert the opposite of the real
-// contract and must remain a violation, but a negation word governing some
-// other, earlier part of the same clause -- most commonly the recommendation
-// verb itself, as in "do NOT use the api_key parameter; it is deprecated" --
-// must not be read as negating "deprecated" too.
-var negationWordPattern = regexp.MustCompile(`(?i)\b(not|never|no longer|isn't|aren't|wasn't|weren't|doesn't|didn't|won't|wont)\b`)
-
-// negationBoundaryPattern marks a punctuation boundary strong enough to stop
-// a negation word from being read as governing a deprecation-context word on
-// the other side of it: a sentence-ending mark, a semicolon, or a dash (em,
-// en, or a double hyphen standing in for one in plain-text Markdown). Without
-// this, "Do NOT use the api_key query parameter; it is deprecated" would
-// wrongly read the leading "not" -- which governs "use", not "deprecated" --
-// as negating the deprecation notice that follows it.
-var negationBoundaryPattern = regexp.MustCompile(`[.!?;—–]|--`)
-
-// negationProximityWords bounds how many words may separate a negation
-// word/phrase from the deprecation-context word it must directly govern to
-// count as negating it (for example "is not actually deprecated"). Keeping
-// this small, in addition to negationBoundaryPattern, is what ensures only a
-// negation that grammatically governs the deprecation-context word itself --
-// not an unrelated negation earlier in the same clause -- suppresses it.
-const negationProximityWords = 3
-
-// adversativeBoundaryPattern matches a bounded adversative/contrastive
-// connector -- "but", "however", "yet", "though", "although", "nevertheless",
-// "nonetheless", "whereas" -- the specific word class that signals two
-// clauses make independent, often opposing, claims (unlike a semicolon or
-// an em/en dash, which this package also recognizes as a clause separator
-// but which, in every example seen so far, introduces an *elaboration* of
-// the very same claim -- "Do not use the api_key query parameter; it is
-// deprecated" -- and must continue to count as affirmative context; see
-// hasAffirmativeDeprecationContext). A deprecation-context word on one side
-// of one of these connectors must not be read as qualifying a recommendation
-// on the other side, regardless of which comes first: "X is deprecated, but
-// use api_key" and "Use api_key, but X is deprecated" both describe X, not
-// api_key's status, when X is a different subject.
-var adversativeBoundaryPattern = regexp.MustCompile(`(?i)\b(?:but|however|yet|though|although|nevertheless|nonetheless|whereas)\b`)
-
-// apiKeyMentionPattern matches a literal `api_key` occurrence
-// (case-insensitive). deprecationContextProximityDistance uses it to bind a
-// deprecation-context word to the specific transport syntax it must
-// describe, rather than any similarly-placed but unrelated subject sharing
-// the same sentence or clause -- "Use the api_key query parameter for
-// authentication; our legacy billing system also needs migration, with
-// removal scheduled separately" mentions "legacy"/"migration"/"removal",
-// but none of them are about api_key's own deprecation.
-var apiKeyMentionPattern = regexp.MustCompile(`(?i)api_key`)
-
-// deprecationContextProximityWords bounds how many words may separate a
-// deprecation-context word from the nearest `api_key` mention in the same
-// clause and still count as describing that transport's own status. This
-// is deliberately generous enough for a context word to sit just past a
-// short verb phrase ("the api_key parameter is deprecated", "recommended
-// the api_key query parameter; it is now deprecated") while still excluding
-// a word that is merely nearby in the same sentence but describing an
-// unrelated subject.
-const deprecationContextProximityWords = 6
-
-// deprecationContextProximityDistance returns the number of
-// whitespace-separated words between pos and the closest `api_key` mention
-// in clauseText, or -1 if clauseText contains no such mention at all.
-func deprecationContextProximityDistance(clauseText string, pos int) int {
-	best := -1
-	for _, loc := range apiKeyMentionPattern.FindAllStringIndex(clauseText, -1) {
-		var between string
-		if loc[0] >= pos {
-			between = clauseText[pos:loc[0]]
-		} else {
-			between = clauseText[loc[1]:pos]
-		}
-		n := len(strings.Fields(between))
-		if best == -1 || n < best {
-			best = n
-		}
-	}
-	return best
-}
-
-// hasAffirmativeDeprecationContext reports whether clauseText contains at
-// least one deprecation-context word or phrase that is (a) not directly
-// negated, (b) not separated from recommendationPos -- the byte offset,
-// within clauseText, of the recommendation match being evaluated -- by an
-// adversativeBoundaryPattern connector, and (c) within
-// deprecationContextProximityWords of an actual `api_key` mention, so it
-// describes that transport specifically rather than some other subject
-// merely sharing the sentence or clause. It is used both per-line (for
-// table rows, with recommendationPos set to len(line) so any context in the
-// row counts as before) and per-sentence (for recommendation prose, scoped
-// via sentenceBounds), so a negated mention, one that belongs to a
-// different, adversatively-contrasted clause, or one that is simply too far
-// from any `api_key` mention to describe it, cannot accidentally suppress a
-// genuine violation.
-func hasAffirmativeDeprecationContext(clauseText string, recommendationPos int) bool {
-	for _, match := range deprecationContextPattern.FindAllStringIndex(clauseText, -1) {
-		start := match[0]
-		windowStart := start - 40
-		if windowStart < 0 {
-			windowStart = 0
-		}
-		preceding := clauseText[windowStart:start]
-		if locs := negationBoundaryPattern.FindAllStringIndex(preceding, -1); len(locs) > 0 {
-			last := locs[len(locs)-1]
-			preceding = preceding[last[1]:]
-		}
-		words := strings.Fields(preceding)
-		if len(words) > negationProximityWords {
-			words = words[len(words)-negationProximityWords:]
-		}
-		if negationWordPattern.MatchString(strings.Join(words, " ")) {
-			continue
-		}
-
-		var between string
-		if start <= recommendationPos {
-			between = clauseText[start:recommendationPos]
-		} else {
-			between = clauseText[recommendationPos:start]
-		}
-		if adversativeBoundaryPattern.MatchString(between) {
-			continue
-		}
-
-		if d := deprecationContextProximityDistance(clauseText, start); d == -1 || d > deprecationContextProximityWords {
-			continue
-		}
-
-		return true
-	}
-	return false
-}
-
-// sentenceTerminators are the characters that end an English sentence, used
-// by sentenceBounds to scope deprecation-context association to "the
-// same sentence as a recommendation": an unrelated deprecation mention about
-// a different subject, in an earlier or later sentence of the same
-// paragraph, must not be able to suppress a live recommendation elsewhere in
-// that paragraph.
-const sentenceTerminators = ".!?"
-
-// isDottedVersionPeriod reports whether the '.' at text[idx] sits between
-// two ASCII digits, as in the removal version "0.13.0". Such a period is
-// part of a dotted version number, never a sentence boundary: treating it as
-// one would split "...targeted for removal in 0.13.0." into a fragment
-// ending at "0" and a separate fragment starting at "13.0.", stranding the
-// removal-version context away from whatever recommendation sentence it was
-// meant to qualify.
-func isDottedVersionPeriod(text string, idx int) bool {
-	if idx <= 0 || idx+1 >= len(text) || text[idx] != '.' {
-		return false
-	}
-	isDigit := func(b byte) bool { return b >= '0' && b <= '9' }
-	return isDigit(text[idx-1]) && isDigit(text[idx+1])
-}
-
-// nextSentenceTerminator returns the index of the first real sentence
-// terminator in text at or after fromIdx, skipping any '.' that is part of a
-// dotted version number (see isDottedVersionPeriod). It returns -1 if none
-// is found.
-func nextSentenceTerminator(text string, fromIdx int) int {
-	for i := fromIdx; i < len(text); i++ {
-		if !strings.ContainsRune(sentenceTerminators, rune(text[i])) {
-			continue
-		}
-		if text[i] == '.' && isDottedVersionPeriod(text, i) {
-			continue
-		}
-		return i
-	}
-	return -1
-}
-
-// prevSentenceTerminator returns the index of the last real sentence
-// terminator in text at or before fromIdx, skipping any '.' that is part of
-// a dotted version number (see isDottedVersionPeriod). It returns -1 if none
-// is found.
-func prevSentenceTerminator(text string, fromIdx int) int {
-	for i := fromIdx; i >= 0; i-- {
-		if !strings.ContainsRune(sentenceTerminators, rune(text[i])) {
-			continue
-		}
-		if text[i] == '.' && isDottedVersionPeriod(text, i) {
-			continue
-		}
-		return i
-	}
-	return -1
-}
-
-// sentenceBounds returns the [start, end) byte offsets of the sentence in
-// text containing offset pos, bounded by the nearest real sentence
-// terminator on each side (or the start/end of text if none is found). A
-// '.' inside a dotted version number such as "0.13.0" is never treated as
-// that boundary.
-func sentenceBounds(text string, pos int) (start, end int) {
-	start = 0
-	if idx := prevSentenceTerminator(text, pos-1); idx != -1 {
-		start = idx + 1
-	}
-	end = len(text)
-	if idx := nextSentenceTerminator(text, pos); idx != -1 {
-		end = idx + 1
-	}
-	return start, end
-}
-
-// tableRowPattern matches a Markdown table row: a line whose first
-// non-whitespace character is a pipe.
-var tableRowPattern = regexp.MustCompile(`^\s*\|`)
-
-// offeredAsAlternativePattern matches prose that lists `api_key` as an
-// alternative/option, e.g. "... or an `api_key` parameter" or
-// "... or a api_key value". This is the exact phrasing of the original bug
-// in docs/GROUP_IMPORT_LIMITS.md.
-var offeredAsAlternativePattern = regexp.MustCompile("(?i)\\bor\\s+an?\\s+`?api_key`?")
-
-// recommendationProximity bounds how many intervening words a recommendation
-// verb may be from "api_key" and still count as describing it, rather than
-// coincidentally sharing a (now paragraph-wide, potentially multi-sentence)
-// block of text with it. Without this bound, a purely descriptive paragraph
-// that happens to use the word "authentication" in one sentence and mention
-// `api_key` in an unrelated sentence nearby would falsely violate; this is
-// exactly the false positive a real paragraph in docs/API_AUTHENTICATION.md
-// surfaced once detection moved from single lines to whole paragraphs.
-const recommendationProximity = `(?:\s+\S+){0,4}\s+`
-
-// strongRecommendationPattern matches the word "authenticate" (and its
-// inflections: authenticates, authenticated, authenticating,
-// authentication) within recommendationProximity words of `api_key`, in
-// either order. Paired with no affirmative deprecation context, this word
-// alone is specific enough to signal a recommendation ("authenticate via
-// api_key", "authenticate with the api_key parameter") without needing a
-// separate anchor word -- but only when it is actually close to the
-// `api_key` mention, not merely present somewhere in the same paragraph.
-var strongRecommendationPattern = regexp.MustCompile(
-	`(?i)\bauthenticat\w*\b` + recommendationProximity + `api_key\b|\bapi_key\b` + recommendationProximity + `authenticat\w*\b`,
-)
-
-// weakRecommendationVerbPattern matches common, much more generic verbs --
-// "use", "via", "with", "accept", "recommend" (recommend/recommends/
-// recommended/recommending) -- within recommendationProximity words of
-// `api_key`. These words are far too common in ordinary prose (including
-// this package's own documentation) to use unbounded across a whole
-// paragraph; requiring proximity to `api_key`, in addition to the
-// recommendationAnchorPattern check below, is what keeps this narrow.
-var weakRecommendationVerbPattern = regexp.MustCompile(
-	`(?i)\b(?:use\w*|via|with|accept\w*|recommend\w*)\b` + recommendationProximity + `api_key\b|\bapi_key\b` + recommendationProximity + `\b(?:use\w*|via|with|accept\w*|recommend\w*)\b`,
-)
-
-// recommendationAnchorPattern matches a word that anchors a weak
-// recommendation verb to the authentication-transport meaning of `api_key`,
-// as opposed to an incidental mention (a curl flag, a value, a variable
-// name) that happens to share the text with one of those common verbs.
-var recommendationAnchorPattern = regexp.MustCompile(`(?i)\b(parameter|param|query|field|header|credential)\b`)
-
-// candidateKeyPattern finds every "key=" token in a line, in either a URL
-// query string or a curl form body. The key is whatever Go's net/url would
-// treat as a parameter name: any run of characters up to the next
-// "&"/"?"/"="/whitespace/quote/backtick. Each match is percent-decoded and
-// compared against "api_key", which is what actually makes it a working
-// credential at runtime -- not its literal, possibly percent-encoded,
-// spelling in the document.
-var candidateKeyPattern = regexp.MustCompile("[^&?=\\s\"'`]+=")
-
 // Violation is one deprecated-transport example found in a document. It
 // carries only its location and Kind -- never the matched text -- so a
 // caller can safely print every field of a Violation (see Kind.Explanation)
@@ -395,353 +172,103 @@ var candidateKeyPattern = regexp.MustCompile("[^&?=\\s\"'`]+=")
 type Violation struct {
 	// StartLine and EndLine are the 1-indexed, inclusive line range the
 	// violation was found in. For a single-line violation (parameter
-	// credential, raw Authorization, a table row) they are equal; a
-	// recommendation-prose violation spanning a wrapped Markdown paragraph
-	// reports that paragraph's full line range.
+	// credential, raw Authorization, a table cell occupying one line) they
+	// are equal; a recommendation-prose violation spanning a wrapped
+	// Markdown paragraph reports that paragraph's full line range.
 	StartLine int
 	EndLine   int
 	Kind      Kind
 }
 
-// canonicalBearerScheme is the exact, case-sensitive prefix the real
-// credential extractor strips (see middleware.extractExplicitAPICredential:
-// strings.TrimPrefix(authorization, "Bearer ")). Any other casing of the
-// word "bearer" is not recognized as this scheme at runtime.
-const canonicalBearerScheme = "Bearer"
+// mdParser is this package's single, shared CommonMark+GFM parser instance.
+// It is stateless and safe for concurrent use across calls to ScanText.
+var mdParser = parser.New(parser.WithExtensions(extension.GFMParser))
 
-// recognizedAuthSchemes lists HTTP Authorization scheme tokens, other than
-// Bearer, that are not the deprecated raw API-key transport. Bearer is
-// handled separately because, unlike these real, independently registered
-// schemes, this repository's own runtime does not recognize it
-// case-insensitively. Keeping this list short and explicit is what keeps the
-// exemption "narrow and auditable": every entry is a real HTTP
-// authentication scheme, not a loophole.
-var recognizedAuthSchemes = map[string]bool{
-	"basic":     true,
-	"digest":    true,
-	"negotiate": true,
-	"ntlm":      true,
-}
+// maxLineLength bounds the length of any single physical line this package
+// will scan. The previous, bufio.Scanner-based implementation failed closed
+// on bufio.ErrTooLong for a line exceeding its internal buffer; this
+// explicit check preserves the exact same fail-closed guarantee under the
+// new AST-based implementation, which has no equivalent built-in limit of
+// its own.
+const maxLineLength = 1024 * 1024
 
-// backslashEscapePattern matches a backslash followed by one of the ASCII
-// punctuation characters CommonMark/GitHub Flavored Markdown treats as
-// escapable (`!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~`). A renderer turns each such
-// pair into the bare punctuation character alone -- `api\_key` and
-// `Authorization\:` render identically to `api_key` and `Authorization:` --
-// so this must be undone before any pattern matching, or an escaped example
-// would read as canonical prose while still rendering as a working,
-// deprecated credential example.
-var backslashEscapePattern = regexp.MustCompile(`\\([\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E])`)
-
-// numericCharRefPattern matches a decimal (`&#95;`) or hexadecimal
-// (`&#x5f;`, `&#X5F;`, and any other case mix of the `x`/`X` prefix and hex
-// digits) numeric character reference. Decoding every numeric reference this
-// way is safe and unambiguous -- each one names exactly one Unicode code
-// point -- unlike named references, which this package only recognizes for
-// a narrow, explicit list (see namedCharRefReplacements); it is not a
-// general HTML/XML entity parser, only this one well-defined, bounded
-// transformation.
-var numericCharRefPattern = regexp.MustCompile(`&#(?:[xX]([0-9a-fA-F]+)|([0-9]+));`)
-
-// namedCharRefReplacements maps a narrow, explicit list of HTML named
-// character references to the single literal character each one renders as,
-// restricted to exactly the punctuation that appears in the protected
-// anchors this package matches against: the underscore in `api_key`, the
-// colon after `Authorization`, the `=`/`&`/`?`/`;` of query and form syntax,
-// and the backslash/other delimiters that could themselves be used to
-// reference one of those. This is deliberately not a general named-entity
-// table (the full HTML5 list has over 2,000 entries): adding an unrelated
-// one here would risk decoding something this package was never meant to
-// touch, which is exactly the "general Markdown/HTML parser" scope this
-// package avoids.
-var namedCharRefReplacements = map[string]string{
-	"&amp;":      "&",
-	"&AMP;":      "&",
-	"&lowbar;":   "_",
-	"&UnderBar;": "_",
-	"&colon;":    ":",
-	"&equals;":   "=",
-	"&num;":      "#",
-	"&quest;":    "?",
-	"&semi;":     ";",
-	"&sol;":      "/",
-	"&bsol;":     "\\",
-}
-
-// namedCharRefPattern finds every candidate `&name;` token so
-// normalizeRenderedEscapes can look each one up in namedCharRefReplacements
-// without a full named-entity table: an unrecognized name (e.g. `&copy;`,
-// `&hearts;`) is left exactly as written.
-var namedCharRefPattern = regexp.MustCompile(`&[A-Za-z][A-Za-z0-9]*;`)
-
-// safeInlineTagPattern matches an opening or closing tag for a narrow,
-// explicit allow-list of safe inline HTML formatting elements GitHub's
-// Markdown renders as real HTML, with or without attributes: em, i, b,
-// strong, u, s, del, ins, mark, small, sub, sup, span, abbr, code. A
-// documentation example can use one of these purely to visually split one
-// of this package's protected anchors while still rendering as plain,
-// readable text -- `api<em>_</em>key=TOKEN` renders exactly like
-// `api_key=TOKEN` -- so these tags are stripped (never their content)
-// before any other pattern runs. This is deliberately a short, explicit
-// list of tag *names*, not a general HTML tag parser: anything else (a
-// `<script>`, an `<img>`, an unknown or custom element) is left untouched.
-var safeInlineTagPattern = regexp.MustCompile(`(?i)</?(?:em|i|b|strong|u|s|del|ins|mark|small|sub|sup|span|abbr|code)(?:\s[^>]*)?>`)
-
-// renderedMarkupSplitPattern matches a Markdown emphasis/strong-emphasis/
-// strikethrough delimiter run (one to three asterisks, one to three
-// underscores, or one to two tildes, independently on each side) wrapping
-// exactly one of this package's protected punctuation characters (`_`,
-// `:`, `=`, `&`). A documentation example can use this purely to visually
-// split one of this package's protected anchors while still rendering as
-// plain, readable text -- `api*_*key=TOKEN` renders exactly like
-// `api_key=TOKEN` -- so the delimiter run on each side is stripped,
-// keeping only the wrapped character. This intentionally recognizes only
-// this one narrow, specific shape (a single wrapped protected character),
-// not general Markdown emphasis: a delimiter run can equally be literal
-// *content* rather than a wrapping delimiter (`**_**` strong-emphasizes a
-// literal underscore), and there is no way to tell those apart without a
-// real parser: recognizing only "exactly one wrapped protected character"
-// avoids that ambiguity, since none of `_:=&` is itself a delimiter
-// character this pattern also tries to match as wrapped content.
-var renderedMarkupSplitPattern = regexp.MustCompile(
-	`(?:\*{1,3}|_{1,3}|~{1,2})([_:=&])(?:\*{1,3}|_{1,3}|~{1,2})`,
-)
-
-// codeFenceLinePattern matches a Markdown fenced code block delimiter line:
-// up to three leading spaces (per CommonMark) followed by three or more
-// identical backticks or tildes. It is used only to detect where a fence
-// opens and closes, never to parse an info string or the fence's contents.
-var codeFenceLinePattern = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
-
-// matchCodeFence reports whether line is a fenced-code-block delimiter,
-// returning the fence character and the length of its backtick/tilde run.
-func matchCodeFence(line string) (ch byte, length int, ok bool) {
-	m := codeFenceLinePattern.FindStringSubmatch(line)
-	if m == nil {
-		return 0, 0, false
-	}
-	return m[1][0], len(m[1]), true
-}
-
-// indentedCodeLinePattern matches a line CommonMark would treat as part of
-// an indented code block: four or more leading spaces, or a leading tab.
-// This package does not track list-item context (which can change whether
-// such indentation is actually a code block), so it conservatively treats
-// every such line as code content for normalization purposes -- this only
-// ever *skips* decoding an escape that would not actually render that way;
-// it never skips detecting a literal forbidden example.
-var indentedCodeLinePattern = regexp.MustCompile(`^(?: {4,}|\t)`)
-
-// decodeNumericCharRef decodes one `&#NN;`/`&#xHH;` match (see
-// numericCharRefPattern) into the literal character it names, or returns it
-// unchanged if the numeric value is not a valid code point.
-func decodeNumericCharRef(ref string) string {
-	m := numericCharRefPattern.FindStringSubmatch(ref)
-	var codePoint int64
-	var err error
-	if m[1] != "" {
-		codePoint, err = strconv.ParseInt(m[1], 16, 32)
-	} else {
-		codePoint, err = strconv.ParseInt(m[2], 10, 32)
-	}
-	if err != nil || codePoint <= 0 || codePoint > 0x10FFFF {
-		return ref
-	}
-	return string(rune(codePoint))
-}
-
-// decodeNamedCharRef decodes one `&name;` match (see namedCharRefPattern)
-// via the narrow namedCharRefReplacements table, or returns it unchanged if
-// the name is not recognized.
-func decodeNamedCharRef(ref string) string {
-	if replacement, ok := namedCharRefReplacements[ref]; ok {
-		return replacement
-	}
-	return ref
-}
-
-// decodeRenderedMarkup applies every rendering-normalization transformation
-// this package recognizes, in an order where later steps can resolve what
-// earlier ones reveal (an HTML-tag-wrapped numeric reference, an
-// emphasis-wrapped entity, and so on): stripping safe inline HTML tags,
-// decoding numeric and narrowly-named HTML character references, undoing
-// CommonMark backslash escapes, and stripping an emphasis/strikethrough
-// delimiter wrapping exactly one protected punctuation character. Callers
-// must only apply this to text that Markdown would actually render these
-// ways -- never to inline code span content or code block lines, where
-// CommonMark renders every one of these mechanisms completely literally
-// (see normalizeRenderedEscapes, ScanText).
-func decodeRenderedMarkup(s string) string {
-	s = safeInlineTagPattern.ReplaceAllString(s, "")
-	s = numericCharRefPattern.ReplaceAllStringFunc(s, decodeNumericCharRef)
-	s = namedCharRefPattern.ReplaceAllStringFunc(s, decodeNamedCharRef)
-	s = backslashEscapePattern.ReplaceAllString(s, "$1")
-	s = renderedMarkupSplitPattern.ReplaceAllString(s, "$1")
-	return s
-}
-
-// inlineCodeSpanRanges returns the half-open byte ranges of line that fall
-// inside a Markdown inline code span: a run of one or more backticks,
-// followed by content, followed by a run of the exact same length. Per
-// CommonMark, a code span's content renders completely literally -- no
-// backslash escape, no character reference, no emphasis delimiter, and no
-// raw HTML tag is processed inside one -- so decodeRenderedMarkup must
-// never be applied to these ranges (see normalizeRenderedEscapes). Go's
-// regexp package cannot express "a closing run of the same length as the
-// opening run" (no backreferences), so this is a small manual scanner
-// instead of a single regular expression; it is deliberately a simplified
-// model of CommonMark's actual (more involved) code-span tokenization rule,
-// sufficient for this package's narrow purpose without being a Markdown
-// parser: it finds the first subsequent backtick run of matching length to
-// close a span, and if none exists before the end of the line, treats the
-// opening run as ordinary text (as CommonMark itself does).
-func inlineCodeSpanRanges(line string) [][2]int {
-	var ranges [][2]int
-	i := 0
-	for i < len(line) {
-		if line[i] != '`' {
-			i++
-			continue
-		}
-		openStart := i
-		for i < len(line) && line[i] == '`' {
-			i++
-		}
-		openLen := i - openStart
-		contentStart := i
-		closed := false
-		for i < len(line) {
-			if line[i] != '`' {
-				i++
-				continue
+// oversizedLine reports the 1-indexed line number of the first physical
+// line in source exceeding maxLineLength, or -1 if none does.
+func oversizedLine(source []byte) int {
+	lineNo := 1
+	start := 0
+	for i, b := range source {
+		if b == '\n' {
+			if i-start > maxLineLength {
+				return lineNo
 			}
-			closeStart := i
-			for i < len(line) && line[i] == '`' {
-				i++
-			}
-			if i-closeStart == openLen {
-				ranges = append(ranges, [2]int{contentStart, closeStart})
-				closed = true
-				break
-			}
-		}
-		if !closed {
-			// No matching close before end of line: not a code span: fall
-			// through and keep scanning for a new opening run starting
-			// just after the one we tried, matching CommonMark's behavior
-			// of treating an unmatched backtick run as literal text.
-			i = contentStart
+			lineNo++
+			start = i + 1
 		}
 	}
-	return ranges
-}
-
-// normalizeRenderedEscapes rewrites a line into the plain text it would
-// render as in GitHub's Markdown, undoing every rendering mechanism a
-// canonical-looking documentation example could otherwise hide a
-// deprecated-transport example behind (see decodeRenderedMarkup), while
-// leaving any inline code span's content completely untouched (see
-// inlineCodeSpanRanges): CommonMark renders code span content literally,
-// so an escape or entity or emphasis delimiter written there never
-// actually decodes when rendered, and normalizing it anyway would turn a
-// harmless literal example (“ `api\_key=TOKEN` “, which renders as the
-// non-functional literal text "api\_key=TOKEN") into a false positive. A
-// line that is itself part of a fenced or indented code block is handled
-// one level up, in ScanText, which does not call this function for such
-// lines at all, for the same reason.
-func normalizeRenderedEscapes(line string) string {
-	ranges := inlineCodeSpanRanges(line)
-	if len(ranges) == 0 {
-		return decodeRenderedMarkup(line)
+	if len(source)-start > maxLineLength {
+		return lineNo
 	}
-	var b strings.Builder
-	prev := 0
-	for _, r := range ranges {
-		b.WriteString(decodeRenderedMarkup(line[prev:r[0]]))
-		b.WriteString(line[r[0]:r[1]])
-		prev = r[1]
-	}
-	b.WriteString(decodeRenderedMarkup(line[prev:]))
-	return b.String()
+	return -1
 }
 
 // ScanText scans arbitrary text (typically one Markdown file's contents) and
-// returns every deprecated-transport example it finds. It returns a non-nil
-// error if the scanner itself failed -- most importantly bufio.ErrTooLong on
-// a line that exceeds the internal buffer -- in which case the returned
-// violations are necessarily incomplete and callers must fail closed rather
-// than trust them as "no violations found".
-func ScanText(text string) ([]Violation, error) {
-	var violations []Violation
-	var lines []string
+// returns every deprecated-transport example it finds. It parses the text
+// with mdParser and walks the resulting syntax tree; it returns a non-nil
+// error if any line exceeds maxLineLength or if parsing/walking fails, in
+// which case the returned violations are necessarily incomplete and callers
+// must fail closed rather than trust them as "no violations found".
+func ScanText(text string) (violations []Violation, err error) {
+	source := []byte(text)
 
-	scanner := bufio.NewScanner(strings.NewReader(text))
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-	lineNo := 0
-	var inFence bool
-	var fenceChar byte
-	var fenceLen int
-	for scanner.Scan() {
-		lineNo++
-		raw := scanner.Text()
-
-		// Markdown/HTML normalization (see normalizeRenderedEscapes) must
-		// only run on text CommonMark actually renders that way. A fenced
-		// or indented code block's content -- and its fence delimiter
-		// lines themselves -- render completely literally, the same as an
-		// inline code span's content; skip normalization for those lines
-		// entirely and scan the raw text, so a literal forbidden example
-		// inside a code block is still caught without a harmless escaped
-		// one being wrongly normalized into a false positive.
-		var line string
-		switch {
-		case inFence:
-			if ch, length, ok := matchCodeFence(raw); ok && ch == fenceChar && length >= fenceLen {
-				inFence = false
-			}
-			line = raw
-		default:
-			if ch, length, ok := matchCodeFence(raw); ok {
-				fenceChar, fenceLen = ch, length
-				inFence = true
-				line = raw
-			} else if indentedCodeLinePattern.MatchString(raw) {
-				line = raw
-			} else {
-				line = normalizeRenderedEscapes(raw)
-			}
-		}
-		lines = append(lines, line)
-		if hasParameterCredential(line) {
-			violations = append(violations, Violation{StartLine: lineNo, EndLine: lineNo, Kind: KindParameterCredential})
-		}
-		if rawAuthorization(line) {
-			violations = append(violations, Violation{StartLine: lineNo, EndLine: lineNo, Kind: KindRawAuthorization})
-		}
-		if tableRowMention(line) {
-			violations = append(violations, Violation{StartLine: lineNo, EndLine: lineNo, Kind: KindUndeprecatedParameterMention})
-		}
-	}
-	if err := scanner.Err(); err != nil {
-		return violations, fmt.Errorf("scanning line %d: %w", lineNo+1, err)
+	if lineNo := oversizedLine(source); lineNo != -1 {
+		return nil, fmt.Errorf("scanning line %d: line exceeds maximum length of %d bytes", lineNo, maxLineLength)
 	}
 
-	// Recommendation prose is analyzed per Markdown paragraph (a run of
-	// non-blank lines), not per physical line, so a recommendation wrapped
-	// across several lines by normal Markdown line-wrapping is still
-	// caught.
-	for _, p := range paragraphsFromLines(lines) {
-		if recommendationMention(p.text) {
-			violations = append(violations, Violation{StartLine: p.startLine, EndLine: p.endLine, Kind: KindUndeprecatedParameterMention})
+	lines := newLineIndex(source)
+
+	// goldmark's parser does not itself return errors for malformed input
+	// (CommonMark has no concept of a syntactically invalid document), but
+	// this package fails closed defensively against a panic in the parser
+	// or walker -- for example from an unexpectedly deep or malformed tree
+	// -- rather than silently reporting "no violations found".
+	defer func() {
+		if r := recover(); r != nil {
+			violations = nil
+			err = fmt.Errorf("parsing document: %v", r)
 		}
+	}()
+
+	doc := mdParser.Parse(source)
+
+	walkErr := ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
+		if !entering {
+			return ast.WalkContinue, nil
+		}
+		switch v := n.(type) {
+		case *ast.CodeBlock:
+			violations = append(violations, scanCodeBlock(source, lines, v)...)
+			return ast.WalkSkipChildren, nil
+		case *extast.TableCell:
+			violations = append(violations, scanTableCell(source, lines, n)...)
+			return ast.WalkSkipChildren, nil
+		case *ast.Paragraph, *ast.Heading:
+			violations = append(violations, scanProseBlock(source, lines, n)...)
+			return ast.WalkSkipChildren, nil
+		}
+		return ast.WalkContinue, nil
+	})
+	if walkErr != nil {
+		return violations, fmt.Errorf("walking document: %w", walkErr)
 	}
 
 	return dedupeViolations(violations), nil
 }
 
 // dedupeViolations removes exact (StartLine, EndLine, Kind) duplicates,
-// which can occur when a single-line paragraph independently matches both
-// the per-line table-row check and the per-paragraph recommendation check.
+// which can occur when a block independently matches more than one
+// documentation-accuracy check (for example both tableCellMention and
+// recommendationMention on the same short table cell).
 func dedupeViolations(violations []Violation) []Violation {
 	seen := make(map[Violation]bool, len(violations))
 	deduped := violations[:0]
@@ -755,185 +282,65 @@ func dedupeViolations(violations []Violation) []Violation {
 	return deduped
 }
 
-// paragraph is a run of consecutive non-blank lines, normalized into one
-// whitespace-collapsed string so a sentence wrapped across several physical
-// lines reads as continuous text for the recommendation-prose checks.
-type paragraph struct {
-	startLine int
-	endLine   int
-	text      string
+// lineIndex maps a byte offset into a source document to its 1-indexed line
+// number, so block nodes (whose positions are byte offsets) can be reported
+// in the Violation{StartLine, EndLine} contract this package has always
+// used.
+type lineIndex struct {
+	// starts[i] is the byte offset at which line i+1 begins. starts[0] is
+	// always 0 (line 1 begins at the start of the document).
+	starts []int
 }
 
-// paragraphsFromLines groups lines into paragraphs the way Markdown does:
-// runs of non-blank lines separated by one or more blank (or
-// whitespace-only) lines.
-func paragraphsFromLines(lines []string) []paragraph {
-	var paragraphs []paragraph
-	var current []string
-	start := 0
-
-	flush := func(end int) {
-		if len(current) == 0 {
-			return
+// newLineIndex builds a lineIndex for source.
+func newLineIndex(source []byte) *lineIndex {
+	starts := make([]int, 1, 64)
+	starts[0] = 0
+	for i, b := range source {
+		if b == '\n' {
+			starts = append(starts, i+1)
 		}
-		text := strings.Join(strings.Fields(strings.Join(current, " ")), " ")
-		paragraphs = append(paragraphs, paragraph{startLine: start, endLine: end, text: text})
-		current = nil
 	}
-
-	for i, line := range lines {
-		lineNo := i + 1
-		if strings.TrimSpace(line) == "" {
-			flush(lineNo - 1)
-			continue
-		}
-		if len(current) == 0 {
-			start = lineNo
-		}
-		current = append(current, line)
-	}
-	flush(len(lines))
-	return paragraphs
+	return &lineIndex{starts: starts}
 }
 
-// hasParameterCredential reports whether the line contains a "key=" token
-// that decodes to exactly "api_key" -- the exact parameter name the real
-// credential extractor reads from a URL query or an
-// application/x-www-form-urlencoded POST body (see
-// middleware.extractExplicitAPICredential), after the same percent-decoding
-// Go's net/url and net/http apply before the comparison. This covers every
-// curl encoding that can produce such a token: "?api_key=", "&api_key=",
-// `-d`/`--data`/`--data-raw "api_key=..."`, `--data-urlencode "api_key=..."`,
-// `-F`/`--form "api_key=..."`, a standalone "api_key=..." with no flag at
-// all, and a percent-encoded key such as "api%5Fkey=" in any of those forms.
-func hasParameterCredential(line string) bool {
-	for _, match := range candidateKeyPattern.FindAllString(line, -1) {
-		key := strings.TrimSuffix(match, "=")
-		decoded, err := url.QueryUnescape(key)
-		if err != nil {
-			decoded = key
-		}
-		if decoded == "api_key" {
-			return true
+// lineAt returns the 1-indexed line number containing byte offset.
+func (li *lineIndex) lineAt(offset int) int {
+	lo, hi := 0, len(li.starts)-1
+	for lo < hi {
+		mid := (lo + hi + 1) / 2
+		if li.starts[mid] <= offset {
+			lo = mid
+		} else {
+			hi = mid - 1
 		}
 	}
-	return false
+	return lo + 1
 }
 
-// rawAuthorization reports whether the line shows an Authorization header
-// carrying a bare token or a non-canonically-cased "bearer", instead of the
-// runtime's exact "Bearer" scheme or another recognized scheme. It matches
-// the header name case-insensitively, because HTTP header names are
-// case-insensitive and the real middleware reads it via net/http's
-// canonicalized http.Header.Values("Authorization").
-func rawAuthorization(line string) bool {
-	lowered := strings.ToLower(line)
-	searchFrom := 0
-	for {
-		idx := strings.Index(lowered[searchFrom:], "authorization:")
-		if idx < 0 {
-			return false
-		}
-		idx += searchFrom
-		rest := line[idx+len("authorization:"):]
-		token := firstToken(rest)
-		searchFrom = idx + len("authorization:")
-		if token == "" {
-			// "Authorization:" with no value on this line is not an example
-			// of anything; keep scanning in case the line repeats the header.
-			continue
-		}
-		if strings.EqualFold(token, canonicalBearerScheme) {
-			if token != canonicalBearerScheme {
-				// Wrong-case "bearer": the real extractor only strips the
-				// exact "Bearer " prefix, so this value authenticates (if at
-				// all) as a raw token, not as Bearer -- a canonical example
-				// must not show a casing that cannot possibly work that way.
-				return true
-			}
-			continue
-		}
-		if !recognizedAuthSchemes[strings.ToLower(token)] {
-			return true
-		}
+// blockLineRange returns the 1-indexed, inclusive [startLine, endLine] range
+// of the given block node's source, falling back to a single line at offset
+// 0 if the node reports no source segments at all (which should not happen
+// for a parsed Paragraph/Heading/TableCell/CodeBlock, but is handled
+// defensively rather than risking a panic or a silently wrong line number).
+func blockLineRange(lines *lineIndex, source []byte, block ast.BlockNode) (start, end int) {
+	segs := block.Source()
+	if len(segs) == 0 {
+		return 1, 1
 	}
-}
-
-// firstToken returns the first run of characters after any leading
-// punctuation (backticks, quotes, whitespace) typical of Markdown and curl
-// examples, stopping at the next whitespace, backtick, or quote.
-func firstToken(s string) string {
-	s = strings.TrimLeft(s, " \t`\"'")
-	end := strings.IndexAny(s, " \t`\"'\n\r")
-	if end == -1 {
-		end = len(s)
+	first := segs[0]
+	last := segs[len(segs)-1]
+	start = lines.lineAt(first.Start)
+	stop := last.Stop
+	if stop > len(source) {
+		stop = len(source)
 	}
-	return s[:end]
-}
-
-// tableRowMention reports whether a single physical line is a Markdown
-// table row presenting `api_key` with no affirmative deprecation context.
-// Table rows stay a per-line check (unlike recommendationMention) because a
-// Markdown table row is always exactly one physical line by construction.
-// recommendationPos is set to len(line): the row itself is the thing being
-// judged, not a verb at a particular position, so any affirmative context
-// anywhere in the row counts (subject only to the usual negation and
-// adversative-boundary rules).
-func tableRowMention(line string) bool {
-	if !strings.Contains(strings.ToLower(line), "api_key") {
-		return false
+	if stop > first.Start {
+		stop--
 	}
-	if !tableRowPattern.MatchString(line) {
-		return false
+	end = lines.lineAt(stop)
+	if end < start {
+		end = start
 	}
-	return !hasAffirmativeDeprecationContext(line, len(line))
-}
-
-// recommendationMention reports whether normalized paragraph text presents
-// `api_key` as an alternative or recommended authentication option -- "or
-// an api_key parameter", "use the api_key query parameter", "authenticate
-// via api_key" -- with no affirmative deprecation context in the same
-// sentence as that particular mention. Each candidate recommendation match
-// is judged against only its own enclosing sentence (see sentenceBounds),
-// not the whole paragraph: an unrelated deprecation notice about a different
-// subject, in an earlier or later sentence of the same paragraph, must not
-// suppress a live recommendation elsewhere in it. Within that sentence, a
-// context word separated from the match by an adversativeBoundaryPattern
-// connector ("but", "however", ...) -- in either direction -- is likewise
-// excluded, since it describes a contrasting clause's claim, not this one's
-// (see hasAffirmativeDeprecationContext). Operating paragraph-wide to *find*
-// candidate matches (rather than one physical line at a time) is what still
-// catches a recommendation wrapped across several physical lines by
-// ordinary Markdown line-wrapping.
-func recommendationMention(paragraphText string) bool {
-	if !strings.Contains(strings.ToLower(paragraphText), "api_key") {
-		return false
-	}
-
-	checkMatch := func(loc []int, requireAnchor bool) bool {
-		sentenceStart, sentenceEnd := sentenceBounds(paragraphText, loc[0])
-		sentence := paragraphText[sentenceStart:sentenceEnd]
-		if requireAnchor && !recommendationAnchorPattern.MatchString(sentence) {
-			return false
-		}
-		recommendationPos := loc[1] - sentenceStart
-		return !hasAffirmativeDeprecationContext(sentence, recommendationPos)
-	}
-
-	for _, loc := range offeredAsAlternativePattern.FindAllStringIndex(paragraphText, -1) {
-		if checkMatch(loc, false) {
-			return true
-		}
-	}
-	for _, loc := range strongRecommendationPattern.FindAllStringIndex(paragraphText, -1) {
-		if checkMatch(loc, false) {
-			return true
-		}
-	}
-	for _, loc := range weakRecommendationVerbPattern.FindAllStringIndex(paragraphText, -1) {
-		if checkMatch(loc, true) {
-			return true
-		}
-	}
-	return false
+	return start, end
 }
