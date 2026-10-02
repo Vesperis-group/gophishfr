@@ -18,6 +18,7 @@ package docsguard
 import (
 	"bufio"
 	"fmt"
+	"regexp"
 	"strings"
 )
 
@@ -40,7 +41,36 @@ const (
 	// `Authorization: Bearer ...` and other real schemes such as
 	// `Authorization: Basic ...` are not flagged; a bare token is.
 	KindRawAuthorization Kind = "raw_authorization"
+
+	// KindUndeprecatedParameterMention covers a Markdown table row or a
+	// "presented as an alternative" prose sentence that lists `api_key` as
+	// an ordinary, currently supported authentication option with no
+	// deprecation context on the same line. Unlike KindParameterCredential,
+	// this has no `=` sign and would never authenticate anything -- it is a
+	// documentation-accuracy check, not a credential-syntax check: it
+	// exists because a contract table can quietly fall out of sync with the
+	// deprecation even when no example in it is directly copy-pasteable.
+	KindUndeprecatedParameterMention Kind = "undeprecated_parameter_mention"
 )
+
+// deprecationContextPattern matches any of the words/strings that, if present
+// on the same line as an `api_key` mention, show the mention already carries
+// its required deprecation context (the removal version, the word
+// "deprecated"/"deprecation", "legacy", "sunset", or "migrat(e/ion)"). This
+// list is deliberately short: every entry is a plain-language signal a human
+// reviewer would also accept as "this is clearly marked deprecated", which is
+// what keeps the policy narrow and auditable rather than a loophole.
+var deprecationContextPattern = regexp.MustCompile(`(?i)deprecat|0\.13\.0|remov|sunset|migrat|legacy`)
+
+// tableRowPattern matches a Markdown table row: a line whose first
+// non-whitespace character is a pipe.
+var tableRowPattern = regexp.MustCompile(`^\s*\|`)
+
+// offeredAsAlternativePattern matches prose that lists `api_key` as an
+// alternative/option, e.g. "... or an `api_key` parameter" or
+// "... or a api_key value". This is the exact phrasing of the original bug
+// in docs/GROUP_IMPORT_LIMITS.md.
+var offeredAsAlternativePattern = regexp.MustCompile("(?i)\\bor\\s+an?\\s+`?api_key`?")
 
 // Violation is one deprecated-transport example found on one line.
 type Violation struct {
@@ -76,6 +106,9 @@ func ScanText(text string) []Violation {
 		}
 		if reason, ok := rawAuthorization(line); ok {
 			violations = append(violations, Violation{Line: lineNo, Kind: KindRawAuthorization, Text: strings.TrimSpace(reason)})
+		}
+		if undeprecatedParameterMention(line) {
+			violations = append(violations, Violation{Line: lineNo, Kind: KindUndeprecatedParameterMention, Text: strings.TrimSpace(line)})
 		}
 	}
 	return violations
@@ -132,4 +165,20 @@ func firstToken(s string) string {
 		end = len(s)
 	}
 	return s[:end]
+}
+
+// undeprecatedParameterMention reports whether the line presents `api_key`
+// as an ordinary, currently supported authentication option -- a Markdown
+// table row, or prose offering it as an alternative to Bearer -- with no
+// deprecation context (a removal version, "deprecated", "legacy", "sunset",
+// or "migrat...") on that same line. It is case-insensitive on "api_key"
+// itself to catch a capitalized table header or sentence start.
+func undeprecatedParameterMention(line string) bool {
+	if !strings.Contains(strings.ToLower(line), "api_key") {
+		return false
+	}
+	if deprecationContextPattern.MatchString(line) {
+		return false
+	}
+	return tableRowPattern.MatchString(line) || offeredAsAlternativePattern.MatchString(line)
 }

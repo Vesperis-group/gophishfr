@@ -4,7 +4,7 @@ This Builder review records the evidence for
 `security/deprecate-legacy-api-key-transports`. The immutable acceptance
 checklist in `.goals/deprecate-api-key-transports/goal.md` remains the
 source of truth; this document groups the evidence by control area and has
-been updated in place for iteration 2 rather than duplicated, so it always
+been updated in place for each iteration rather than duplicated, so it always
 describes the PR's current state.
 
 ## Scope of the change
@@ -14,6 +14,10 @@ This PR is documentation/test/CI-only. It touches:
 - `docs/API_AUTHENTICATION.md` — marks query/form/raw as deprecated inline
   and points at the new deprecation guide instead of restating the full
   rationale in two places.
+- `docs/GROUP_IMPORT_LIMITS.md` — the group-import authentication table row
+  now recommends `Authorization: Bearer` as canonical and marks the
+  `api_key` query/form parameter deprecated with removal targeted for
+  `0.13.0`, linking to the migration guide.
 - `docs/API_KEY_TRANSPORT_DEPRECATION.md` — the canonical/deprecated
   contract table; old/new migration examples for query, form, and raw, all
   against the same real, executable business operation
@@ -35,9 +39,12 @@ This PR is documentation/test/CI-only. It touches:
 - `internal/docsguard/` (new) and `cmd/docsguard/` (new) — the detection
   logic and CLI behind the documentation gate, plus their fixture-based
   table tests (`internal/docsguard/docsguard_test.go`,
-  `cmd/docsguard/main_test.go`) covering every supported deprecated syntax
-  and every legitimate Authorization scheme this guard must leave alone.
-  Both are `go test`-covered stdlib-only Go code; no new dependency.
+  `cmd/docsguard/main_test.go`) covering every supported deprecated syntax,
+  every legitimate Authorization scheme this guard must leave alone, and (as
+  of iteration 3) every canonical-doc table row or alternative-option
+  sentence that presents `api_key` as an ordinary option with no
+  deprecation context. Both are `go test`-covered stdlib-only Go code; no
+  new dependency.
 - `scripts/verify-docs-canonical-examples.sh` (rewritten) — now a thin
   wrapper that runs `go run ./cmd/docsguard` over tracked Markdown, with one
   explicit, auditable exemption
@@ -114,6 +121,48 @@ like `go-vet` or `go-build`. `actionlint` and `zizmor` both pass against the
 updated workflow (see below). Local `scripts/verify.sh` integration is
 unchanged.
 
+## Iteration 3: independent review finding and fix
+
+[`review-feedback-2.md`](../.goals/deprecate-api-key-transports/review-feedback-2.md)
+returned a FAIL on iteration 2: `docs/GROUP_IMPORT_LIMITS.md` still listed
+an `api_key` parameter as a normal authentication option with no
+deprecation context, which `internal/docsguard` did not catch because its
+rules only recognized credential-syntax patterns (a literal `api_key`
+assignment, raw `Authorization`), not a documentation table or sentence
+that merely *names* `api_key` as a supported option.
+
+### Finding — a canonical doc still advertised `api_key` as an ordinary option
+
+Fixed in two parts:
+
+1. **The doc itself.** `docs/GROUP_IMPORT_LIMITS.md`'s authentication table
+   row now reads: `API key, as the canonical Authorization: Bearer header
+   (an api_key query/form parameter is deprecated and targeted for removal
+   in 0.13.0; see the migration guide)`, with a Markdown link to
+   `API_KEY_TRANSPORT_DEPRECATION.md`.
+2. **The gate.** `internal/docsguard` gained a new
+   `KindUndeprecatedParameterMention` rule: a line is flagged if it mentions
+   `api_key` (case-insensitive) and is either a Markdown table row (starts
+   with `|`) or an "offered as an alternative" sentence (`... or an
+   api_key ...`), *and* the same line carries no deprecation-context
+   keyword (`deprecat`, `0.13.0`, `remov`, `sunset`, `migrat`, `legacy`).
+   This is a regexp-based check, not a Markdown parser, and adds no
+   dependency. Positive fixtures reproduce the exact original bug wording
+   and three generalizations of it (prose, a bare table cell, and a
+   different-casing variant); negative fixtures cover the fixed
+   `GROUP_IMPORT_LIMITS.md` row, the deprecation guide's own contract table,
+   plain prose that already says a transport is deprecated, and — the
+   trickiest case — this guard's own meta-documentation describing its
+   fixture categories, which mentions `api_key` and "parameter" together
+   without "or a(n)" and without being a table row, and so correctly stays
+   unflagged.
+
+A repository-wide `grep -rn` search across every tracked `*.md` file (see
+the Validation evidence below) confirmed `GROUP_IMPORT_LIMITS.md` was the
+only canonical doc with this wording; `API_KEY_VERIFIER.md`'s mentions of
+`api_key` describe an internal database column, not a client-facing
+transport, and do not match the new rule.
+
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |
@@ -160,24 +209,32 @@ unchanged.
   passes, unmodified.
 - `gosec ./...`: 12 pre-existing findings (open-redirect taint-analysis
   reports on unchanged redirect call sites, plus the previously documented
-  TLS/path/log-mode findings), the same baseline as iteration 1. Two new,
-  narrow, explicitly justified `#nosec` annotations were added, matching the
-  repository's existing `#nosec G101`/`#nosec G304` style: one on a Go
-  constant whose name merely contains the word "credential" (`G101`, not an
-  actual secret value), and one on `cmd/docsguard`'s `os.ReadFile(path)`
-  (`G304`), where `path` is this CLI's own argv/`-exempt` flag values —
-  repository files chosen by the invoking script, not untrusted network
-  input.
-- `gitleaks detect --source . --no-banner --redact`: 2 pre-existing findings,
-  both in `.goals/api-key-verifier/inspector-feedback-1.md` from commits
-  dated 2026-09-03, unrelated to and unchanged by this PR; no new finding.
-  The migration guide's canonical `curl` examples place the `Authorization`
-  header as each command's last line specifically so a same-line
-  `# gitleaks:allow` comment can mark the synthetic
-  `REPLACE_WITH_YOUR_TOKEN` placeholder without breaking the example's shell
-  syntax; each occurrence carries its own inline justification, which is the
-  narrow, auditable suppression CLAUDE.md requires rather than a blanket
-  ignore.
+  TLS/path/log-mode findings), the same baseline as iterations 1–2. No new
+  finding from this iteration's changes: `-nosec=true` confirms the new
+  `KindUndeprecatedParameterMention` constant does not itself trigger a
+  finding, so it carries no `#nosec` comment (one was tried and removed
+  when it proved unnecessary, rather than left in place unjustified).
+- `gitleaks detect --source . --no-banner --redact`: scanning full commit
+  history still reports the 2 pre-existing `.goals/api-key-verifier`
+  findings from 2026-09-03 (unrelated, unchanged by this PR) and 2 findings
+  inside the iteration-1 commit's original (pre-fix) blob of
+  `docs/API_KEY_TRANSPORT_DEPRECATION.md` — expected, since history scanning
+  checks every past commit's snapshot and the iteration-2 `gitleaks:allow`
+  fix could not retroactively annotate an earlier commit. The current
+  working tree (`gitleaks detect --no-git`) is clean. No new finding was
+  introduced by this iteration's changes.
+- `scripts/verify-docs-canonical-examples.sh` sanity check: with
+  `docs/GROUP_IMPORT_LIMITS.md`'s fix temporarily reverted via
+  `git stash`, the gate correctly reported
+  `FORBIDDEN (undeprecated_parameter_mention)` on the original wording; with
+  the fix restored, the gate reports 0 violations across all 29 scanned
+  files.
+- `grep -rni "api_key" docs/*.md` (repository-wide Markdown search): every
+  remaining canonical mention is either properly deprecation-flagged
+  (`API_AUTHENTICATION.md`, `API_KEY_TRANSPORT_DEPRECATION.md`,
+  `RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md`, this self-review) or an
+  internal database-column/verifier-state reference
+  (`API_KEY_VERIFIER.md`), never a client-facing "normal option" mention.
 - `actionlint -color`: pass, including the new `docs-guard` job.
 - `zizmor --min-severity=low .github/workflows/`: no findings (2 previously
   documented suppressions retained), including the new `docs-guard` job.

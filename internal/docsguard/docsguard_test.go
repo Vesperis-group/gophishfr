@@ -96,6 +96,53 @@ func TestScanTextMultiLineAndLineNumbers(t *testing.T) {
 	}
 }
 
+func TestScanTextUndeprecatedParameterMention(t *testing.T) {
+	positive := []string{
+		"| Authentication | API key, as an `Authorization: Bearer` header or an `api_key` parameter |",
+		"Authentication can use a Bearer header or an api_key parameter.",
+		"| Auth | api_key |",
+		"Clients may authenticate with Bearer or an API_KEY parameter.",
+	}
+	for _, line := range positive {
+		t.Run(line, func(t *testing.T) {
+			violations := ScanText(line)
+			if !containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("expected an undeprecated-parameter-mention violation for %q, got %v", line, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// The fixed docs/GROUP_IMPORT_LIMITS.md row: same deprecation
+		// context (deprecated/removal/0.13.0) as the table cell itself.
+		"| Authentication | API key, as the canonical `Authorization: Bearer` header (an `api_key` query/form parameter is deprecated and targeted for removal in `0.13.0`; see the migration guide) |",
+		// The deprecation guide's own contract table.
+		"| `api_key` query parameter | Deprecated legacy | `0.13.0` |",
+		"| `api_key` form parameter | Deprecated legacy | `0.13.0` |",
+		// Prose describing the deprecation itself, not offering api_key as
+		// a live alternative.
+		"The `api_key` query parameter is deprecated.",
+		"Query and form `api_key` are legacy transports slated for removal.",
+		// Meta-documentation describing this guard's own fixtures -- "a
+		// query api_key parameter", not "or an api_key parameter" -- must
+		// stay allowed even though it is not itself a deprecation sentence.
+		"covering, as positive cases: a query `api_key` parameter, curl -d",
+		// A table row that does not mention api_key at all.
+		"| Authentication | session cookie |",
+		// Internal/DB-schema prose using the identifier, not describing a
+		// client-facing transport option.
+		"SQLite stores a nullable legacy `api_key`, a raw BLOB verifier.",
+	}
+	for _, line := range negative {
+		t.Run(line, func(t *testing.T) {
+			violations := ScanText(line)
+			if containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("unexpected undeprecated-parameter-mention violation for %q: %v", line, violations)
+			}
+		})
+	}
+}
+
 func containsKind(violations []Violation, kind Kind) bool {
 	for _, v := range violations {
 		if v.Kind == kind {

@@ -1,7 +1,7 @@
 {
     "goal_id":  "deprecate-api-key-transports",
     "status":  "inspecting",
-    "iteration":  2,
+    "iteration":  3,
     "builder_model":  "Claude:Sonnet-5",
     "inspector_model":  "Claude:Haiku-4.5",
     "initial_sha":  "99c9a50848e8a826360ea7585a57d7e6f753a34c",
@@ -90,6 +90,41 @@
                         "role":  "inspector",
                         "summary":  "All three iteration-1 review findings successfully fixed: form example now executable against real POST /api/campaigns/{id}/complete route with real campaign fixture and verification of business operation completion; docs gate upgraded to stdlib-only Go package with comprehensive fixture tests covering all deprecated syntaxes and authorization schemes; CI integration complete with blocking docs-guard job in ci-success. All 49 original acceptance criteria verified met. Zero runtime auth/middleware/dependency changes. Suppressions narrow and justified.",
                         "completed_at":  "2026-10-01T21:08:45+02:00"
+                    },
+                    {
+                        "iteration":  2,
+                        "role":  "code-review",
+                        "verdict":  "FAIL",
+                        "feedback_file":  ".goals/deprecate-api-key-transports/review-feedback-2.md",
+                        "summary":  "docs/GROUP_IMPORT_LIMITS.md still lists an api_key parameter as a normal authentication option with no deprecation context, and the documentation guard did not recognize that table-row/prose wording as a violation."
+                    },
+                    {
+                        "iteration":  3,
+                        "role":  "builder",
+                        "model":  "Claude:Sonnet-5",
+                        "commit_sha":  "PENDING",
+                        "commit_title":  "docs(api): [B] align legacy transport references",
+                        "summary":  "Fixed the iteration-2 review finding, docs/test-only: docs/GROUP_IMPORT_LIMITS.md's authentication table row now recommends Authorization: Bearer as canonical, marks the api_key query/form parameter deprecated with removal targeted for 0.13.0, and links docs/API_KEY_TRANSPORT_DEPRECATION.md. internal/docsguard gained a new KindUndeprecatedParameterMention rule (a regexp-based check, still stdlib-only, no new dependency) that flags a Markdown table row or an \"or an api_key parameter\" alternative-option sentence mentioning api_key with no deprecation-context keyword (deprecat/0.13.0/remov/sunset/migrat/legacy) on that same line, with positive/negative fixtures in internal/docsguard/docsguard_test.go covering the original bug wording, the fixed wording, the deprecation guide's own table, plain deprecation prose, and this guard's own meta-documentation (which must stay allowed). A repository-wide search of every shipped Markdown file confirmed GROUP_IMPORT_LIMITS.md was the only canonical doc with this wording; none of the API_KEY_VERIFIER.md internal schema/column mentions of api_key qualify as a client-facing transport table and none now match the new rule. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
+                        "validation":  {
+                                           "verify_sh":  "pass",
+                                           "go_test":  "pass (including the extended internal/docsguard fixtures)",
+                                           "go_test_race":  "pass",
+                                           "go_vet":  "pass",
+                                           "go_build":  "pass",
+                                           "golangci_lint":  "0 issues",
+                                           "govulncheck":  "pass (0 reachable vulnerabilities)",
+                                           "gosec":  "12 pre-existing findings, same baseline; no new finding",
+                                           "gitleaks":  "1 pre-existing finding from 2026-09-03 history, unrelated to this PR; no new finding",
+                                           "actionlint":  "pass",
+                                           "zizmor":  "pass (2 pre-existing documented suppressions)",
+                                           "yarn_audit":  "4 pre-existing moderate findings in transitive webpack devDependency, lockfile unchanged",
+                                           "retire_js":  "pass",
+                                           "browser_tests":  "pass (scripts/test-browser.sh)",
+                                           "docker_compat_tests":  "pass (scripts/test-container-api-session-auth.sh, scripts/test-container-api-key-verifier.sh)",
+                                           "docs_gate_sanity_check":  "confirmed the extended gate flags the original unfixed GROUP_IMPORT_LIMITS.md wording when temporarily restored via git stash, then confirmed it passes clean after restoring the fix",
+                                           "git_diff_check":  "clean",
+                                           "lockfiles_unchanged":  true
+                                       }
                     }
                 ]
 }
