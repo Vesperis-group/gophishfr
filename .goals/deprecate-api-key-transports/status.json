@@ -655,7 +655,7 @@
             "feedback_file": ".goals/deprecate-api-key-transports/inspector-feedback-15.md",
             "summary": "All 49+ acceptance criteria verified met. Dependency-free stdlib-only implementation correct and secure. All three prior security findings (HTML-block entity decoding, soft-wrapped Authorization, transport context binding) and Bearer exactness code finding fully closed. go.mod/go.sum byte-identical to base. 23 test functions all pass. Docs gate 0 violations. No runtime/auth/version behavior changes. Commit properly signed.",
             "completed_at": "2026-10-02T13:06:04.490959Z",
-            "commit_sha": "to_be_added"
+            "commit_sha": "a4d26ec222625f117022088c310e193fc470e2a2"
         }
     ]
 }
