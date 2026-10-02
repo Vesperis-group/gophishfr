@@ -155,6 +155,27 @@ jobs:
       - name: Build
         run: go build ./...
 
+  docs-guard:
+    name: Docs transport guard
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      # Fails the build if canonical documentation reintroduces a deprecated
+      # query/form api_key example or a raw Authorization header example. See
+      # internal/docsguard and scripts/verify-docs-canonical-examples.sh.
+      - name: Verify canonical docs do not reintroduce deprecated API-key transports
+        run: ./scripts/verify-docs-canonical-examples.sh
+
   frontend-build:
     name: Frontend build
     runs-on: ubuntu-24.04
@@ -415,6 +436,7 @@ jobs:
       - go-lint
       - go-vet
       - go-build
+      - docs-guard
       - frontend-build
       - frontend-browser-smoke
       - container-build

@@ -16,7 +16,7 @@ the group endpoints, which persist them inside a transaction.
 | --- | --- |
 | Method | `POST` only |
 | Content-Type | `multipart/form-data` with a boundary |
-| Authentication | API key, as an `Authorization: Bearer` header or an `api_key` parameter |
+| Authentication | API key, as the canonical `Authorization: Bearer` header (a deprecated `api_key` query parameter is also still accepted, targeted for removal in `0.13.0`; a `multipart/form-data` field named `api_key` is **not** read as a credential — Go's `ParseForm` never parses a multipart body — so this endpoint is effectively header- or query-authenticated only; see [API-key transport deprecation](API_KEY_TRANSPORT_DEPRECATION.md)) |
 | Authorization | `modify_objects`, enforced for every non-`GET` API request |
 | File field | `files[]` |
 | Files per request | 10 |

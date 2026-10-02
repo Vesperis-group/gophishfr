@@ -36,17 +36,28 @@ compatibility.
 
 ## External API clients
 
-External clients continue to authenticate with any of the legacy explicit
-transports:
+`Authorization: Bearer <token>` is the **only recommended and canonical**
+transport. Use it for every new integration and every first-party example.
 
-- `Authorization: Bearer <key>`;
-- a raw `Authorization: <key>` value;
-- the `api_key` query parameter; or
-- the `api_key` form parameter.
+External clients also continue to authenticate, unchanged, with three
+deprecated legacy transports that remain accepted during this release:
 
-Query and form credentials are retained solely for compatibility. Query
-credentials can be exposed by URL/access logging and should be migrated to the
-Authorization header; removing those transports is deferred.
+- a raw `Authorization` header carrying only the token, with no `Bearer`
+  prefix — deprecated, with **no removal version announced**;
+- the `api_key` query parameter — deprecated, **removal targeted for
+  `0.13.0`**; and
+- the `api_key` form parameter — deprecated, **removal targeted for
+  `0.13.0`**.
+
+These three were already documented here as legacy compatibility transports;
+this release does not change what they accept, only how they are documented.
+See [API-key transport deprecation](API_KEY_TRANSPORT_DEPRECATION.md) for
+migration examples, the exact `0.13.0` removal behaviour, leaked-key rotation
+and log-review guidance, and why no runtime deprecation signal (header or
+otherwise) was added. Query credentials can be exposed by URL, browser, and
+reverse-proxy access logging; migrating to the Bearer header and rotating any
+key ever sent in a query string removes that exposure going forward, but does
+not erase a copy already written to a log before migration.
 
 Authentication mechanism selection happens **before** credential validation.
 The presence of any Authorization header, query `api_key`, or form `api_key` —
