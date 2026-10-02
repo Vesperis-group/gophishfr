@@ -135,15 +135,69 @@ func flattenedText(source []byte, block ast.Node) string {
 // physical lines is reported at its own exact line.
 func scanInlineCredentials(source []byte, lines *lineIndex, block ast.Node) []Violation {
 	var violations []Violation
-	for _, run := range flattenInlineByLine(source, lines, block) {
+	runs := flattenInlineByLine(source, lines, block)
+
+	// A parameter credential ("?api_key=TOKEN", a curl -d/-F body) is, in
+	// practice, never itself split across an ordinary Markdown soft line
+	// break the way a header value can be (see below): keeping this per
+	// physical line preserves its existing, already-correct line
+	// reporting unchanged.
+	for _, run := range runs {
 		if hasParameterCredential(run.text) {
 			violations = append(violations, Violation{StartLine: run.lineNo, EndLine: run.lineNo, Kind: KindParameterCredential})
 		}
-		if rawAuthorization(run.text) {
-			violations = append(violations, Violation{StartLine: run.lineNo, EndLine: run.lineNo, Kind: KindRawAuthorization})
-		}
+	}
+
+	// A raw Authorization header example is checked over the whole
+	// block's joined text instead: an ordinary Markdown soft line break
+	// ("Authorization:\nTOKEN") renders as a single space, so the header
+	// name and its value can straddle a physical source line exactly like
+	// any other soft-wrapped sentence -- checking one physical line at a
+	// time, as above, would never see the two halves together. This is
+	// the only check run over the joined text, so a header on a single,
+	// unwrapped line is still reported exactly once, not twice.
+	joined, runAt := joinRunsWithOffsets(runs)
+	for _, m := range rawAuthorizationMatches(joined) {
+		violations = append(violations, Violation{
+			StartLine: lineAtJoinedOffset(runs, runAt, m[0]),
+			EndLine:   lineAtJoinedOffset(runs, runAt, m[1]-1),
+			Kind:      KindRawAuthorization,
+		})
 	}
 	return violations
+}
+
+// joinRunsWithOffsets joins runs (see flattenInlineByLine) into one combined
+// string with a single space between consecutive runs -- mirroring the same
+// soft/hard-line-break-to-space rendering flattenInline already applies
+// within a run -- together with a parallel slice mapping each byte offset
+// in the combined string to the index, within runs, of the run it came
+// from (the separating space itself is attributed to the preceding run).
+func joinRunsWithOffsets(runs []inlineLineRun) (string, []int) {
+	var sb strings.Builder
+	var runAt []int
+	for i, run := range runs {
+		if i > 0 {
+			runAt = append(runAt, i-1)
+			sb.WriteByte(' ')
+		}
+		for range len(run.text) {
+			runAt = append(runAt, i)
+		}
+		sb.WriteString(run.text)
+	}
+	return sb.String(), runAt
+}
+
+// lineAtJoinedOffset returns the source line number of the run containing
+// byte offset in the text joinRunsWithOffsets(runs) returned (runAt being
+// its second return value), clamping offset into range defensively.
+func lineAtJoinedOffset(runs []inlineLineRun, runAt []int, offset int) int {
+	if len(runAt) == 0 || len(runs) == 0 {
+		return 0
+	}
+	offset = clampIndex(offset, len(runAt)-1)
+	return runs[runAt[offset]].lineNo
 }
 
 // scanCodeBlock scans one indented or fenced code block's raw source lines

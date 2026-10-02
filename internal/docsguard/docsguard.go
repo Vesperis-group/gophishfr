@@ -53,6 +53,14 @@
 //     literal forbidden example inside one is still caught while a
 //     backslash-escaped or character-referenced one -- which never actually
 //     decodes there -- is not.
+//   - A raw HTML block's content is flattened into the *visible* text a
+//     browser would actually render for it (see flattenHTMLBlockText):
+//     comments, processing instructions, declarations, CDATA sections, tag
+//     markup, and attribute values are all dropped (none is ever visible
+//     text), a <script>/<style> element's entire content is dropped too
+//     (neither ever displays as readable prose), and everything else --
+//     including a <div>'s or <pre>'s inner text -- is kept and checked the
+//     same way a paragraph's flattened text is.
 //
 // A raw inline HTML tag or comment, and a Markdown link's destination, never
 // contribute visible text and are dropped entirely during flattening; an
@@ -248,6 +256,9 @@ func ScanText(text string) (violations []Violation, err error) {
 		switch v := n.(type) {
 		case *ast.CodeBlock:
 			violations = append(violations, scanCodeBlock(source, lines, v)...)
+			return ast.WalkSkipChildren, nil
+		case *ast.HTMLBlock:
+			violations = append(violations, scanHTMLBlock(source, lines, v)...)
 			return ast.WalkSkipChildren, nil
 		case *extast.TableCell:
 			violations = append(violations, scanTableCell(source, lines, n)...)

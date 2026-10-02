@@ -1018,3 +1018,212 @@ func TestScanTextRenderedMarkupSplit(t *testing.T) {
 		})
 	}
 }
+
+// TestScanTextHTMLBlockVisibleText proves a raw HTML block is scanned for
+// only its *visible* rendered text (see flattenHTMLBlockText): a
+// credential or recommendation inside ordinary element content (<div>,
+// <p>, <pre>, nested/multi-line tags) violates exactly like it would in a
+// paragraph, while one that only ever appears in an HTML comment, an
+// attribute value, or <script>/<style> content -- none of which ever
+// renders as visible text -- does not, and malformed markup fails closed
+// toward scanning rather than silently away from it.
+func TestScanTextHTMLBlockVisibleText(t *testing.T) {
+	positive := []struct {
+		name string
+		text string
+		kind Kind
+	}{
+		{
+			"block div with a credential",
+			"<div>api_key=TOKEN</div>\n",
+			KindParameterCredential,
+		},
+		{
+			"block p with a recommendation",
+			"<p>Use the api_key query parameter for authentication.</p>\n",
+			KindUndeprecatedParameterMention,
+		},
+		{
+			"pre renders its content as visible text",
+			"<pre>api_key=TOKEN</pre>\n",
+			KindParameterCredential,
+		},
+		{
+			"multi-line nested tags",
+			"<div>\n  <span>Use the api_key query parameter for authentication.</span>\n</div>\n",
+			KindUndeprecatedParameterMention,
+		},
+		{
+			// An unterminated attribute value is malformed: this package
+			// cannot confidently skip the tag at all, so it fails closed
+			// by keeping the remainder -- including the credential that
+			// happens to appear where an attribute value would otherwise
+			// have hidden it -- as ordinary visible text instead of
+			// silently excluding it.
+			"malformed/unterminated tag fails closed toward scanning",
+			"<div data-example=\"unterminated api_key=TOKEN\n",
+			KindParameterCredential,
+		},
+	}
+	for _, c := range positive {
+		t.Run(c.name, func(t *testing.T) {
+			violations := mustScan(t, c.text)
+			if !containsKind(violations, c.kind) {
+				t.Fatalf("expected a %s violation for %q, got %v", c.kind, c.text, violations)
+			}
+		})
+	}
+
+	negative := []struct {
+		name string
+		text string
+	}{
+		{
+			"HTML comment never renders as visible text",
+			"<!-- api_key=TOKEN -->\n",
+		},
+		{
+			"attribute value never renders as visible text",
+			"<div data-example=\"api_key=TOKEN\">Just a label.</div>\n",
+		},
+		{
+			"script content never renders as visible text",
+			"<script>var api_key = \"TOKEN\";</script>\n",
+		},
+		{
+			"style content never renders as visible text",
+			"<style>/* api_key=TOKEN */</style>\n",
+		},
+		{
+			"script tag case-insensitive and with an attribute",
+			"<SCRIPT type=\"text/javascript\">api_key=TOKEN;</SCRIPT>\n",
+		},
+		{
+			"a processing instruction never renders as visible text",
+			"<?xml-stylesheet api_key=\"TOKEN\" ?>\n",
+		},
+		{
+			"a declaration never renders as visible text",
+			"<!DOCTYPE api_key=\"TOKEN\">\n",
+		},
+		{
+			"ordinary visible text around the block, unrelated to api_key",
+			"<div>Just an ordinary note.</div>\n",
+		},
+	}
+	for _, c := range negative {
+		t.Run(c.name, func(t *testing.T) {
+			violations := mustScan(t, c.text)
+			if len(violations) != 0 {
+				t.Fatalf("unexpected violation(s) for %q: %v", c.text, violations)
+			}
+		})
+	}
+}
+
+// TestScanTextSoftWrappedRawAuthorization proves a raw Authorization
+// header example is still detected when an ordinary Markdown soft (or
+// hard) line break separates the header name from its value -- both
+// render as a single space, so "Authorization:\nTOKEN" reads exactly like
+// "Authorization: TOKEN" -- while an unwrapped header on one line is still
+// reported exactly once (not duplicated by also being checked as a whole
+// joined block), two unrelated paragraphs each containing only half of the
+// header do not get wrongly merged into one match, and an ordinary
+// multi-line query/form credential example is unaffected.
+func TestScanTextSoftWrappedRawAuthorization(t *testing.T) {
+	t.Run("soft line break between header name and value", func(t *testing.T) {
+		text := "Authorization:\nTOKEN\n"
+		violations := mustScan(t, text)
+		if !containsKind(violations, KindRawAuthorization) {
+			t.Fatalf("expected a raw-authorization violation for %q, got %v", text, violations)
+		}
+	})
+
+	t.Run("hard line break between header name and value", func(t *testing.T) {
+		text := "Authorization:  \nTOKEN\n"
+		violations := mustScan(t, text)
+		if !containsKind(violations, KindRawAuthorization) {
+			t.Fatalf("expected a raw-authorization violation for %q, got %v", text, violations)
+		}
+	})
+
+	t.Run("unwrapped header on one line is reported exactly once", func(t *testing.T) {
+		text := "Authorization: TOKEN\n"
+		violations := mustScan(t, text)
+		count := 0
+		for _, v := range violations {
+			if v.Kind == KindRawAuthorization {
+				count++
+			}
+		}
+		if count != 1 {
+			t.Fatalf("expected exactly one raw-authorization violation for %q, got %d: %v", text, count, violations)
+		}
+	})
+
+	t.Run("two unrelated paragraphs are not merged across the boundary", func(t *testing.T) {
+		text := "This sentence happens to end with the word Authorization:\n\nTOKEN is a separate, unrelated paragraph about something else entirely.\n"
+		violations := mustScan(t, text)
+		if containsKind(violations, KindRawAuthorization) {
+			t.Fatalf("unexpected raw-authorization violation merging across a blank-line block boundary for %q: %v", text, violations)
+		}
+	})
+
+	t.Run("ordinary multi-line form/query example is unaffected", func(t *testing.T) {
+		text := "curl -d \"api_key=TOKEN\n&other=value\" https://gophishfr.example/api/campaigns/42/complete\n"
+		violations := mustScan(t, text)
+		if !containsKind(violations, KindParameterCredential) {
+			t.Fatalf("expected a parameter-credential violation for %q, got %v", text, violations)
+		}
+	})
+}
+
+// TestScanTextCompactMixedTransportDirectional proves transportKindNear's
+// directional, occurrence-specific word-distance binding (as opposed to a
+// flat, symmetric character window) correctly classifies a compact
+// sentence naming two transports close together with no anchor word like
+// "parameter" to space them out, and that a genuinely ambiguous
+// classification -- two different transport words exactly tied for
+// nearest to the same `api_key` mention -- fails safe and never suppresses,
+// even though the recommendation's own transport is unambiguous.
+func TestScanTextCompactMixedTransportDirectional(t *testing.T) {
+	positive := []string{
+		// The reviewer's exact compact example: no "parameter" anchor
+		// word after either transport word.
+		"api_key form deprecated; use api_key query",
+		// Same compact mismatch inside a single table cell.
+		"| Note | api_key form is deprecated; use api_key query instead. |\n| --- | --- |\n",
+		// A genuine tie: "raw" and "form" are both immediately adjacent to
+		// the *first* api_key occurrence (one directly before, one
+		// directly after, at the same distance), so that occurrence's own
+		// transport cannot be determined at all -- this must fail safe
+		// and never suppress, even though the recommendation's own
+		// occurrence ("query") is perfectly unambiguous.
+		"The raw api_key form field is deprecated; use the api_key query parameter instead.",
+	}
+	for _, text := range positive {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if !containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("expected a violation for the compact mismatch %q, got %v", text, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// Preserve a natural, accepted warning with no distinguishing
+		// transport word at all on either side.
+		"Do not use the api_key parameter; it is deprecated.",
+		// Preserve the same-transport compact case: both sides are
+		// unambiguously "query", so this correctly still suppresses.
+		"api_key query deprecated; use api_key query only for legacy integrations.",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("unexpected violation for %q: %v", text, violations)
+			}
+		})
+	}
+}

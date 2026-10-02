@@ -201,58 +201,89 @@ var (
 	responseFieldWordPattern  = regexp.MustCompile(`(?i)\bresponse\b`)
 )
 
-// transportWordWindowChars bounds how many characters around a specific
-// `api_key` mention are searched for a transport word (see
-// transportKindNear). A transport word normally sits immediately next to
-// the mention it describes ("the api_key query parameter", "api_key form
-// field"), so this window is deliberately small -- small enough that a
-// *different* api_key mention's own transport word, elsewhere in the same
-// short sentence ("The api_key form parameter is deprecated; use the
-// api_key query parameter instead."), is not also caught by this one's
-// window and does not make the classification wrongly ambiguous.
-const transportWordWindowChars = 20
+// transportWordKinds lists the transport-word patterns transportKindNear
+// chooses among, in a fixed order used only to break a genuine tie between
+// two kinds at the exact same word-distance deterministically (favoring the
+// earlier entry); it does not affect which kind is nearest in the normal
+// case where the distances differ.
+var transportWordKinds = []struct {
+	kind    string
+	pattern *regexp.Regexp
+}{
+	{"query", queryTransportWordPattern},
+	{"form", formTransportWordPattern},
+	{"raw", rawTransportWordPattern},
+	{"response", responseFieldWordPattern},
+}
+
+// transportWordProximityWords bounds how many words may separate an
+// `api_key` occurrence from the transport word that describes it and still
+// count as describing it specifically, reusing the same bound
+// deprecationContextProximityWords uses for binding a deprecation-context
+// word to the mention it describes.
+const transportWordProximityWords = deprecationContextProximityWords
 
 // transportKindNear classifies which specific transport (or non-transport
 // "response" field mention) the `api_key` occurrence at [start, end) in
-// clauseText is about, by looking for exactly one of the transport-word
-// patterns within transportWordWindowChars characters of it. It returns ""
-// (ambiguous) if none or more than one of the patterns matches nearby:
-// transport mismatch is only ever enforced when *both* sides of a
-// comparison are unambiguously classified (see
-// hasAffirmativeDeprecationContext), so an ambiguous classification never
-// newly suppresses or newly un-suppresses anything on its own.
-func transportKindNear(clauseText string, start, end int) string {
+// clauseText is about: the transport word, among every occurrence of every
+// kind within transportWordProximityWords words of it in clauseText, that
+// is *nearest* to it by word distance in either direction -- a directional,
+// occurrence-specific association, not "any transport word present
+// somewhere in a flat character window around it", which could not
+// distinguish a word immediately describing this specific mention from a
+// different mention's own transport word merely falling in the same window
+// in a compact sentence naming two transports close together.
+//
+// ambiguous is true only when two or more *different* kinds are tied for
+// nearest -- a genuine conflict, not simply the common case of no transport
+// word being nearby at all (which instead returns kind="", ambiguous=false:
+// "no information", not "conflicting information"). Callers must never let
+// an ambiguous classification suppress a recommendation (see
+// hasAffirmativeDeprecationContext): unlike "no information", which leaves
+// existing non-transport-aware suppression untouched, "conflicting
+// information" must fail safe and never suppress, since the actual
+// transport cannot be determined at all.
+func transportKindNear(clauseText string, start, end int) (kind string, ambiguous bool) {
 	start = clampIndex(start, len(clauseText))
 	end = clampIndex(end, len(clauseText))
-	windowStart := clampIndex(start-transportWordWindowChars, len(clauseText))
-	windowEnd := clampIndex(end+transportWordWindowChars, len(clauseText))
-	if windowEnd < windowStart {
-		windowEnd = windowStart
+	if end < start {
+		end = start
 	}
-	window := clauseText[windowStart:windowEnd]
 
-	kind := ""
-	matches := 0
-	if queryTransportWordPattern.MatchString(window) {
-		kind = "query"
-		matches++
+	bestDistance := -1
+	tied := false
+	for _, tw := range transportWordKinds {
+		for _, loc := range tw.pattern.FindAllStringIndex(clauseText, -1) {
+			var between string
+			switch {
+			case loc[0] >= end:
+				between = clauseText[end:loc[0]]
+			case loc[1] <= start:
+				between = clauseText[loc[1]:start]
+			default:
+				between = ""
+			}
+			d := len(strings.Fields(between))
+			if d > transportWordProximityWords {
+				continue
+			}
+			switch {
+			case bestDistance == -1 || d < bestDistance:
+				bestDistance = d
+				kind = tw.kind
+				tied = false
+			case d == bestDistance && tw.kind != kind:
+				tied = true
+			}
+		}
 	}
-	if formTransportWordPattern.MatchString(window) {
-		kind = "form"
-		matches++
+	if bestDistance == -1 {
+		return "", false
 	}
-	if rawTransportWordPattern.MatchString(window) {
-		kind = "raw"
-		matches++
+	if tied {
+		return "", true
 	}
-	if responseFieldWordPattern.MatchString(window) {
-		kind = "response"
-		matches++
-	}
-	if matches == 1 {
-		return kind
-	}
-	return ""
+	return kind, false
 }
 
 // hasAffirmativeDeprecationContext reports whether clauseText contains at
@@ -271,7 +302,9 @@ func transportKindNear(clauseText string, start, end int) string {
 //   - about the same specific transport (query/form/raw) as the
 //     recommendation, whenever both are unambiguously classified (see
 //     transportKindNear) -- a deprecation notice about one transport must
-//     not suppress a live recommendation of a different one.
+//     not suppress a live recommendation of a different one, and an
+//     ambiguous classification on either side never suppresses either,
+//     since which transport it actually describes cannot be determined.
 //
 // It is used both for a table cell (with recommendationPos set to
 // len(cellText), so any qualifying context anywhere in the cell counts, as
@@ -280,8 +313,8 @@ func transportKindNear(clauseText string, start, end int) string {
 // sentenceBounds), so a negated mention, one that belongs to a different,
 // adversatively contrasted clause, one that is simply too far from any
 // `api_key` mention to describe it, an unaccompanied bare version number, or
-// one describing a different transport, cannot accidentally suppress a
-// genuine violation.
+// one describing a different (or ambiguous) transport, cannot accidentally
+// suppress a genuine violation.
 func hasAffirmativeDeprecationContext(clauseText string, recommendationPos int) bool {
 	// Defensive clamp: every caller is expected to pass a valid index into
 	// clauseText, but guarding here means a future caller's off-by-one
@@ -293,10 +326,11 @@ func hasAffirmativeDeprecationContext(clauseText string, recommendationPos int) 
 		recommendationPos = len(clauseText)
 	}
 
-	recAPIStart, _, recAPIFound := nearestAPIKeyOccurrence(clauseText, recommendationPos)
+	recAPIStart, recAPIEnd, recAPIFound := nearestAPIKeyOccurrence(clauseText, recommendationPos)
 	var recTransport string
+	var recAmbiguous bool
 	if recAPIFound {
-		recTransport = transportKindNear(clauseText, recAPIStart, recAPIStart)
+		recTransport, recAmbiguous = transportKindNear(clauseText, recAPIStart, recAPIEnd)
 	}
 
 	for _, match := range deprecationContextPattern.FindAllStringIndex(clauseText, -1) {
@@ -336,8 +370,11 @@ func hasAffirmativeDeprecationContext(clauseText string, recommendationPos int) 
 			continue
 		}
 
-		if ctxAPIStart, _, ctxAPIFound := nearestAPIKeyOccurrence(clauseText, start); ctxAPIFound {
-			ctxTransport := transportKindNear(clauseText, ctxAPIStart, ctxAPIStart)
+		if ctxAPIStart, ctxAPIEnd, ctxAPIFound := nearestAPIKeyOccurrence(clauseText, start); ctxAPIFound {
+			ctxTransport, ctxAmbiguous := transportKindNear(clauseText, ctxAPIStart, ctxAPIEnd)
+			if recAmbiguous || ctxAmbiguous {
+				continue
+			}
 			if recTransport != "" && ctxTransport != "" && recTransport != ctxTransport {
 				continue
 			}

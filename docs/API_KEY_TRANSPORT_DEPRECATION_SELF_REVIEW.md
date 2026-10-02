@@ -997,6 +997,125 @@ middleware/header/status/version change. `VERSION` unchanged (`0.12.1`).
 Markdown file: 0 violations across 28 files, no doc wording changed other
 than the one `API_KEY_VERIFIER.md` sentence noted above.
 
+## Iteration 14: closing three structured-parser gaps
+
+Final reviews of the iteration-13 rewrite found three gaps *within* the
+structured (goldmark v2 AST) design, not a reason to return to ad-hoc
+regex patching (see
+`.goals/deprecate-api-key-transports/review-feedback-13.md`). No dependency
+changed; `go.mod`/`go.sum` are untouched by this iteration.
+
+### Finding 1 (security, MEDIUM, 10/10, also code) — raw HTML blocks were never scanned
+
+`ast.HTMLBlock` was not one of the node kinds `ScanText`'s AST walk
+dispatched to, so a `<div>`, `<p>`, or `<pre>` block's visible rendered
+content was never checked at all.
+
+Fixed by adding `internal/docsguard/html.go`. `flattenHTMLBlockText` is a
+small, linear state machine recognizing exactly the handful of constructs
+CommonMark's own HTML-block grammar defines: comments (`<!-- -->`),
+processing instructions (`<? ?>`), declarations (`<!DOCTYPE ...>`), CDATA
+sections (`<![CDATA[ ]]>`), tag markup and attribute values (all dropped —
+none is ever visible text), and `<script>`/`<style>` element content
+specifically (dropped too, since neither ever displays as readable prose,
+unlike every other element including `<pre>` and `<div>`, whose inner text
+is always visible and is kept). An unterminated comment/CDATA/
+processing-instruction/declaration is handled the way a real browser's
+tokenizer does — the remainder of the block is still genuinely never
+visible either way, so it is still dropped — but anything this state
+machine cannot otherwise confidently classify (an unterminated tag, or an
+unterminated `<script>`/`<style>` element) fails closed the *other* way:
+scanning falls back to treating it as ordinary visible text, so a real
+credential is never silently hidden behind a malformed document.
+`*ast.HTMLBlock` is now wired into `ScanText`'s walk dispatch
+(`scanHTMLBlock`), reusing the existing credential-match-span and
+`recommendationMention` checks, with each match's line attributed via a
+byte-offset map back into `source` (see `flattenHTMLBlockText`'s `offsets`
+return value), preserving the existing redacted-diagnostics contract.
+
+New fixtures (`TestScanTextHTMLBlockVisibleText`): a block `<div>`/`<p>`
+with a credential/recommendation; `<pre>` (visible, unlike `<script>`/
+`<style>`); multi-line nested tags; an unterminated attribute value failing
+closed toward scanning rather than away from it — all violate. An HTML
+comment, an attribute value, `<script>`/`<style>` content (including a
+case-insensitive tag with an attribute), a processing instruction, a
+declaration, and ordinary unrelated text — all correctly do not.
+
+### Finding 2 (code) — soft-wrapped raw Authorization header not detected
+
+Credential scanning checked only one physical source line at a time, so
+`Authorization:\nTOKEN` — which renders as `Authorization: TOKEN`, an
+ordinary Markdown soft line break collapsing to a single space — was never
+detected: the header name and its value were never read together.
+
+Fixed by adding match-span variants of the existing boolean checks
+(`rawAuthorizationMatches`/`parameterCredentialMatches` in
+`credential.go`, alongside their unchanged boolean forms) and a new
+`joinRunsWithOffsets` (`scan.go`) that joins a block's per-line runs (see
+`flattenInlineByLine`) into one combined string with a single space between
+consecutive runs — mirroring the same soft/hard-line-break-to-space
+rendering `flattenInline` already applies within a run — together with a
+parallel slice mapping each byte of the combined string back to the run,
+and therefore the source line, it came from. `scanInlineCredentials` now
+checks a raw Authorization header example over this whole joined text
+(the *only* pass performed for that check, so an unwrapped single-line
+header is still reported exactly once, not twice, and two separate blocks
+are never joined together, since this always operates within one AST
+block's own runs), reporting each match's own precise, contributing
+`[StartLine, EndLine]` — which can now correctly span two physical lines.
+Parameter-credential matching remains per physical line, unchanged, since
+that case does not need this.
+
+New fixtures (`TestScanTextSoftWrappedRawAuthorization`): a soft line
+break, and a hard line break (two trailing spaces), between the header
+name and its value both violate; an unwrapped single-line header is
+reported exactly once; two separate paragraphs each containing only half
+of the header, separated by a blank line, are not wrongly merged into one
+match; an ordinary multi-line form/query credential example is unaffected.
+
+### Finding 3 (code) — compact mixed-transport binding was symmetric, ambiguous-unsafe
+
+`transportKindNear`'s flat, symmetric ±20-character window could not
+correctly classify a compact sentence naming two transports close together
+with no anchor word like "parameter" to space them apart (the review's
+exact example, "api_key form deprecated; use api_key query", must violate)
+and, more importantly, treated a genuinely *ambiguous* classification (two
+conflicting transport words both found within the same window) identically
+to simply "no transport information available", letting both default to
+the same suppressing branch.
+
+Fixed by replacing the window with directional, occurrence-specific
+word-distance binding: for a given `api_key` occurrence, the nearest
+transport word among every occurrence of every kind within
+`transportWordProximityWords` words, in either direction, becomes its
+classification. The function's contract changed to distinguish a genuine
+tie between two different kinds (`ambiguous=true`) from no transport word
+being nearby at all (`ambiguous=false`, kind `""`), and
+`hasAffirmativeDeprecationContext` now treats an ambiguous classification
+on *either* side as failing safe — it never suppresses — which is the
+concrete fix for the bug the review identified: the prior design let an
+ambiguous (`""`) classification on the context side fall through to the
+same branch as "no information", wrongly allowing suppression.
+
+New fixtures (`TestScanTextCompactMixedTransportDirectional`): the
+review's exact compact example, the same mismatch inside a single table
+cell, and a constructed genuine-tie case ("raw" and "form" both exactly
+adjacent to the same `api_key` occurrence, one on each side) that
+demonstrates the old code's suppression bug is now fixed — all violate. A
+natural, accepted warning with no distinguishing transport word on either
+side, and a same-transport compact case, both continue to suppress
+correctly.
+
+All prior fixtures (iterations 1-13) and the full repository test suite
+(`go test ./...`) pass unchanged under all three fixes composed together.
+The nonconforming historical commit flagged separately by the reviewers is
+intentionally **not** touched in this iteration; the orchestrator will seek
+explicit user authorization for that separately. No runtime authentication/
+middleware/header/status/version/dependency change (`go.mod`/`go.sum` diff
+is empty). `VERSION` unchanged (`0.12.1`).
+`scripts/verify-docs-canonical-examples.sh` re-run against every tracked
+Markdown file: 0 violations across 28 files, no doc wording changed.
+
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |
@@ -1260,6 +1379,33 @@ than the one `API_KEY_VERIFIER.md` sentence noted above.
   `docs/API_KEY_VERIFIER.md` reworded ("accepted" → "validated", meaning
   preserved) to remove a coincidental false-positive trigger surfaced by
   the new, more thorough end-to-end scanning.
+- Iteration 14 (closing three structured-parser gaps, no dependency
+  change): `TestScanTextHTMLBlockVisibleText` (new) covers a block
+  `<div>`/`<p>` credential/recommendation, `<pre>` (visible), multi-line
+  nested tags, and an unterminated attribute value failing closed toward
+  scanning -- all violate -- against an HTML comment, an attribute value,
+  `<script>`/`<style>` content (plain and case-insensitive with an
+  attribute), a processing instruction, a declaration, and unrelated text,
+  which correctly do not. `TestScanTextSoftWrappedRawAuthorization` (new)
+  covers a soft and a hard line break between an Authorization header name
+  and its value, both violating with a precise two-line range; an
+  unwrapped single-line header reported exactly once, not twice; two
+  separate paragraphs each holding only half of the header, across a blank
+  line, not wrongly merged; and an ordinary multi-line form/query example
+  unaffected. `TestScanTextCompactMixedTransportDirectional` (new) covers
+  the review's exact compact phrasing ("api_key form deprecated; use
+  api_key query") and the same mismatch inside a single table cell, both
+  violating, plus a constructed genuine-tie case ("raw" and "form" both
+  exactly adjacent to the same `api_key` occurrence) demonstrating the
+  fixed ambiguous-classification-must-fail-safe behavior, against a
+  natural accepted warning with no transport word and a same-transport
+  compact case, both continuing to suppress correctly. All prior
+  `internal/docsguard` fixtures (iterations 1-13) and the full repository
+  test suite (`go test ./...`) pass unchanged.
+  `./scripts/verify-docs-canonical-examples.sh` re-run against every
+  tracked Markdown file after the iteration-14 fixes: 0 violations across
+  28 shipped Markdown files, no doc wording changed. `go.mod`/`go.sum`
+  diff is empty.
 
 ## Why a bounded deprecation window instead of immediate removal
 

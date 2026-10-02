@@ -1,7 +1,7 @@
 {
     "goal_id": "deprecate-api-key-transports",
     "status": "inspecting",
-    "iteration": 13,
+    "iteration": 14,
     "builder_model": "Claude:Sonnet-5",
     "inspector_model": "Claude:Haiku-4.5",
     "initial_sha": "99c9a50848e8a826360ea7585a57d7e6f753a34c",
@@ -562,6 +562,38 @@
             "feedback_file": "inspector-feedback-13.md",
             "completed_at": "2026-10-02T13:45:00Z",
             "summary": "Goldmark v2.1.6 migration fully verified. Dependency legitimate, maintained, 0 vulnerabilities, justified per CLAUDE.md. AST/GFM configuration correct. Fail-closed via maxLineLength check and panic recovery. All 19 test functions (100+ cases) pass; all prior findings re-tested and intact. No runtime/auth/version changes. All 54 acceptance criteria verified met (49 original + 5 iteration-13). Root-cause architectural rewrite eliminates all prior regex-heuristic bypasses. Production ready."
+        },
+        {
+            "iteration": 13,
+            "role": "security-review",
+            "verdict": "FAIL",
+            "summary": "Final reviews of the iteration-13 structured (goldmark v2 AST) rewrite found three remaining root-cause gaps within that same structured design, rather than a need for further ad-hoc patching. (1) SECURITY MEDIUM 10/10 + code: ast.HTMLBlock was not walked at all, so a raw HTML block's visible rendered content (a <div>, <p>, or <pre> containing a credential or recommendation) was never scanned, while comments, tag/attribute markup, and script/style content needed to stay correctly excluded as non-visible, with malformed HTML handled conservatively/fail-closed and diagnostics still redacted. (2) Soft-wrapped raw Authorization detection: an ordinary Markdown soft line break between the header name and its value ('Authorization:\\nTOKEN', which renders as a single space) was not detected, because credential scanning ran per physical line only; it needed to also scan the fully rendered/flattened block text, retaining a precise contributing line range, correct code/hard-break semantics, correctness for ordinary multi-line query/form examples, and no duplicate diagnostics or false merging across unrelated block/cell boundaries. (3) Compact mixed transport: the symmetric, flat character-window transport-word binding (transportKindNear) could not correctly classify a compact sentence naming two transports close together with no anchor word ('api_key form deprecated; use api_key query' must violate), and -- more importantly -- treated a genuinely ambiguous classification the same as 'no information available', letting it default to suppression instead of failing safe; it needed to be replaced with directional, occurrence-specific binding, with an ambiguous classification on either side never suppressing, while preserving natural variants and prior accepted warnings. User selected: fix all final AST findings. The nonconforming historical commit remains explicitly out of scope; the orchestrator will obtain explicit user authorization for that separately."
+        },
+        {
+            "iteration": 14,
+            "role": "builder",
+            "model": "Claude:Sonnet-5",
+            "commit_sha": "PENDING",
+            "commit_title": "fix(docs): [B] close structured parser gaps",
+            "summary": "Fixed all three remaining structured-parser gaps from the final review of iteration 13, within the existing goldmark v2 AST design (no dependency change; go.mod/go.sum untouched). (1) HTML blocks: added internal/docsguard/html.go. flattenHTMLBlockText is a small, linear state machine recognizing exactly the handful of constructs CommonMark's own HTML-block grammar defines -- comments, CDATA sections, processing instructions, declarations, tag markup/attributes (all dropped, none ever visible), and <script>/<style> content specifically (dropped too, since neither ever displays as readable prose) -- while keeping everything else, including a <div>'s or <pre>'s inner text, as visible text to scan exactly like a paragraph's. An unterminated comment/CDATA/PI/declaration is handled the way a real browser's tokenizer does (the rest of the block is still never visible, so it is still dropped), but anything this state machine cannot otherwise confidently classify -- an unterminated tag, or an unterminated <script>/<style> element -- fails closed the other way: scanning falls back to treating it as ordinary visible text, rather than risking silently hiding a real credential behind a malformed document. Wired *ast.HTMLBlock into ScanText's walk dispatch (scanHTMLBlock), reusing the existing credential-match-span and recommendationMention checks with line attribution via a byte-offset map back into source. (2) Soft-wrapped Authorization: refactored rawAuthorization/hasParameterCredential (credential.go) to expose match-span variants (rawAuthorizationMatches/parameterCredentialMatches) alongside their existing boolean forms. scanInlineCredentials (scan.go) now checks a raw Authorization header example over the whole block's joined, per-run text (joinRunsWithOffsets), so a header name and its value separated only by an ordinary Markdown soft or hard line break are still read together exactly as they render, with each match mapped back to its own precise, contributing [StartLine, EndLine] -- while this is the only pass performed over the joined text (an unwrapped single-line header is still reported exactly once, not twice, and two separate blocks are never joined together, since this always operates within one AST block's own runs). Parameter-credential matching stays per physical line, unchanged, since that case does not need this. (3) Compact mixed transport: replaced transportKindNear's flat +/-20-character symmetric window with directional, occurrence-specific word-distance binding -- the transport word, among every occurrence of every kind within the proximity bound, nearest to the specific api_key mention in either direction -- and changed its return contract to distinguish a genuine tie between two different kinds (ambiguous=true) from simply no transport word being nearby at all (ambiguous=false, kind=\"\"). hasAffirmativeDeprecationContext now treats an ambiguous classification on either side as failing safe: it never suppresses, unlike the prior design, which let an ambiguous ('') classification on the context side fall through to the same suppressing branch as 'no information', the concrete bug the review identified. Added TestScanTextHTMLBlockVisibleText, TestScanTextSoftWrappedRawAuthorization, and TestScanTextCompactMixedTransportDirectional covering every reviewer example (including the exact compact phrasing and a constructed genuine-tie adversarial case demonstrating the old code's suppression bug is now fixed) plus block/multi-line/table/HTML positive and negative fixtures. All prior fixtures (iterations 1-13) and the full repository test suite (go test ./...) pass unchanged. docsguard gate re-run against all shipped Markdown: 0 violations across 28 files, no doc wording changed. The nonconforming historical commit is intentionally untouched in this iteration; the orchestrator will obtain explicit user authorization for that separately. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
+            "validation": {
+                "verify_sh": "pass",
+                "go_build": "pass (go build ./...)",
+                "go_vet": "pass",
+                "gofmt": "clean",
+                "go_test": "pass (internal/docsguard: 22 test functions including 3 new iteration-14 adversarial regression functions; cmd/docsguard; full repository go test ./... -- all packages pass)",
+                "docsguard_gate": "pass (scripts/verify-docs-canonical-examples.sh: 0 violations across 28 scanned files)",
+                "dependency_pin": "unchanged (go.mod/go.sum diff empty; no dependency added or modified)",
+                "gosec": "12 findings (unchanged pre-existing baseline)",
+                "gitleaks": "1 finding (unchanged pre-existing baseline, unrelated file)",
+                "actionlint": "clean",
+                "zizmor": "clean (2 suppressed, unchanged baseline)",
+                "yarn_audit": "4 moderate (unchanged pre-existing baseline, transitive webpack/ajv/fast-uri)",
+                "browser_test": "pass (scripts/test-browser.sh)",
+                "docker_build": "pass",
+                "docker_config_no_log_test": "pass (scripts/test-docker-config-no-log.sh)",
+                "govulncheck": "pass (0 reachable vulnerabilities; 3 unreachable findings in required modules, unchanged baseline)"
+            }
         }
     ]
 }

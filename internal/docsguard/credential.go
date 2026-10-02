@@ -26,17 +26,27 @@ var candidateKeyPattern = regexp.MustCompile("[^&?=\\s\"'`]+=")
 // `-F`/`--form "api_key=..."`, a standalone "api_key=..." with no flag at
 // all, and a percent-encoded key such as "api%5Fkey=" in any of those forms.
 func hasParameterCredential(text string) bool {
-	for _, match := range candidateKeyPattern.FindAllString(text, -1) {
-		key := strings.TrimSuffix(match, "=")
+	return len(parameterCredentialMatches(text)) > 0
+}
+
+// parameterCredentialMatches returns the byte span, within text, of every
+// "key=" token that decodes to exactly "api_key" (see
+// hasParameterCredential). A caller with a position-to-line mapping for
+// text can use these spans to report a precise, contributing line range
+// instead of merely the whole block's.
+func parameterCredentialMatches(text string) [][2]int {
+	var spans [][2]int
+	for _, loc := range candidateKeyPattern.FindAllStringIndex(text, -1) {
+		key := strings.TrimSuffix(text[loc[0]:loc[1]], "=")
 		decoded, err := url.QueryUnescape(key)
 		if err != nil {
 			decoded = key
 		}
 		if decoded == "api_key" {
-			return true
+			spans = append(spans, [2]int{loc[0], loc[1]})
 		}
 	}
-	return false
+	return spans
 }
 
 // canonicalBearerScheme is the exact, case-sensitive prefix the real
@@ -66,15 +76,30 @@ var recognizedAuthSchemes = map[string]bool{
 // case-insensitive and the real middleware reads it via net/http's
 // canonicalized http.Header.Values("Authorization").
 func rawAuthorization(text string) bool {
+	return len(rawAuthorizationMatches(text)) > 0
+}
+
+// rawAuthorizationMatches returns the byte span, within text, of every
+// Authorization header example rawAuthorization would flag: from the start
+// of the literal (case-insensitive) "authorization:" through the end of
+// its first whitespace/backtick/quote-delimited token, for every such
+// occurrence. A caller with a position-to-line mapping for text can use
+// these spans to report a precise, contributing line range -- including
+// one spanning two physical source lines, when the header name and its
+// value are joined only by an ordinary Markdown soft line break -- instead
+// of merely the whole block's.
+func rawAuthorizationMatches(text string) [][2]int {
+	var spans [][2]int
 	lowered := strings.ToLower(text)
 	searchFrom := 0
 	for {
 		idx := strings.Index(lowered[searchFrom:], "authorization:")
 		if idx < 0 {
-			return false
+			return spans
 		}
 		idx += searchFrom
 		rest := text[idx+len("authorization:"):]
+		trimmed := strings.TrimLeft(rest, " \t`\"'")
 		token := firstToken(rest)
 		searchFrom = idx + len("authorization:")
 		if token == "" {
@@ -82,6 +107,8 @@ func rawAuthorization(text string) bool {
 			// anything; keep scanning in case the text repeats the header.
 			continue
 		}
+		tokenStart := searchFrom + (len(rest) - len(trimmed))
+		tokenEnd := tokenStart + len(token)
 		if strings.EqualFold(token, canonicalBearerScheme) {
 			if token != canonicalBearerScheme {
 				// Wrong-case "bearer": the real extractor only strips the
@@ -89,12 +116,12 @@ func rawAuthorization(text string) bool {
 				// all) as a raw token, not as canonical Bearer; a canonical
 				// example must not show a casing that cannot possibly work
 				// that way.
-				return true
+				spans = append(spans, [2]int{idx, tokenEnd})
 			}
 			continue
 		}
 		if !recognizedAuthSchemes[strings.ToLower(token)] {
-			return true
+			spans = append(spans, [2]int{idx, tokenEnd})
 		}
 	}
 }
