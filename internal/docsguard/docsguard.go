@@ -65,12 +65,17 @@ const (
 	// prose (e.g. "use the api_key query parameter", "authenticate via
 	// api_key") -- including one wrapped across several physical lines --
 	// that presents `api_key` as an ordinary, currently supported
-	// authentication option with no *affirmative* deprecation context
-	// nearby. A negated context ("not deprecated", "no longer legacy")
-	// does not suppress this: it means the surrounding text is actively
-	// asserting the opposite of the real contract, which is itself the
-	// violation. Unlike KindParameterCredential, this has no `=` sign and
-	// would never authenticate anything -- it is a documentation-accuracy
+	// authentication option with no *affirmative* deprecation context in
+	// the same sentence. A deprecation-context word elsewhere in the
+	// paragraph, about an unrelated subject, does not suppress this. Nor
+	// does a negated context ("not deprecated", "no longer legacy") where
+	// the negation directly governs it: that means the surrounding text is
+	// actively asserting the opposite of the real contract, which is
+	// itself the violation. A negation that instead governs the
+	// recommendation verb -- "do NOT use the api_key parameter; it is
+	// deprecated" -- is a legitimate warning and does not violate. Unlike
+	// KindParameterCredential, this has no `=` sign and would never
+	// authenticate anything -- it is a documentation-accuracy
 	// check, not a credential-syntax check.
 	KindUndeprecatedParameterMention Kind = "undeprecated_parameter_mention"
 )
@@ -105,18 +110,40 @@ func (k Kind) Explanation() string {
 // and auditable rather than a loophole.
 var deprecationContextPattern = regexp.MustCompile(`(?i)deprecat\w*|0\.13\.0|remov\w*|sunset\w*|migrat\w*|legacy`)
 
-// negationWordPattern matches common negation words/contractions. If one of
-// these appears between the start of the current sentence and a
-// deprecation-context match, that match does not count as affirmative
-// context: "not deprecated" and "no longer legacy" assert the opposite of
-// the real contract, which must remain a violation, not be suppressed by it.
+// negationWordPattern matches common negation words/contractions. A match
+// only counts as negating a particular deprecationContextPattern match when
+// it is within negationProximityWords words of it, on the near side of any
+// negationBoundaryPattern punctuation (see hasAffirmativeDeprecationContext):
+// "not deprecated" and "no longer legacy" assert the opposite of the real
+// contract and must remain a violation, but a negation word governing some
+// other, earlier part of the same clause -- most commonly the recommendation
+// verb itself, as in "do NOT use the api_key parameter; it is deprecated" --
+// must not be read as negating "deprecated" too.
 var negationWordPattern = regexp.MustCompile(`(?i)\b(not|never|no longer|isn't|aren't|wasn't|weren't|doesn't|didn't|won't|wont)\b`)
 
+// negationBoundaryPattern marks a punctuation boundary strong enough to stop
+// a negation word from being read as governing a deprecation-context word on
+// the other side of it: a sentence-ending mark, a semicolon, or a dash (em,
+// en, or a double hyphen standing in for one in plain-text Markdown). Without
+// this, "Do NOT use the api_key query parameter; it is deprecated" would
+// wrongly read the leading "not" -- which governs "use", not "deprecated" --
+// as negating the deprecation notice that follows it.
+var negationBoundaryPattern = regexp.MustCompile(`[.!?;—–]|--`)
+
+// negationProximityWords bounds how many words may separate a negation
+// word/phrase from the deprecation-context word it must directly govern to
+// count as negating it (for example "is not actually deprecated"). Keeping
+// this small, in addition to negationBoundaryPattern, is what ensures only a
+// negation that grammatically governs the deprecation-context word itself --
+// not an unrelated negation earlier in the same clause -- suppresses it.
+const negationProximityWords = 3
+
 // hasAffirmativeDeprecationContext reports whether block contains at least
-// one deprecation-context word or phrase that is not negated in its own
-// sentence. It is used both per-line (for table rows) and per-paragraph
-// (for recommendation prose), so a negated or merely-nearby-but-unrelated
-// mention elsewhere cannot accidentally suppress a genuine violation.
+// one deprecation-context word or phrase that is not directly negated. It is
+// used both per-line (for table rows) and per-sentence (for recommendation
+// prose, scoped via enclosingSentence), so a negated mention, or one that
+// belongs to an unrelated clause, cannot accidentally suppress a genuine
+// violation.
 func hasAffirmativeDeprecationContext(block string) bool {
 	for _, match := range deprecationContextPattern.FindAllStringIndex(block, -1) {
 		start := match[0]
@@ -125,14 +152,42 @@ func hasAffirmativeDeprecationContext(block string) bool {
 			windowStart = 0
 		}
 		preceding := block[windowStart:start]
-		if idx := strings.LastIndexAny(preceding, ".!?"); idx != -1 {
-			preceding = preceding[idx+1:]
+		if locs := negationBoundaryPattern.FindAllStringIndex(preceding, -1); len(locs) > 0 {
+			last := locs[len(locs)-1]
+			preceding = preceding[last[1]:]
 		}
-		if !negationWordPattern.MatchString(preceding) {
+		words := strings.Fields(preceding)
+		if len(words) > negationProximityWords {
+			words = words[len(words)-negationProximityWords:]
+		}
+		if !negationWordPattern.MatchString(strings.Join(words, " ")) {
 			return true
 		}
 	}
 	return false
+}
+
+// sentenceTerminators are the characters that end an English sentence, used
+// by enclosingSentence to scope deprecation-context association to "the
+// same sentence as a recommendation": an unrelated deprecation mention about
+// a different subject, in an earlier or later sentence of the same
+// paragraph, must not be able to suppress a live recommendation elsewhere in
+// that paragraph.
+const sentenceTerminators = ".!?"
+
+// enclosingSentence returns the sentence of text containing byte offset pos,
+// bounded by the nearest sentenceTerminators character on each side (or the
+// start/end of text if none is found).
+func enclosingSentence(text string, pos int) string {
+	start := 0
+	if idx := strings.LastIndexAny(text[:pos], sentenceTerminators); idx != -1 {
+		start = idx + 1
+	}
+	end := len(text)
+	if idx := strings.IndexAny(text[pos:], sentenceTerminators); idx != -1 {
+		end = pos + idx + 1
+	}
+	return text[start:end]
 }
 
 // tableRowPattern matches a Markdown table row: a line whose first
@@ -421,22 +476,38 @@ func tableRowMention(line string) bool {
 // recommendationMention reports whether normalized paragraph text presents
 // `api_key` as an alternative or recommended authentication option -- "or
 // an api_key parameter", "use the api_key query parameter", "authenticate
-// via api_key" -- with no affirmative deprecation context anywhere in the
-// paragraph. Operating on the whole paragraph (rather than one line) is
-// what catches a recommendation wrapped across several physical lines by
-// ordinary Markdown line-wrapping.
+// via api_key" -- with no affirmative deprecation context in the same
+// sentence as that particular mention. Each candidate recommendation match
+// is judged against only its own enclosing sentence (see enclosingSentence),
+// not the whole paragraph: an unrelated deprecation notice about a different
+// subject, in an earlier or later sentence of the same paragraph, must not
+// suppress a live recommendation elsewhere in it. Operating paragraph-wide
+// to *find* candidate matches (rather than one physical line at a time) is
+// what still catches a recommendation wrapped across several physical lines
+// by ordinary Markdown line-wrapping.
 func recommendationMention(paragraphText string) bool {
 	if !strings.Contains(strings.ToLower(paragraphText), "api_key") {
 		return false
 	}
-	if hasAffirmativeDeprecationContext(paragraphText) {
-		return false
+
+	for _, loc := range offeredAsAlternativePattern.FindAllStringIndex(paragraphText, -1) {
+		if !hasAffirmativeDeprecationContext(enclosingSentence(paragraphText, loc[0])) {
+			return true
+		}
 	}
-	if offeredAsAlternativePattern.MatchString(paragraphText) {
-		return true
+	for _, loc := range strongRecommendationPattern.FindAllStringIndex(paragraphText, -1) {
+		if !hasAffirmativeDeprecationContext(enclosingSentence(paragraphText, loc[0])) {
+			return true
+		}
 	}
-	if strongRecommendationPattern.MatchString(paragraphText) {
-		return true
+	for _, loc := range weakRecommendationVerbPattern.FindAllStringIndex(paragraphText, -1) {
+		sentence := enclosingSentence(paragraphText, loc[0])
+		if !recommendationAnchorPattern.MatchString(sentence) {
+			continue
+		}
+		if !hasAffirmativeDeprecationContext(sentence) {
+			return true
+		}
 	}
-	return weakRecommendationVerbPattern.MatchString(paragraphText) && recommendationAnchorPattern.MatchString(paragraphText)
+	return false
 }

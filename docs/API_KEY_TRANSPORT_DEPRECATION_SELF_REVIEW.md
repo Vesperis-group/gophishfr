@@ -461,6 +461,70 @@ line behaviour, and all existing CI wiring; no runtime authentication,
 middleware, header, status code, logging, version, or dependency behaviour
 changed.
 
+## Iteration 8: independent review findings and fixes
+
+[`review-feedback-7.md`](../.goals/deprecate-api-key-transports/review-feedback-7.md)
+returned a FAIL on iteration 7. Security review passed; code review found
+two remaining semantic-context defects in `internal/docsguard`'s
+paragraph-wide analysis from the previous iteration.
+
+### Finding 1 — an unrelated deprecation mention anywhere in the paragraph suppressed a later, unrelated recommendation
+
+`hasAffirmativeDeprecationContext` was still being evaluated against the
+*whole paragraph* for a recommendation match. Two sentences in the same
+paragraph that each independently mention a deprecation-sounding word and
+`api_key` — about two entirely different subjects — would incorrectly
+suppress a genuine, unqualified `api_key` recommendation.
+
+Fixed by adding `enclosingSentence`, which bounds a block of text to just
+the sentence containing a given match (split on `.`/`!`/`?`), and changing
+`recommendationMention` to look up each candidate recommendation match's
+*own* enclosing sentence before checking for affirmative context, instead
+of checking the whole paragraph once. An unrelated deprecation-context word
+in an earlier or later sentence of the same paragraph no longer suppresses
+a recommendation that appears in a different sentence.
+
+### Finding 2 — generic nearby negation was assumed to negate "deprecated" even when it governed a different word
+
+The previous negation check scanned back from a deprecation-context match
+to the start of its sentence (cut only at `.`/`!`/`?`) for *any* negation
+word in that entire span. A legitimate warning such as "Do not use the
+`api_key` query parameter; it is deprecated." has "not" governing "use",
+not "deprecated" — but the old, unbounded backward scan read it as
+negating "deprecated" too, and incorrectly flagged this accurate warning
+as a violation.
+
+Fixed by tightening negation association to require the negation
+word/phrase to be within `negationProximityWords` (3) words of the
+deprecation-context word it must directly govern (e.g. "is not actually
+deprecated"), and by adding `negationBoundaryPattern` (a semicolon, an
+em/en dash, or a double hyphen standing in for one) as a hard stop a
+negation word cannot be read across. "Do not use the api_key parameter;
+it is deprecated" no longer reads "not" as negating "deprecated", because
+the semicolon separates them; "The parameter is not deprecated" still
+does, because "not" directly and closely precedes "deprecated" with no
+boundary between them.
+
+Both fixes are purely about *where* affirmative context is looked for and
+*which* negation governs it — the underlying recommendation-detection
+patterns (strong "authenticate" proximity, weak verb+anchor proximity, the
+table-row and alternative-wording checks) are unchanged from iteration 7.
+
+New fixtures: `TestScanTextContextIsSentenceScopedNotParagraphWide`
+(positive: an unrelated subject's deprecation mention in one sentence does
+not suppress a live, unqualified recommendation in a different sentence of
+the same paragraph, including a wrapped variant; negative: a genuine
+same-sentence context still suppresses) and
+`TestScanTextNegationMustDirectlyGovernDeprecationWord` (negative: several
+phrasings of "do not use X; it is deprecated", including one using `--`
+as the dash and wrapped variants, must not violate; positive: a negation
+that *does* directly govern "deprecated" itself, e.g. "is not actually
+deprecated", must still violate). All prior fixtures, including every
+iteration 5–7 fixture, pass unchanged.
+
+A full run of `scripts/verify-docs-canonical-examples.sh` against every
+tracked Markdown file found 0 violations; no doc wording changed.
+
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |
@@ -595,6 +659,22 @@ changed.
   `docs/API_AUTHENTICATION.md` false positive surfaced mid-iteration by the
   new paragraph-wide scope (see "Finding 1" above) no longer appears, with
   no doc wording changed to achieve that.
+- `TestScanTextContextIsSentenceScopedNotParagraphWide` (iteration 8, new):
+  an unrelated subject's deprecation mention in one sentence of a paragraph
+  does not suppress a live, unqualified `api_key` recommendation in a
+  different sentence of that paragraph (plain and wrapped forms); a
+  genuine same-sentence context still suppresses.
+- `TestScanTextNegationMustDirectlyGovernDeprecationWord` (iteration 8,
+  new): several phrasings of a legitimate "do not use `api_key`; it is
+  deprecated" warning, including a `--` dash variant and wrapped forms,
+  are not violations, since the negation there governs "use", not
+  "deprecated"; a negation that does directly govern "deprecated" itself
+  still violates. All prior `internal/docsguard` fixtures, including every
+  iteration 5–7 fixture, pass unchanged under the sentence-scoped,
+  directly-governed negation logic.
+- `./scripts/verify-docs-canonical-examples.sh` re-run against every
+  tracked Markdown file after the iteration-8 fixes: 0 violations across
+  28 shipped Markdown files, no doc wording changed.
 
 ## Why a bounded deprecation window instead of immediate removal
 

@@ -298,6 +298,86 @@ func TestScanTextNegatedContextDoesNotSuppress(t *testing.T) {
 	}
 }
 
+// TestScanTextContextIsSentenceScopedNotParagraphWide proves an affirmative
+// deprecation-context word about an unrelated subject, in a different
+// sentence of the same paragraph, cannot suppress a live recommendation
+// elsewhere in that paragraph -- the exact bug a real paragraph in
+// docs/API_AUTHENTICATION.md's sibling, a hypothetical unrelated-deprecation
+// paragraph, would otherwise trigger.
+func TestScanTextContextIsSentenceScopedNotParagraphWide(t *testing.T) {
+	positive := []string{
+		// "deprecated" describes the session-based login, an unrelated
+		// subject, in the first sentence; the second sentence is a live,
+		// unqualified api_key recommendation and must still violate.
+		"The old session-based login flow was deprecated last year for unrelated reasons. Use the api_key query parameter for authentication.",
+		"This project removed cookie-based SSO in a prior release. Authenticate via the api_key parameter.",
+		// Same pairing, wrapped across physical lines by ordinary
+		// Markdown line-wrapping.
+		"The old session-based login flow was\ndeprecated last year for unrelated reasons.\nUse the api_key\nquery parameter for authentication.\n",
+	}
+	for _, text := range positive {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if !containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("expected an unrelated-context violation for %q, got %v", text, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// For contrast: the deprecation context and the recommendation are
+		// in the same sentence (one comma-separated clause, not a separate
+		// sentence), so it correctly still suppresses.
+		"The api_key query parameter is deprecated, but some old docs still say to use the api_key query parameter for authentication.",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("unexpected violation when context is about the same subject %q: %v", text, violations)
+			}
+		})
+	}
+}
+
+// TestScanTextNegationMustDirectlyGovernDeprecationWord proves a negation
+// word is only read as negating a nearby deprecation-context word when it
+// directly governs that word -- not when it governs the recommendation verb
+// instead, as in a legitimate "do not use X; it is deprecated" warning.
+func TestScanTextNegationMustDirectlyGovernDeprecationWord(t *testing.T) {
+	negative := []string{
+		"Do not use the api_key query parameter; it is deprecated.",
+		"Never use the api_key form field -- it is deprecated and scheduled for removal in 0.13.0.",
+		"Clients should not authenticate via the api_key parameter; this transport is deprecated.",
+		"Avoid the api_key header for authentication; it's deprecated.",
+		// Same warning, wrapped across physical lines.
+		"Do not use the\napi_key query parameter;\nit is deprecated.\n",
+		"Never use the api_key\nform field -- it is\ndeprecated and scheduled\nfor removal in 0.13.0.\n",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("unexpected violation for a legitimate do-not-use warning %q: %v", text, violations)
+			}
+		})
+	}
+
+	// For contrast: a negation that directly governs "deprecated" itself
+	// (not an earlier verb) must still violate.
+	positive := []string{
+		"Do not worry: the api_key query parameter is not deprecated, so use it for authentication via api_key.",
+	}
+	for _, text := range positive {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if !containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("expected a violation when the negation directly governs \"deprecated\" %q, got %v", text, violations)
+			}
+		})
+	}
+}
+
 func containsKind(violations []Violation, kind Kind) bool {
 	for _, v := range violations {
 		if v.Kind == kind {

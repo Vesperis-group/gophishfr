@@ -1,7 +1,7 @@
 {
     "goal_id":  "deprecate-api-key-transports",
     "status":  "inspecting",
-    "iteration":  7,
+    "iteration":  8,
     "builder_model":  "Claude:Sonnet-5",
     "inspector_model":  "Claude:Haiku-4.5",
     "initial_sha":  "99c9a50848e8a826360ea7585a57d7e6f753a34c",
@@ -312,6 +312,41 @@
                                         "feedback_file":  ".goals/deprecate-api-key-transports/inspector-feedback-7.md",
                                         "summary":  "Both iteration-6 review findings fixed: (1) Paragraph/negation bypass — paragraphsFromLines() groups wrapped Markdown lines into normalized blocks; hasAffirmativeDeprecationContext() checks for negation words before deprecation-context keywords, so 'not deprecated' remains a violation; proximity-bounded recommendation patterns prevent false positives from co-occurring 'api_key' and 'authentication' mentions in unrelated sentences. (2) Diagnostic secret echo — Violation no longer carries source text (StartLine/EndLine only); Kind.Explanation() returns fixed, non-sensitive descriptions; CLI outputs only location and kind, never source text. Synthetic secret test passes: distinctive string sk-SYNTH7f3c9a1b-not-a-real-credential-9e2d4f embedded in both parameter_credential and raw_authorization violations is absent from stdout/stderr; FORBIDDEN lines with correct locations and kinds are present. All 40+ test cases pass (including 2 new docsguard functions + CLI secret-leak subtest). Docs gate: 0 violations across 28 shipped Markdown files. Full gate: PASS. No runtime/auth/dependency changes. VERSION unchanged (0.12.1). Ready for release candidate.",
                                         "completed_at":  "2026-10-02T15:30:00+02:00"
+                    },
+                    {
+                                        "iteration":  7,
+                                        "role":  "code-review",
+                                        "verdict":  "FAIL",
+                                        "feedback_file":  ".goals/deprecate-api-key-transports/review-feedback-7.md",
+                                        "summary":  "Security review passed. internal/docsguard's paragraph-wide analysis had two remaining semantic-context defects: (1) any deprecation keyword anywhere in a paragraph suppressed a later, unrelated api_key recommendation about a different subject in a different sentence; (2) a legitimate warning such as 'Do not use the api_key query parameter; it is deprecated.' was rejected, because generic nearby negation was assumed to negate 'deprecated' even though it actually governed 'use'. Required associating affirmative deprecation context with the same sentence/clause as the relevant api_key recommendation, and treating negation as negating deprecation only when it directly governs the deprecation/legacy expression, with new fixtures for both directions."
+                    },
+                    {
+                                        "iteration":  8,
+                                        "role":  "builder",
+                                        "model":  "Claude:Sonnet-5",
+                                        "commit_sha":  "PENDING",
+                                        "commit_title":  "fix(docs): [B] bind deprecation context to transport",
+                                        "summary":  "Fixed both iteration-7 review findings in internal/docsguard, test/docs-only. (1) Sentence-scoped context: added enclosingSentence (bounds a block of text to the sentence containing a given match, split on .!?) and changed recommendationMention to check affirmative deprecation context against each candidate recommendation match's own enclosing sentence, instead of the whole paragraph once. An unrelated deprecation-context word about a different subject, in an earlier or later sentence of the same paragraph, no longer suppresses a live recommendation elsewhere in it. (2) Directly-governed negation: tightened hasAffirmativeDeprecationContext's negation association to require the negation word/phrase within negationProximityWords (3) words of the deprecation-context word it must directly govern, and added negationBoundaryPattern (semicolon, em/en dash, or double hyphen) as a hard stop a negation word cannot be read across. 'Do not use the api_key parameter; it is deprecated' no longer misreads the leading not (which governs use) as negating deprecated, since the semicolon separates them; 'is not actually deprecated' still correctly negates, since not directly and closely precedes deprecated with no boundary between them. Added TestScanTextContextIsSentenceScopedNotParagraphWide (unrelated-subject context in a different sentence does not suppress, including a wrapped variant; genuine same-sentence context still does) and TestScanTextNegationMustDirectlyGovernDeprecationWord (several do-not-use-it-is-deprecated phrasings, including a -- dash variant and wrapped forms, do not violate; a negation that directly governs deprecated itself still violates). All prior fixtures, including every iteration 5-7 fixture, pass unchanged. Searched all shipped Markdown with the extended gate: 0 violations across 28 files, no doc wording changed. All prior rules (encoded-parameter, Bearer-casing, scanner-error fail-closed, table, alternative-wording, recommendation-prose, redacted diagnostics) preserved and still fully tested. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
+                                        "validation":  {
+                                           "verify_sh":  "pass",
+                                           "go_test":  "pass (including 2 new docsguard test functions covering sentence-scoped context and directly-governed negation fixtures; all prior fixtures unchanged and passing)",
+                                           "go_test_race":  "pass",
+                                           "go_vet":  "pass",
+                                           "go_build":  "pass",
+                                           "golangci_lint":  "0 issues",
+                                           "govulncheck":  "pass (0 reachable vulnerabilities)",
+                                           "gosec":  "12 pre-existing findings, same baseline; no new finding",
+                                           "gitleaks":  "1 pre-existing finding from 2026-09-03 history, unrelated to this PR; current working tree clean (--no-git); no new finding",
+                                           "actionlint":  "pass",
+                                           "zizmor":  "pass (2 pre-existing documented suppressions)",
+                                           "yarn_audit":  "4 pre-existing moderate findings in transitive webpack devDependency, lockfile unchanged",
+                                           "retire_js":  "pass",
+                                           "browser_tests":  "pass (scripts/test-browser.sh)",
+                                           "docker_compat_tests":  "pass (scripts/test-container-api-session-auth.sh, scripts/test-container-api-key-verifier.sh)",
+                                           "docs_gate_sanity_check":  "scripts/verify-docs-canonical-examples.sh reports 0 violations across all 28 tracked shipped Markdown files",
+                                           "git_diff_check":  "clean",
+                                           "lockfiles_unchanged":  true
+                                       }
                     }
                 ]
 }
