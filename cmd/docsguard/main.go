@@ -52,7 +52,12 @@ func run(args []string, stdout, stderr io.Writer) int {
 			return 2
 		}
 		scanned++
-		for _, violation := range docsguard.ScanText(string(contents)) {
+		violations, err := docsguard.ScanText(string(contents))
+		if err != nil {
+			_, _ = fmt.Fprintf(stderr, "docsguard: scanning %s: %v\n", path, err)
+			return 2
+		}
+		for _, violation := range violations {
 			totalViolations++
 			_, _ = fmt.Fprintf(stdout, "FORBIDDEN (%s): %s:%d: %s\n", violation.Kind, path, violation.Line, violation.Text)
 		}

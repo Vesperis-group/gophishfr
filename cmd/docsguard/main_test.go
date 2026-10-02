@@ -64,4 +64,19 @@ func TestRunFlagsAndExitCodes(t *testing.T) {
 			t.Fatalf("expected exit 2 for a missing file, got %d", code)
 		}
 	})
+
+	t.Run("oversized line followed by a forbidden example fails closed", func(t *testing.T) {
+		oversized := strings.Repeat("a", 2*1024*1024)
+		content := oversized + "\n?api_key=TOKEN\n"
+		path := writeTempFile(t, dir, "oversized.md", content)
+
+		var stdout, stderr bytes.Buffer
+		code := run([]string{path}, &stdout, &stderr)
+		if code != 2 {
+			t.Fatalf("expected exit 2 for a scan error (fail closed), got %d (stdout=%q stderr=%q)", code, stdout.String(), stderr.String())
+		}
+		if !strings.Contains(stderr.String(), "scanning") {
+			t.Fatalf("expected a scanning-error message, got stderr=%q", stderr.String())
+		}
+	})
 }

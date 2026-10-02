@@ -1,7 +1,7 @@
 {
     "goal_id":  "deprecate-api-key-transports",
     "status":  "inspecting",
-    "iteration":  4,
+    "iteration":  5,
     "builder_model":  "Claude:Sonnet-5",
     "inspector_model":  "Claude:Haiku-4.5",
     "initial_sha":  "99c9a50848e8a826360ea7585a57d7e6f753a34c",
@@ -179,6 +179,42 @@
                         "role":  "inspector",
                         "summary":  "Iteration-3 review finding completely addressed: real campaign-complete example now explicitly labelled as proving transport-level authentication equivalence only (credential-only body by design), separated from new illustrative generic form migration template showing the business-field preservation pattern (remove only api_key, preserve all other fields byte-for-byte). New middleware/api_auth_form_fields_test.go wraps real RequireAPIKey middleware (used by every /api/* route) around local handler reading PostForm, proves identical non-api_key fields survive parsing byte-for-byte under both deprecated form and canonical Bearer transports. Documentation correctly specifies ParseForm scope (POST/PUT/PATCH only, not GET; multipart/form-data NOT parsed into PostForm). GROUP_IMPORT_LIMITS.md authentication row correctly identifies endpoint as header- or query-authenticated only due to multipart behavior. All 49 original acceptance criteria verified met. All gates pass. Zero runtime auth/middleware/dependency changes. VERSION 0.12.1 unchanged.",
                         "completed_at":  "2026-10-02T08:45:00+02:00"
+                    },
+                    {
+                        "iteration":  4,
+                        "role":  "code-review",
+                        "verdict":  "FAIL",
+                        "feedback_file":  ".goals/deprecate-api-key-transports/review-feedback-4.md",
+                        "summary":  "Security review passed; code review found four correctness gaps in internal/docsguard: accepted lowercase 'bearer' though runtime requires exact 'Bearer ' casing; literal-only matching missed percent-encoded parameter names like api%5Fkey; scanner errors (including oversized lines) were silently ignored instead of failing closed; and docs claimed Content-Type must match exactly rather than describing the parsed media type with parameters allowed."
+                    },
+                    {
+                        "iteration":  5,
+                        "role":  "builder",
+                        "model":  "Claude:Sonnet-5",
+                        "commit_sha":  "PENDING",
+                        "commit_title":  "fix(docs): [B] fail closed on deprecated examples",
+                        "summary":  "Fixed all four iteration-4 review findings in internal/docsguard, docs/test-only: (1) Authorization header name stays case-insensitive but the Bearer scheme itself now requires the runtime's exact case-sensitive 'Bearer' casing (strings.TrimPrefix in middleware.extractExplicitAPICredential is case-sensitive) -- any other casing (bearer/BEARER/BeaRer) is flagged as raw_authorization, while unrelated schemes (Basic/Digest/Negotiate/NTLM) remain case-insensitively allowed per RFC 7235; (2) hasParameterCredential now finds every key= token via regexp, percent-decodes the key with net/url.QueryUnescape, and compares the decoded value to exactly 'api_key', catching percent-encoded names like api%5Fkey that Go's net/url and net/http would also decode and accept at runtime; (3) ScanText's signature changed to ([]Violation, error), propagating bufio.Scanner's Err() (including ErrTooLong on an oversized line) instead of silently returning fewer violations, and cmd/docsguard fails closed (exit 2) on any scan error; (4) docs/API_KEY_TRANSPORT_DEPRECATION.md's Content-Type wording corrected to describe the parsed media type (via Go's mime.ParseMediaType, which ParseForm calls) rather than an exact string match, explicitly noting media-type parameters such as charset=UTF-8 are allowed and ignored -- verified empirically with a throwaway Go program. Added fixture tests for every new/changed rule: wrong-case Bearer (positive) alongside exact-case and header-name-case-insensitive (negative); percent-encoded api_key query/form parameters (positive) alongside a percent-encoded non-matching key (negative); an oversized-line-then-forbidden-suffix test at both the internal/docsguard and cmd/docsguard levels proving fail-closed behaviour. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
+                        "validation":  {
+                                           "verify_sh":  "pass",
+                                           "go_test":  "pass (including all new/changed docsguard and cmd/docsguard fixtures)",
+                                           "go_test_race":  "pass",
+                                           "go_vet":  "pass",
+                                           "go_build":  "pass",
+                                           "golangci_lint":  "0 issues",
+                                           "govulncheck":  "pass (0 reachable vulnerabilities)",
+                                           "gosec":  "12 pre-existing findings, same baseline; no new finding",
+                                           "gitleaks":  "1 pre-existing finding from 2026-09-03 history, unrelated to this PR; current working tree clean (--no-git); no new finding",
+                                           "actionlint":  "pass",
+                                           "zizmor":  "pass (2 pre-existing documented suppressions)",
+                                           "yarn_audit":  "4 pre-existing moderate findings in transitive webpack devDependency, lockfile unchanged",
+                                           "retire_js":  "pass",
+                                           "browser_tests":  "pass (scripts/test-browser.sh)",
+                                           "docker_compat_tests":  "pass (scripts/test-container-api-session-auth.sh, scripts/test-container-api-key-verifier.sh)",
+                                           "content_type_claim":  "empirically verified with a standalone Go program: req.ParseForm() succeeds and populates PostForm for Content-Type 'application/x-www-form-urlencoded; charset=UTF-8'",
+                                           "docs_gate_sanity_check":  "scripts/verify-docs-canonical-examples.sh reports 0 violations across all 29 scanned files after every doc edit",
+                                           "git_diff_check":  "clean",
+                                           "lockfiles_unchanged":  true
+                                       }
                     }
                 ]
 }

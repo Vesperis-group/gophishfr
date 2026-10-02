@@ -142,10 +142,13 @@ data, however that body is encoded.
 ### A technical note on the form transport's exact scope
 
 The form `api_key` transport works only where all of the following hold:
-the request method is `POST`, `PUT`, or `PATCH`; the `Content-Type` is
-exactly `application/x-www-form-urlencoded`; and the credential is read
-from Go's `r.PostForm` (via `r.ParseForm()`, which `middleware.GetContext`
-and the credential extractor both call). In particular:
+the request method is `POST`, `PUT`, or `PATCH`; the `Content-Type` header's
+**parsed media type** (via Go's `mime.ParseMediaType`, which `ParseForm`
+calls internally) is `application/x-www-form-urlencoded` — media-type
+parameters such as `; charset=UTF-8` are explicitly allowed and ignored,
+only the base media type has to match; and the credential is read from
+Go's `r.PostForm` (via `r.ParseForm()`, which `middleware.GetContext` and
+the credential extractor both call). In particular:
 
 - a **`multipart/form-data`** request — the content type every real
   GophishFR file-upload endpoint uses, including

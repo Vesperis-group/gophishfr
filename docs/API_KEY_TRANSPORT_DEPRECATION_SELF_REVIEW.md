@@ -45,15 +45,16 @@ This PR is documentation/test/CI-only. It touches:
   trailing-slash request to the same path does **not** match the route,
   which is the exact class of mistake that made the original form example
   non-executable.
-- `internal/docsguard/` (new) and `cmd/docsguard/` (new) — the detection
-  logic and CLI behind the documentation gate, plus their fixture-based
-  table tests (`internal/docsguard/docsguard_test.go`,
-  `cmd/docsguard/main_test.go`) covering every supported deprecated syntax,
-  every legitimate Authorization scheme this guard must leave alone, and (as
-  of iteration 3) every canonical-doc table row or alternative-option
-  sentence that presents `api_key` as an ordinary option with no
-  deprecation context. Both are `go test`-covered stdlib-only Go code; no
-  new dependency.
+- `internal/docsguard/` and `cmd/docsguard/` — the detection logic and CLI
+  behind the documentation gate, plus their fixture-based table tests
+  (`internal/docsguard/docsguard_test.go`, `cmd/docsguard/main_test.go`)
+  covering every supported deprecated syntax (including, as of iteration 5,
+  percent-encoded parameter names), every legitimate Authorization scheme
+  this guard must leave alone (with Bearer itself now requiring the
+  runtime's exact case-sensitive casing), every canonical-doc table row or
+  alternative-option sentence that presents `api_key` as an ordinary option
+  with no deprecation context, and scanner-error fail-closed behaviour.
+  Both are `go test`-covered stdlib-only Go code; no new dependency.
 - `scripts/verify-docs-canonical-examples.sh` (rewritten) — now a thin
   wrapper that runs `go run ./cmd/docsguard` over tracked Markdown, with one
   explicit, auditable exemption
@@ -225,6 +226,85 @@ Fixed in four parts, all documentation/test only:
    corrected to match: that endpoint's `multipart/form-data` content type
    means its `api_key` support is header/query only, never a form field.
 
+## Iteration 5: independent review findings and fixes
+
+[`review-feedback-4.md`](../.goals/deprecate-api-key-transports/review-feedback-4.md)
+returned a FAIL on iteration 4. Security review passed; code review found
+four correctness gaps, all inside `internal/docsguard` itself (the gate's
+own detection logic had drifted from the exact runtime contract it exists
+to check), plus one documentation wording issue.
+
+### Finding 1 — the gate accepted lowercase `bearer`
+
+The real credential extractor only strips a literal, case-sensitive
+`"Bearer "` prefix (`strings.TrimPrefix` in
+`middleware.extractExplicitAPICredential`); any other casing of the word
+is not recognized as Bearer at runtime and is treated as a raw/legacy
+credential instead. The gate previously matched the scheme name
+case-insensitively for every scheme, including Bearer, so a canonical
+example showing the Authorization header with the word `bearer` in
+lowercase would have passed the gate while silently not working the way
+the example claims. Fixed: the
+header *name* ("Authorization") still matches case-insensitively, per RFC
+9110 and `http.Header.Values`, but the Bearer scheme token now requires
+the exact case-sensitive spelling `Bearer`; any other casing (`bearer`,
+`BEARER`, `BeaRer`, ...) is flagged as `raw_authorization`. Unrelated real
+schemes (`Basic`, `Digest`, `Negotiate`, `NTLM`) remain allowed
+case-insensitively, since this repository's runtime has no special-cased
+handling of them the way it does for Bearer, and HTTP auth schemes are
+registered case-insensitively (RFC 7235). Fixture tests cover all four
+wrong-case Bearer variants as positive, and the header name in three
+different cases paired with the exact Bearer casing as negative.
+
+### Finding 2 — percent-encoded parameter names bypassed literal matching
+
+Go's `net/url` and `net/http` percent-decode a query or form parameter
+name before comparing it, so a key percent-encoded as `api%5Fkey`
+(`%5F` is `_`) decodes to and authenticates exactly like the literal
+`api_key` parameter at runtime, but the gate's previous literal substring
+check never saw the encoded form. Fixed:
+`hasParameterCredential` now finds every `key=` token in a line with a
+regexp, percent-decodes each key with `net/url.QueryUnescape`, and
+compares the *decoded* value to exactly `"api_key"`. This is still a plain
+regexp/string check, not a URL or Markdown parser, and needed no new
+dependency (`net/url` is already in the standard library this project
+already depends on). Fixture tests cover a percent-encoded key in a query
+string, a form body, and alongside another parameter, plus a negative case
+where the percent-encoded key decodes to a different, non-matching
+parameter name and must stay unflagged.
+
+### Finding 3 — scanner errors were silently ignored
+
+`bufio.Scanner.Scan` returns `false` on any error, including
+`bufio.ErrTooLong` when a single line exceeds its internal buffer; the
+previous `ScanText` never checked `scanner.Err()`, so a pathologically
+long line would silently truncate the scan and everything after it —
+reporting "no violations" even if a real violation sat on the very next
+line. Fixed: `ScanText`'s signature changed from `[]Violation` to
+`([]Violation, error)`, returning the scanner's error (if any) alongside
+whatever partial violations were found before it. `cmd/docsguard` now
+fails closed: a scan error is treated exactly like a file-read error
+(`exit 2`), not as "zero violations found". A new test,
+`TestScanTextOversizedLineFailsClosed`, builds a line larger than the 1
+MiB buffer followed by a line with a real deprecated-parameter violation,
+and asserts `ScanText` returns a non-nil error; a matching CLI-level test in
+`cmd/docsguard/main_test.go` asserts `run()` exits `2` and reports a
+scanning error for the same input.
+
+### Finding 4 — Content-Type wording claimed an exact match
+
+The migration guide stated the form transport requires the `Content-Type`
+to be "exactly" `application/x-www-form-urlencoded`, but Go's `ParseForm`
+calls `mime.ParseMediaType`, which parses out and discards media-type
+parameters (such as `; charset=UTF-8`) before comparing only the base
+media type — so a real request with those parameters still authenticates
+via the form transport. Fixed: the doc now describes the **parsed media
+type** via `mime.ParseMediaType`, explicitly stating parameters are
+allowed and ignored. Verified empirically with a standalone Go program
+that called `req.ParseForm()` on a body with
+`Content-Type: application/x-www-form-urlencoded; charset=UTF-8` and
+confirmed both `PostForm` fields parsed successfully.
+
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |
@@ -270,6 +350,20 @@ Fixed in four parts, all documentation/test only:
   printed `req.PostForm["api_key"]` — confirmed empty (`[]`), proving
   `docs/GROUP_IMPORT_LIMITS.md`'s corrected claim that a multipart
   `api_key` field is never read as a credential.
+- `internal/docsguard`'s extended fixture suite (iteration 5):
+  `TestScanTextRawAuthorization` now covers four wrong-case `bearer`
+  variants as positive and the header name in three cases paired with
+  exact-case `Bearer` as negative; `TestScanTextParameterCredential` covers
+  three percent-encoded `api_key` placements as positive and a
+  percent-encoded non-matching key as negative;
+  `TestScanTextOversizedLineFailsClosed` asserts `ScanText` returns a
+  non-nil error for a line exceeding the 1 MiB buffer followed by a real
+  violation; `cmd/docsguard/main_test.go`'s matching CLI-level case asserts
+  `run()` exits `2` with a scanning-error message for the same input.
+- Standalone verification of the parsed-media-type Content-Type claim: a
+  throwaway Go program called `req.ParseForm()` on a body with
+  `Content-Type: application/x-www-form-urlencoded; charset=UTF-8` and
+  confirmed both posted fields parsed successfully.
 - `./scripts/test-browser.sh`: the real, non-mocked `TestBrowser*` suite in
   `controllers` passes against a fresh `corepack yarn build`.
 - `scripts/test-container-api-session-auth.sh`: the PR #62/#63 real-container
