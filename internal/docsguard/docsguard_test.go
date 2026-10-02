@@ -157,6 +157,18 @@ func TestScanTextUndeprecatedParameterMention(t *testing.T) {
 		"Authentication can use a Bearer header or an api_key parameter.",
 		"| Auth | api_key |",
 		"Clients may authenticate with Bearer or an API_KEY parameter.",
+		// Ordinary recommendation prose: a verb ("use"/"via"/"with"/
+		// "accept"/"authenticate") governing api_key as a live
+		// authentication option, with a companion anchor word, and no
+		// deprecation context. Query and form variants, several casings.
+		"Use the api_key query parameter for authentication.",
+		"Use the API_KEY query parameter for authentication.",
+		"You can authenticate via the api_key parameter.",
+		"Clients authenticate using the api_key query parameter.",
+		"Requests accept the api_key form parameter.",
+		"Authenticate with the Api_Key header.",
+		"Send requests using the api_key form field to authenticate.",
+		"This endpoint accepts the api_key credential in the query string.",
 	}
 	for _, line := range positive {
 		t.Run(line, func(t *testing.T) {
@@ -182,11 +194,20 @@ func TestScanTextUndeprecatedParameterMention(t *testing.T) {
 		// query api_key parameter", not "or an api_key parameter" -- must
 		// stay allowed even though it is not itself a deprecation sentence.
 		"covering, as positive cases: a query `api_key` parameter, curl -d",
+		"Fixtures include a query `api_key` parameter and a form `api_key` value for the credential-syntax check.",
 		// A table row that does not mention api_key at all.
 		"| Authentication | session cookie |",
 		// Internal/DB-schema prose using the identifier, not describing a
 		// client-facing transport option.
 		"SQLite stores a nullable legacy `api_key`, a raw BLOB verifier.",
+		"The migration script reads the api_key column from the legacy table.",
+		// Historical statements: describe past/no-longer-current behaviour,
+		// already carrying deprecation-style context, not a recommendation.
+		"Earlier releases let clients authenticate via the api_key parameter before this deprecation.",
+		"This release deprecates using the api_key query parameter in favor of Bearer.",
+		// Migration/deprecation description naming the recommendation verbs
+		// only to contrast them with the canonical replacement.
+		"Replace any client that authenticates with the api_key parameter; migrate it to Bearer instead.",
 	}
 	for _, line := range negative {
 		t.Run(line, func(t *testing.T) {

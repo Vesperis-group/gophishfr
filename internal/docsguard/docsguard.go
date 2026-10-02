@@ -2,8 +2,11 @@
 // first-party Markdown documentation. It backs
 // scripts/verify-docs-canonical-examples.sh and the "docs-guard" CI job: both
 // exist so a future documentation change cannot silently reintroduce a
-// `?api_key=`/form `api_key` example or a raw (non-scheme) Authorization
-// header example as if it were a canonical, recommended transport.
+// `?api_key=`/form `api_key` example, a raw (non-scheme) Authorization
+// header example, or ordinary prose recommending a deprecated transport
+// (a table row, an "or an api_key" alternative, or a sentence like "use the
+// api_key query parameter") as if it were a canonical, recommended
+// transport.
 //
 // This package intentionally does not parse Markdown. It scans plain text
 // line by line for the literal substrings that would make an example
@@ -51,14 +54,16 @@ const (
 	// matched case-insensitively, per RFC 7235, and are not flagged.
 	KindRawAuthorization Kind = "raw_authorization"
 
-	// KindUndeprecatedParameterMention covers a Markdown table row or a
-	// "presented as an alternative" prose sentence that lists `api_key` as
-	// an ordinary, currently supported authentication option with no
-	// deprecation context on the same line. Unlike KindParameterCredential,
-	// this has no `=` sign and would never authenticate anything -- it is a
-	// documentation-accuracy check, not a credential-syntax check: it
-	// exists because a contract table can quietly fall out of sync with the
-	// deprecation even when no example in it is directly copy-pasteable.
+	// KindUndeprecatedParameterMention covers a Markdown table row, a
+	// "presented as an alternative" sentence, or ordinary recommendation
+	// prose (e.g. "use the api_key query parameter", "authenticate via
+	// api_key") that presents `api_key` as an ordinary, currently supported
+	// authentication option with no deprecation context on the same line.
+	// Unlike KindParameterCredential, this has no `=` sign and would never
+	// authenticate anything -- it is a documentation-accuracy check, not a
+	// credential-syntax check: it exists because a contract table or a
+	// recommendation sentence can quietly fall out of sync with the
+	// deprecation even when no example near it is directly copy-pasteable.
 	KindUndeprecatedParameterMention Kind = "undeprecated_parameter_mention"
 )
 
@@ -80,6 +85,27 @@ var tableRowPattern = regexp.MustCompile(`^\s*\|`)
 // "... or a api_key value". This is the exact phrasing of the original bug
 // in docs/GROUP_IMPORT_LIMITS.md.
 var offeredAsAlternativePattern = regexp.MustCompile("(?i)\\bor\\s+an?\\s+`?api_key`?")
+
+// strongRecommendationPattern matches the word "authenticate" (and its
+// inflections: authenticates, authenticated, authenticating,
+// authentication) anywhere on the line. Paired with an `api_key` mention
+// and no deprecation context, this word alone is specific enough to signal
+// a recommendation ("authenticate via api_key", "authenticate with the
+// api_key parameter") without needing a separate anchor word.
+var strongRecommendationPattern = regexp.MustCompile(`(?i)authenticat\w*`)
+
+// weakRecommendationVerbPattern matches common, much more generic verbs
+// that only signal a recommendation when they also co-occur with an
+// authentication-flavored anchor word (recommendationAnchorPattern) on the
+// same line -- otherwise "with", "via", and "use" are far too common in
+// ordinary prose (including this package's own documentation) to use alone.
+var weakRecommendationVerbPattern = regexp.MustCompile(`(?i)\b(use\w*|via|with|accept\w*)\b`)
+
+// recommendationAnchorPattern matches a word that anchors a weak
+// recommendation verb to the authentication-transport meaning of `api_key`,
+// as opposed to an incidental mention (a curl flag, a value, a variable
+// name) that happens to share the line with one of those common verbs.
+var recommendationAnchorPattern = regexp.MustCompile(`(?i)\b(parameter|param|query|field|header|credential)\b`)
 
 // candidateKeyPattern finds every "key=" token in a line, in either a URL
 // query string or a curl form body. The key is whatever Go's net/url would
@@ -224,10 +250,12 @@ func firstToken(s string) string {
 
 // undeprecatedParameterMention reports whether the line presents `api_key`
 // as an ordinary, currently supported authentication option -- a Markdown
-// table row, or prose offering it as an alternative to Bearer -- with no
-// deprecation context (a removal version, "deprecated", "legacy", "sunset",
-// or "migrat...") on that same line. It is case-insensitive on "api_key"
-// itself to catch a capitalized table header or sentence start.
+// table row, prose offering it as an alternative to Bearer, or ordinary
+// recommendation prose (e.g. "use the api_key query parameter",
+// "authenticate via api_key") -- with no deprecation context (a removal
+// version, "deprecated", "legacy", "sunset", or "migrat...") on that same
+// line. It is case-insensitive on "api_key" itself to catch a capitalized
+// table header or sentence start.
 func undeprecatedParameterMention(line string) bool {
 	if !strings.Contains(strings.ToLower(line), "api_key") {
 		return false
@@ -235,5 +263,11 @@ func undeprecatedParameterMention(line string) bool {
 	if deprecationContextPattern.MatchString(line) {
 		return false
 	}
-	return tableRowPattern.MatchString(line) || offeredAsAlternativePattern.MatchString(line)
+	if tableRowPattern.MatchString(line) || offeredAsAlternativePattern.MatchString(line) {
+		return true
+	}
+	if strongRecommendationPattern.MatchString(line) {
+		return true
+	}
+	return weakRecommendationVerbPattern.MatchString(line) && recommendationAnchorPattern.MatchString(line)
 }
