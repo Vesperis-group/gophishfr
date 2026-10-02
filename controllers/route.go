@@ -91,6 +91,11 @@ func NewAdminServer(config config.AdminServer, options ...AdminServerOption) *Ad
 	}
 	resolver := clientip.NewResolver(config.TrustedProxies)
 	defaultLimiter := ratelimit.NewPostLimiter(ratelimit.WithClientIP(resolver.ClientIP))
+	// Install the explicit-API-credential failure-budget rate limiter with
+	// the same trusted-proxy-aware resolver used everywhere else in this
+	// request chain -- the one and only source of truth for client IP. See
+	// docs/API_AUTH_RATE_LIMITING.md.
+	mid.SetAPIAuthRateLimiter(ratelimit.NewFailureLimiter(ratelimit.WithFailureClientIP(resolver.ClientIP)))
 	as := &AdminServer{
 		server:   defaultServer,
 		limiter:  defaultLimiter,

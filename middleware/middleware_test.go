@@ -10,6 +10,7 @@ import (
 	"github.com/Vesperis-group/gophishfr/config"
 	ctx "github.com/Vesperis-group/gophishfr/context"
 	"github.com/Vesperis-group/gophishfr/internal/apikey"
+	"github.com/Vesperis-group/gophishfr/middleware/ratelimit"
 	"github.com/Vesperis-group/gophishfr/models"
 )
 
@@ -25,6 +26,12 @@ func setupTest(t *testing.T) *testContext {
 	t.Setenv(models.InitialAdminPassword, "synthetic-middleware-test-password")
 	t.Setenv(models.InitialAdminApiToken, "synthetic-middleware-api-token")
 	installTestAPIKeyVerifier(t)
+	// Every test gets its own fresh explicit-API-credential failure budget:
+	// without this, failures recorded by an earlier test function in this
+	// same test binary (sharing the package-level default limiter) could
+	// carry over and make an unrelated later test's expected 401 become an
+	// unexpected 429.
+	SetAPIAuthRateLimiter(ratelimit.NewFailureLimiter())
 	conf := &config.Config{
 		DBName:         "sqlite3",
 		DBPath:         ":memory:",

@@ -1,0 +1,26 @@
+{
+  "goal_id": "rate-limit-api-auth",
+  "status": "completed",
+  "iteration": 1,
+  "builder_model": "Claude:Sonnet-5",
+  "inspector_model": "Claude:Haiku-4.5",
+  "initial_sha": "00305ef0dc60b705c32b5d4e4d6b21b0c7d43196",
+  "created_at": "2026-10-02T19:10:00+02:00",
+  "history": [
+    {
+      "iteration": 1,
+      "role": "builder",
+      "model": "Claude:Sonnet-5",
+      "commit_sha": "4a00cb85b41f5dee98e6888155303ffc28cdf5c8",
+      "summary": "Added a failure-budget rate limiter (middleware/ratelimit.FailureLimiter: burst 20, refill 20/min, IP-only bucket key via middleware/clientip, pre-check-before-HMAC/DB ordering, 429 JSON + Retry-After) protecting RequireAPIKey's explicit-credential branch uniformly for Bearer/raw/query/form. Only models.ErrInvalidAPICredential counts as a client-attributable failure; verifier-unavailable/ambiguous-candidate/raw-DB errors, RBAC/view-only denials, and all successes never touch the limiter. Session-only requests have zero limiter interaction. Boundary convention: the failure that exhausts the budget still gets its historical status; the next request is blocked. Added docs/API_AUTH_RATE_LIMITING.md and unit+integration test coverage (including -race concurrency and XFF-bypass proofs). go.mod/go.sum/package.json/yarn.lock untouched."
+    },
+    {
+      "iteration": 1,
+      "role": "inspector",
+      "model": "Claude:Haiku-4.5",
+      "commit_sha": "pending",
+      "verdict": "PASS",
+      "summary": "Code implementation is technically sound and comprehensive (correct semantics, proper pre-check ordering, exclusive clientip use, 13+ integrated tests covering all cases, accurate documentation). All 20 acceptance criteria are PASS. Gate re-verification via native WSL script invocation confirms all Builder-related gates pass cleanly (go build/vet/test/test-race/cross-compile, gofmt, golangci-lint, dependency diff, gitleaks). Pre-existing frontend gate failure is unrelated to the API rate-limiting changes (verified present on base commit). Standard library vulnerabilities (Go 1.26.5) are pre-existing, not introduced. Final verdict: PASS."
+    }
+  ]
+}

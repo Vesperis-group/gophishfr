@@ -72,6 +72,14 @@ are non-ambient authority. Authentication and RBAC still validate them, so an
 empty, invalid, or conflicting attempt cannot gain access. Existing CORS,
 OPTIONS, status, response, and unsafe-method compatibility remains unchanged.
 
+Every explicit-credential authentication attempt (regardless of transport) is
+also subject to a per-client-IP failure-budget rate limiter: repeated
+client-attributable authentication failures from one IP eventually receive a
+generic `429` response, while successful authentications, authorization
+(RBAC) failures, and server-side failures never count against it. See
+[API-key authentication rate limiting](API_AUTH_RATE_LIMITING.md) for the
+exact semantics, parameters, and caveats.
+
 ## Verifier storage and reveal-once management
 
 Runtime authentication uses only indexed HMAC verifiers from the dedicated API

@@ -190,12 +190,36 @@ func RequireAPIKey(handler http.Handler) http.Handler {
 			return
 		}
 
+		// Every explicit-credential request (Bearer, raw Authorization, query,
+		// or form -- uniformly, with no per-transport branching) is subject to
+		// the failure-budget rate limiter before anything else is done with
+		// it. If the resolved client IP is already blocked by its own prior
+		// failures, HMAC candidate computation and the database lookup are
+		// never performed, regardless of whether this particular request's
+		// credential would otherwise have been malformed, ambiguous, empty,
+		// unknown, or valid: the response must never become an oracle for any
+		// of that. See docs/API_AUTH_RATE_LIMITING.md.
+		limiter := currentAPIAuthRateLimiter()
+		clientIP := limiter.ResolveClientIP(r)
+		if limiter.Blocked(clientIP) {
+			respondAPIAuthRateLimited(w, limiter.RetryAfterSeconds(clientIP))
+			return
+		}
+
 		if credential.malformed || credential.ambiguous || credential.value == "" {
+			// A malformed, ambiguous, or empty explicit credential is one
+			// client-attributable authentication failure for this request,
+			// regardless of how many conflicting values or transports were
+			// involved.
+			limiter.RecordFailure(clientIP)
 			JSONError(w, http.StatusUnauthorized, "Invalid API Key")
 			return
 		}
-		u, err := models.GetUserByAPIKey(credential.value)
+		u, err := apiKeyLookup(credential.value)
 		if err != nil {
+			if isClientAttributableAPIAuthFailure(err) {
+				limiter.RecordFailure(clientIP)
+			}
 			JSONError(w, http.StatusUnauthorized, "Invalid API Key")
 			return
 		}
