@@ -314,6 +314,16 @@ func TestScanTextContextIsSentenceScopedNotParagraphWide(t *testing.T) {
 		// Same pairing, wrapped across physical lines by ordinary
 		// Markdown line-wrapping.
 		"The old session-based login flow was\ndeprecated last year for unrelated reasons.\nUse the api_key\nquery parameter for authentication.\n",
+		// Corrected from an earlier iteration: a "but" (or other bounded
+		// adversative connector) between a deprecation-context word and a
+		// recommendation, even one naming the very same parameter, puts
+		// them in different, contrasting clauses -- docsguard does not
+		// resolve coreference, only clause membership, so repeating
+		// "api_key" on the far side of "but" does not make the earlier
+		// clause's "deprecated" qualify it (see
+		// TestScanTextDeprecationContextScopedToClause for the genuine
+		// same-clause contrast).
+		"The api_key query parameter is deprecated, but some old docs still say to use the api_key query parameter for authentication.",
 	}
 	for _, text := range positive {
 		t.Run(text, func(t *testing.T) {
@@ -326,15 +336,70 @@ func TestScanTextContextIsSentenceScopedNotParagraphWide(t *testing.T) {
 
 	negative := []string{
 		// For contrast: the deprecation context and the recommendation are
-		// in the same sentence (one comma-separated clause, not a separate
-		// sentence), so it correctly still suppresses.
-		"The api_key query parameter is deprecated, but some old docs still say to use the api_key query parameter for authentication.",
+		// in the same clause (no adversative connector between them), so
+		// it correctly still suppresses.
+		"The deprecated api_key query parameter can still be used for authentication until 0.13.0.",
 	}
 	for _, text := range negative {
 		t.Run(text, func(t *testing.T) {
 			violations := mustScan(t, text)
 			if containsKind(violations, KindUndeprecatedParameterMention) {
 				t.Fatalf("unexpected violation when context is about the same subject %q: %v", text, violations)
+			}
+		})
+	}
+}
+
+// TestScanTextDeprecationContextScopedToClause proves an affirmative
+// deprecation-context word in one clause of a sentence cannot suppress a
+// live recommendation in a different clause of the same sentence, when the
+// two clauses are separated by a bounded adversative connector ("but",
+// "however", ...). Unlike plain sentence-scoping (iteration 8), this is
+// about *clause* membership within a single sentence: "X is deprecated, but
+// use api_key" and "Use api_key, but X is deprecated" both describe X, an
+// unrelated subject, and api_key's own recommendation remains unqualified.
+func TestScanTextDeprecationContextScopedToClause(t *testing.T) {
+	positive := []string{
+		// The review's exact reported bug: the deprecated subject (the
+		// session login) precedes the "but", the live api_key
+		// recommendation follows it.
+		"The old session login is deprecated, but use the api_key query parameter.",
+		"The session cookie flow is deprecated; however, use the api_key form field for authentication.",
+		// The unrelated deprecation notice instead *follows* the
+		// recommendation, across the same kind of connector.
+		"Use the api_key query parameter for authentication, but the session cookie approach is deprecated.",
+		"Authenticate via the api_key parameter, though the legacy admin token scheme no longer works.",
+		// Same pairing, wrapped across physical lines.
+		"The old session\nlogin is deprecated,\nbut use the api_key\nquery parameter.\n",
+		"Use the api_key\nquery parameter for\nauthentication, but the\nsession cookie approach\nis deprecated.\n",
+	}
+	for _, text := range positive {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if !containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("expected a violation for an unrelated-clause deprecation notice %q, got %v", text, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// Genuine same-clause deprecation notices -- no adversative
+		// connector at all between the context and the recommendation --
+		// must continue to suppress, wrapped or not. ("so" is a plain
+		// connector, not a bounded adversative one, and does not block.)
+		"The api_key query parameter is deprecated, so avoid using the api_key query parameter in new integrations.",
+		"The api_key query parameter is deprecated,\nso avoid using the api_key\nquery parameter in new\nintegrations.\n",
+		// A semicolon or dash between the recommendation and its own
+		// deprecation notice is an elaboration, not a contrast, and must
+		// continue to suppress even though it is also a kind of clause
+		// boundary.
+		"Do not use the api_key query parameter; it is deprecated.",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("unexpected violation for a genuine same-clause deprecation notice %q: %v", text, violations)
 			}
 		})
 	}

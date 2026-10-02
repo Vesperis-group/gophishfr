@@ -584,6 +584,70 @@ unchanged. A full run of `scripts/verify-docs-canonical-examples.sh`
 against every tracked Markdown file found 0 violations; no doc wording
 changed.
 
+## Iteration 10: independent review finding and fix
+
+[`review-feedback-9.md`](../.goals/deprecate-api-key-transports/review-feedback-9.md)
+returned a FAIL on iteration 9. Security review passed; code review found a
+remaining clause-scoping gap:
+
+```text
+The old session login is deprecated, but use the api_key query parameter.
+```
+
+### Finding — a deprecation keyword in an unrelated *clause* of the same sentence still suppressed a live recommendation
+
+Iteration 8's sentence-scoping stopped an unrelated deprecation mention in
+a *different sentence* from suppressing a recommendation, but it did
+nothing for an unrelated mention in a different *clause* of the *same*
+sentence. "The old session login is deprecated, but use the `api_key`
+query parameter." is one sentence (a single trailing period), so the
+`deprecated` match was still read as qualifying the `api_key`
+recommendation that follows "but" — even though "but" signals these are
+two independent, contrasting claims about two different subjects.
+
+Fixed by adding `adversativeBoundaryPattern` — a bounded adversative
+connector ("but", "however", "yet", "though", "although", "nevertheless",
+"nonetheless", "whereas") — and changing `hasAffirmativeDeprecationContext`
+to take the recommendation match's own position and check, for each
+candidate context match, whether one of these connectors sits between the
+two, in *either* direction. A connector in between means the context
+describes a different, contrasting clause and does not qualify the
+recommendation. A semicolon or em/en dash was deliberately **not** added to
+this pattern: every existing fixture using one ("Do not use the `api_key`
+query parameter; it is deprecated.") is an *elaboration* of the very thing
+just recommended, not a contrast, and must continue to suppress — adding
+semicolons/dashes to the adversative set would have broken that
+already-required behavior. `hasAffirmativeDeprecationContext`'s existing
+per-line (table row) and per-sentence (recommendation prose) callers were
+updated to pass the recommendation's position (or `len(line)` for table
+rows, preserving their prior whole-row behavior unchanged).
+
+One existing fixture from iteration 8 needed correcting as part of this
+fix: "The `api_key` query parameter is deprecated, but some old docs still
+say to use the `api_key` query parameter for authentication." was
+previously asserted as *not* a violation, reasoning that the context was
+"about the same subject". Under the corrected, clause-scoped semantics
+this reasoning does not hold — docsguard does not resolve coreference, it
+only reads clause membership, and a "but" still separates the deprecation
+notice from the recommendation regardless of the parameter name being
+repeated on both sides. This fixture now correctly asserts a violation,
+with a comment explaining why, and a new fixture
+(`TestScanTextContextIsSentenceScopedNotParagraphWide`'s replacement
+negative case) demonstrates the genuine same-clause contrast instead.
+
+New fixture: `TestScanTextDeprecationContextScopedToClause` — the review's
+exact reported sentence, a semicolon/"however" variant, two "following
+clause" variants (the unrelated deprecation notice comes *after* the
+recommendation instead of before), and wrapped forms, all violate; a
+genuine same-clause notice connected by a non-adversative word ("so") and
+the pre-existing semicolon-elaboration warning continue to suppress. All
+prior fixtures — dotted-version, direct-negation, sentence-scoping,
+proximity, encoded-name, recommend-verb, scanner fail-closed, and
+diagnostic-redaction — pass unchanged.
+
+A full run of `scripts/verify-docs-canonical-examples.sh` against every
+tracked Markdown file found 0 violations; no doc wording changed.
+
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |
@@ -751,6 +815,20 @@ changed.
 - `./scripts/verify-docs-canonical-examples.sh` re-run against every
   tracked Markdown file after the iteration-9 fixes: 0 violations across
   28 shipped Markdown files, no doc wording changed.
+- `TestScanTextDeprecationContextScopedToClause` (iteration 10, new): the
+  review's exact reported sentence, a semicolon/"however" variant, and two
+  "following clause" variants (the unrelated notice follows the
+  recommendation instead of preceding it), plain and wrapped, all violate;
+  a genuine same-clause notice joined by a non-adversative word ("so") and
+  the pre-existing semicolon-elaboration warning continue to suppress. The
+  corrected iteration-8 fixture (a "but" separating a deprecation notice
+  from a recommendation naming the same parameter) now asserts a violation,
+  with a new, genuinely same-clause fixture demonstrating the contrast. All
+  prior `internal/docsguard` fixtures, including every iteration 5–9
+  fixture, pass unchanged under the clause-scoped context association.
+- `./scripts/verify-docs-canonical-examples.sh` re-run against every
+  tracked Markdown file after the iteration-10 fix: 0 violations across 28
+  shipped Markdown files, no doc wording changed.
 
 ## Why a bounded deprecation window instead of immediate removal
 

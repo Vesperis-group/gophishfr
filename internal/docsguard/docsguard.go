@@ -138,20 +138,39 @@ var negationBoundaryPattern = regexp.MustCompile(`[.!?;—–]|--`)
 // not an unrelated negation earlier in the same clause -- suppresses it.
 const negationProximityWords = 3
 
-// hasAffirmativeDeprecationContext reports whether block contains at least
-// one deprecation-context word or phrase that is not directly negated. It is
-// used both per-line (for table rows) and per-sentence (for recommendation
-// prose, scoped via enclosingSentence), so a negated mention, or one that
-// belongs to an unrelated clause, cannot accidentally suppress a genuine
-// violation.
-func hasAffirmativeDeprecationContext(block string) bool {
-	for _, match := range deprecationContextPattern.FindAllStringIndex(block, -1) {
+// adversativeBoundaryPattern matches a bounded adversative/contrastive
+// connector -- "but", "however", "yet", "though", "although", "nevertheless",
+// "nonetheless", "whereas" -- the specific word class that signals two
+// clauses make independent, often opposing, claims (unlike a semicolon or
+// an em/en dash, which this package also recognizes as a clause separator
+// but which, in every example seen so far, introduces an *elaboration* of
+// the very same claim -- "Do not use the api_key query parameter; it is
+// deprecated" -- and must continue to count as affirmative context; see
+// hasAffirmativeDeprecationContext). A deprecation-context word on one side
+// of one of these connectors must not be read as qualifying a recommendation
+// on the other side, regardless of which comes first: "X is deprecated, but
+// use api_key" and "Use api_key, but X is deprecated" both describe X, not
+// api_key's status, when X is a different subject.
+var adversativeBoundaryPattern = regexp.MustCompile(`(?i)\b(?:but|however|yet|though|although|nevertheless|nonetheless|whereas)\b`)
+
+// hasAffirmativeDeprecationContext reports whether clauseText contains at
+// least one deprecation-context word or phrase that is both (a) not
+// directly negated and (b) not separated from recommendationPos -- the byte
+// offset, within clauseText, of the recommendation match being evaluated --
+// by an adversativeBoundaryPattern connector. It is used both per-line (for
+// table rows, with recommendationPos set to len(line) so any context in the
+// row counts as before) and per-sentence (for recommendation prose, scoped
+// via sentenceBounds), so a negated mention, or one that belongs to a
+// different, adversatively-contrasted clause, cannot accidentally suppress a
+// genuine violation.
+func hasAffirmativeDeprecationContext(clauseText string, recommendationPos int) bool {
+	for _, match := range deprecationContextPattern.FindAllStringIndex(clauseText, -1) {
 		start := match[0]
 		windowStart := start - 40
 		if windowStart < 0 {
 			windowStart = 0
 		}
-		preceding := block[windowStart:start]
+		preceding := clauseText[windowStart:start]
 		if locs := negationBoundaryPattern.FindAllStringIndex(preceding, -1); len(locs) > 0 {
 			last := locs[len(locs)-1]
 			preceding = preceding[last[1]:]
@@ -160,15 +179,27 @@ func hasAffirmativeDeprecationContext(block string) bool {
 		if len(words) > negationProximityWords {
 			words = words[len(words)-negationProximityWords:]
 		}
-		if !negationWordPattern.MatchString(strings.Join(words, " ")) {
-			return true
+		if negationWordPattern.MatchString(strings.Join(words, " ")) {
+			continue
 		}
+
+		var between string
+		if start <= recommendationPos {
+			between = clauseText[start:recommendationPos]
+		} else {
+			between = clauseText[recommendationPos:start]
+		}
+		if adversativeBoundaryPattern.MatchString(between) {
+			continue
+		}
+
+		return true
 	}
 	return false
 }
 
 // sentenceTerminators are the characters that end an English sentence, used
-// by enclosingSentence to scope deprecation-context association to "the
+// by sentenceBounds to scope deprecation-context association to "the
 // same sentence as a recommendation": an unrelated deprecation mention about
 // a different subject, in an earlier or later sentence of the same
 // paragraph, must not be able to suppress a live recommendation elsewhere in
@@ -224,20 +255,21 @@ func prevSentenceTerminator(text string, fromIdx int) int {
 	return -1
 }
 
-// enclosingSentence returns the sentence of text containing byte offset pos,
-// bounded by the nearest real sentence terminator on each side (or the
-// start/end of text if none is found). A '.' inside a dotted version number
-// such as "0.13.0" is never treated as that boundary.
-func enclosingSentence(text string, pos int) string {
-	start := 0
+// sentenceBounds returns the [start, end) byte offsets of the sentence in
+// text containing offset pos, bounded by the nearest real sentence
+// terminator on each side (or the start/end of text if none is found). A
+// '.' inside a dotted version number such as "0.13.0" is never treated as
+// that boundary.
+func sentenceBounds(text string, pos int) (start, end int) {
+	start = 0
 	if idx := prevSentenceTerminator(text, pos-1); idx != -1 {
 		start = idx + 1
 	}
-	end := len(text)
+	end = len(text)
 	if idx := nextSentenceTerminator(text, pos); idx != -1 {
 		end = idx + 1
 	}
-	return text[start:end]
+	return start, end
 }
 
 // tableRowPattern matches a Markdown table row: a line whose first
@@ -514,6 +546,10 @@ func firstToken(s string) string {
 // table row presenting `api_key` with no affirmative deprecation context.
 // Table rows stay a per-line check (unlike recommendationMention) because a
 // Markdown table row is always exactly one physical line by construction.
+// recommendationPos is set to len(line): the row itself is the thing being
+// judged, not a verb at a particular position, so any affirmative context
+// anywhere in the row counts (subject only to the usual negation and
+// adversative-boundary rules).
 func tableRowMention(line string) bool {
 	if !strings.Contains(strings.ToLower(line), "api_key") {
 		return false
@@ -521,7 +557,7 @@ func tableRowMention(line string) bool {
 	if !tableRowPattern.MatchString(line) {
 		return false
 	}
-	return !hasAffirmativeDeprecationContext(line)
+	return !hasAffirmativeDeprecationContext(line, len(line))
 }
 
 // recommendationMention reports whether normalized paragraph text presents
@@ -529,34 +565,44 @@ func tableRowMention(line string) bool {
 // an api_key parameter", "use the api_key query parameter", "authenticate
 // via api_key" -- with no affirmative deprecation context in the same
 // sentence as that particular mention. Each candidate recommendation match
-// is judged against only its own enclosing sentence (see enclosingSentence),
+// is judged against only its own enclosing sentence (see sentenceBounds),
 // not the whole paragraph: an unrelated deprecation notice about a different
 // subject, in an earlier or later sentence of the same paragraph, must not
-// suppress a live recommendation elsewhere in it. Operating paragraph-wide
-// to *find* candidate matches (rather than one physical line at a time) is
-// what still catches a recommendation wrapped across several physical lines
-// by ordinary Markdown line-wrapping.
+// suppress a live recommendation elsewhere in it. Within that sentence, a
+// context word separated from the match by an adversativeBoundaryPattern
+// connector ("but", "however", ...) -- in either direction -- is likewise
+// excluded, since it describes a contrasting clause's claim, not this one's
+// (see hasAffirmativeDeprecationContext). Operating paragraph-wide to *find*
+// candidate matches (rather than one physical line at a time) is what still
+// catches a recommendation wrapped across several physical lines by
+// ordinary Markdown line-wrapping.
 func recommendationMention(paragraphText string) bool {
 	if !strings.Contains(strings.ToLower(paragraphText), "api_key") {
 		return false
 	}
 
+	checkMatch := func(loc []int, requireAnchor bool) bool {
+		sentenceStart, sentenceEnd := sentenceBounds(paragraphText, loc[0])
+		sentence := paragraphText[sentenceStart:sentenceEnd]
+		if requireAnchor && !recommendationAnchorPattern.MatchString(sentence) {
+			return false
+		}
+		recommendationPos := loc[1] - sentenceStart
+		return !hasAffirmativeDeprecationContext(sentence, recommendationPos)
+	}
+
 	for _, loc := range offeredAsAlternativePattern.FindAllStringIndex(paragraphText, -1) {
-		if !hasAffirmativeDeprecationContext(enclosingSentence(paragraphText, loc[0])) {
+		if checkMatch(loc, false) {
 			return true
 		}
 	}
 	for _, loc := range strongRecommendationPattern.FindAllStringIndex(paragraphText, -1) {
-		if !hasAffirmativeDeprecationContext(enclosingSentence(paragraphText, loc[0])) {
+		if checkMatch(loc, false) {
 			return true
 		}
 	}
 	for _, loc := range weakRecommendationVerbPattern.FindAllStringIndex(paragraphText, -1) {
-		sentence := enclosingSentence(paragraphText, loc[0])
-		if !recommendationAnchorPattern.MatchString(sentence) {
-			continue
-		}
-		if !hasAffirmativeDeprecationContext(sentence) {
+		if checkMatch(loc, true) {
 			return true
 		}
 	}
