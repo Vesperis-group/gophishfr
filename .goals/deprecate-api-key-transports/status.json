@@ -59,7 +59,7 @@
                         "iteration":  2,
                         "role":  "builder",
                         "model":  "Claude:Sonnet-5",
-                        "commit_sha":  "PENDING",
+                        "commit_sha":  "695fc690d2c1baf116f9595577f2a86fbaefaa68",
                         "commit_title":  "test(api): [B] enforce deprecation guidance",
                         "summary":  "Fixed all three iteration-1 review findings, docs/test/CI-only: (1) replaced the non-executable form migration example with real query/form/raw/Bearer examples against POST /api/campaigns/{id}/complete (exact route, method, no trailing slash) and added controllers/api/campaign_transport_deprecation_test.go, an executable regression dispatching every transport through the real API router and asserting each one authenticates and actually completes its campaign, plus a trailing-slash negative case; (2) replaced the grep-based docs gate with internal/docsguard, a stdlib-only Go package with fixture-based positive/negative table tests covering every supported deprecated syntax (query api_key, curl -d/--data/--data-raw/--data-urlencode/-F/--form, standalone api_key=) and every legitimate Authorization scheme (Bearer/Basic/Digest/Negotiate/NTLM) case-insensitively, wired through a new cmd/docsguard CLI and scripts/verify-docs-canonical-examples.sh; (3) added a blocking docs-guard job to .github/workflows/ci.yml, wired into ci-success, reusing already-pinned action SHAs and the repository's default minimal permissions. No runtime auth/middleware/header/status/warning/version/dependency change. VERSION unchanged (0.12.1).",
                         "validation":  {
@@ -81,6 +81,15 @@
                                            "git_diff_check":  "clean",
                                            "lockfiles_unchanged":  true
                                        }
+                    },
+                    {
+                        "iteration":  2,
+                        "feedback_file":  ".goals/deprecate-api-key-transports/inspector-feedback-2.md",
+                        "verdict":  "PASS",
+                        "model":  "Claude:Haiku-4.5",
+                        "role":  "inspector",
+                        "summary":  "All three iteration-1 review findings successfully fixed: form example now executable against real POST /api/campaigns/{id}/complete route with real campaign fixture and verification of business operation completion; docs gate upgraded to stdlib-only Go package with comprehensive fixture tests covering all deprecated syntaxes and authorization schemes; CI integration complete with blocking docs-guard job in ci-success. All 49 original acceptance criteria verified met. Zero runtime auth/middleware/dependency changes. Suppressions narrow and justified.",
+                        "completed_at":  "2026-10-01T21:08:45+02:00"
                     }
                 ]
 }
