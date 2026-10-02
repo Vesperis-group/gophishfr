@@ -324,7 +324,7 @@
                                         "iteration":  8,
                                         "role":  "builder",
                                         "model":  "Claude:Sonnet-5",
-                                        "commit_sha":  "PENDING",
+                                        "commit_sha":  "841b0fe938e766eeab90a2ce46ef752c9d915642",
                                         "commit_title":  "fix(docs): [B] bind deprecation context to transport",
                                         "summary":  "Fixed both iteration-7 review findings in internal/docsguard, test/docs-only. (1) Sentence-scoped context: added enclosingSentence (bounds a block of text to the sentence containing a given match, split on .!?) and changed recommendationMention to check affirmative deprecation context against each candidate recommendation match's own enclosing sentence, instead of the whole paragraph once. An unrelated deprecation-context word about a different subject, in an earlier or later sentence of the same paragraph, no longer suppresses a live recommendation elsewhere in it. (2) Directly-governed negation: tightened hasAffirmativeDeprecationContext's negation association to require the negation word/phrase within negationProximityWords (3) words of the deprecation-context word it must directly govern, and added negationBoundaryPattern (semicolon, em/en dash, or double hyphen) as a hard stop a negation word cannot be read across. 'Do not use the api_key parameter; it is deprecated' no longer misreads the leading not (which governs use) as negating deprecated, since the semicolon separates them; 'is not actually deprecated' still correctly negates, since not directly and closely precedes deprecated with no boundary between them. Added TestScanTextContextIsSentenceScopedNotParagraphWide (unrelated-subject context in a different sentence does not suppress, including a wrapped variant; genuine same-sentence context still does) and TestScanTextNegationMustDirectlyGovernDeprecationWord (several do-not-use-it-is-deprecated phrasings, including a -- dash variant and wrapped forms, do not violate; a negation that directly governs deprecated itself still violates). All prior fixtures, including every iteration 5-7 fixture, pass unchanged. Searched all shipped Markdown with the extended gate: 0 violations across 28 files, no doc wording changed. All prior rules (encoded-parameter, Bearer-casing, scanner-error fail-closed, table, alternative-wording, recommendation-prose, redacted diagnostics) preserved and still fully tested. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
                                         "validation":  {
@@ -347,6 +347,15 @@
                                            "git_diff_check":  "clean",
                                            "lockfiles_unchanged":  true
                                        }
+                    },
+                    {
+                                        "iteration":  8,
+                                        "role":  "inspector",
+                                        "model":  "Claude:Haiku-4.5",
+                                        "verdict":  "PASS",
+                                        "feedback_file":  ".goals/deprecate-api-key-transports/inspector-feedback-8.md",
+                                        "summary":  "Both iteration-7 code-review findings fixed and verified: (1) Sentence-scoped context — enclosingSentence() bounds deprecation-context checks to the sentence containing each candidate recommendation match (split on .!?), not the whole paragraph. An unrelated deprecation keyword in a different sentence no longer suppresses a live recommendation elsewhere in the same paragraph. (2) Direct-negation logic — hasAffirmativeDeprecationContext() tightened to check negation words only within negationProximityWords (3) words before the deprecation-context keyword, on the near side of negationBoundaryPattern ([.!?;—–]|--). A negation governing an earlier verb or crossing a boundary does not suppress the deprecation. 'Do not use ... it is deprecated' still correctly identifies as no violation (negation governs use, not deprecated); 'is not deprecated' still violates (negation directly governs deprecated). New fixtures: TestScanTextContextIsSentenceScopedNotParagraphWide (4 cases), TestScanTextNegationMustDirectlyGovernDeprecationWord (7 cases); all 40+ prior fixtures pass unchanged. Docs gate: 0 violations across 28 shipped Markdown files. Full test suite: all packages pass with race detector. No runtime/auth/middleware/version/dependency changes. Ready for release.",
+                                        "completed_at":  "2026-10-02T16:15:00+02:00"
                     }
                 ]
 }
