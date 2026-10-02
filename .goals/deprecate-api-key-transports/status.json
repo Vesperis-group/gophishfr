@@ -498,7 +498,7 @@
             "iteration": 12,
             "role": "builder",
             "model": "Claude:Sonnet-5",
-            "commit_sha": "PENDING",
+            "commit_sha": "d56569d38de0f1850cdb33df2310956ec2acf8d1",
             "commit_title": "fix(docs): [B] harden rendered guidance detection",
             "summary": "Fixed all three final-review findings in internal/docsguard, test/docs-only, surgically and without a general Markdown/NLP parser. (1) Rendered markup split: added safeInlineTagPattern, a short explicit allow-list of safe inline formatting tags (em/i/b/strong/u/s/del/ins/mark/small/sub/sup/span/abbr/code), case-insensitive and attribute-tolerant, stripped before matching; and renderedMarkupSplitPattern, which strips an emphasis/strong/strikethrough delimiter run (*/_, 1-3; ~, 1-2) wrapping exactly one protected punctuation character (_/:/=/&), narrow enough to avoid the ambiguity between a delimiter run and literal wrapped content that a general emphasis parser would need to resolve. (2) Code-aware normalization: added inlineCodeSpanRanges, a small manual scanner (Go's regexp has no backreferences, so 'a closing run of the same length as the opening run' cannot be expressed as one regex) that finds backtick code-span ranges within a line; normalizeRenderedEscapes now normalizes only the text outside those ranges. ScanText now tracks fenced-code-block state across lines (backtick or tilde, any length >=3, with or without an info string) and recognizes indented (>=4 space/tab) lines, scanning both raw -- never normalized -- so literal forbidden examples inside code are still caught while non-rendering escapes/entities there are not. (3) Context bound to transport syntax: added a proximity requirement to hasAffirmativeDeprecationContext -- a deprecation-context word must now be within 6 words of an actual api_key mention in the same clause to count, in addition to the existing negation and adversative-boundary checks, so an unrelated subject's nearby deprecation notice no longer suppresses a live, unqualified api_key recommendation. Added TestScanTextRenderedMarkupSplit (20 cases), TestScanTextCodeAwareNormalization (15 cases), and TestScanTextContextBoundToTransportSyntax (5 cases), covering positive and negative fixtures for every finding including combinations, nesting, case variants, attributes, and malformed-markup negatives. All prior fixtures (iterations 5-11) and the full repository test suite pass unchanged with all three fixes composed together. Searched all shipped Markdown with the extended gate: 0 violations across 28 files, no doc wording changed. The nonconforming historical commit is intentionally untouched in this iteration. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
             "validation": {
@@ -521,6 +521,14 @@
                 "git_diff_check": "clean",
                 "lockfiles_unchanged": true
             }
+        },
+        {
+            "iteration": 12,
+            "role": "inspector",
+            "verdict": "PASS",
+            "feedback_file": "inspector-feedback-12.md",
+            "completed_at": "2026-10-02T12:15:00Z",
+            "summary": "All three MEDIUM findings fully fixed with mathematically sound, narrowly-scoped implementations: (1) Inline markup splitting fixed via safe tag allow-list and single-character delimiter patterns; (2) Code-aware normalization via inline code span scanner and fenced/indented code block state tracking; (3) Deprecation context bound to api_key mentions within 6-word proximity. All 70+ prior fixtures pass unchanged. 40 new fixtures comprehensively cover all cases, combinations, edge cases, negatives. Zero runtime/auth changes. All 23 gates passing. Production ready."
         }
     ]
 }
