@@ -690,9 +690,9 @@
             "model": "Claude:Haiku-4.5",
             "verdict": "PASS",
             "feedback_file": ".goals/deprecate-api-key-transports/inspector-feedback-16.md",
-            "summary": "All four reviewer-identified bypasses fully closed with bounded, deterministic stdlib-only logic. Markdown links and HTML comments normalized before credential matching. &lt;a&gt; tags and &nbsp; entity properly handled. Whole-span emphasis recognized with nesting. Mixed HTML verbatim segments scanned per-segment. Deprecation context bound to exact occurrence. All 49+ acceptance criteria preserved. go.mod/go.sum byte-identical to base. 26 test functions all pass. Docs gate 0 violations. No runtime/auth/version changes.",
+            "summary": "All four reviewer-identified bypasses fully closed with bounded, deterministic stdlib-only logic. Markdown links and HTML comments normalized before credential matching. <a> tags and &nbsp; entity properly handled. Whole-span emphasis recognized with nesting. Mixed HTML verbatim segments scanned per-segment. Deprecation context bound to exact occurrence. All 49+ acceptance criteria preserved. go.mod/go.sum byte-identical to base. 26 test functions all pass. Docs gate 0 violations. No runtime/auth/version changes.",
             "completed_at": "2026-10-02T14:45:00Z",
-            "commit_sha": "pending"
+            "commit_sha": "3402c472afcccda1ca0d78415042d2edf586c27c"
         }
     ]
 }
