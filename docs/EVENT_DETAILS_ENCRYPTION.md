@@ -437,10 +437,14 @@ untouched and intact.
 
 Consistent with the existing SMTP credential encryption precedent, read-back
 byte-exact verification -- not reliance on strict SQL mode -- is the
-enforcement mechanism that catches silent truncation. MySQL-gated tests
-(skipped unless `GOPHISHFR_MYSQL_TEST_DSN` is set, matching the existing
-IMAP/SMTP/webhook test convention) exercise both the default strict session
-and an explicitly disabled non-strict session.
+enforcement mechanism that catches silent truncation.
+`TestMySQLEventDetailsNearLegacyCapRoundTripsStrictAndNonStrict` (skipped
+unless `GOPHISHFR_MYSQL_TEST_DSN` is set, matching the existing
+IMAP/SMTP/webhook test convention) migrates a legacy-style event whose
+plaintext is near the historical 65,535-byte MySQL `BLOB` cap into the real
+`details_ciphertext` `MEDIUMBLOB` column and decrypt-compares the result
+byte-for-byte, once under the default strict session and once under an
+explicitly disabled non-strict session.
 
 ## Backlog (not implemented here)
 

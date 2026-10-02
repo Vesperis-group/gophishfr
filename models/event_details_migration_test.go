@@ -461,6 +461,165 @@ func TestDownMigrationRefusesWhileFinalizedEvenWithoutCiphertextRows(t *testing.
 	}
 }
 
+// --- MYSQL_CIPHERTEXT_CAPACITY (real MySQL, strict and non-strict) --------
+
+// seedMySQLLegacyEventRow mirrors seedLegacyEventRow's shape and its reason
+// for pinning INSERT and the id read-back to one connection (so a shared
+// *gorm.DB connection pool never serves them from two different sessions),
+// but uses MySQL's LAST_INSERT_ID() instead of SQLite's
+// last_insert_rowid().
+func seedMySQLLegacyEventRow(t *testing.T, campaignID int64, details string) int64 {
+	t.Helper()
+	transaction := db.Begin()
+	if transaction.Error != nil {
+		t.Fatalf("begin MySQL seed transaction: %v", transaction.Error)
+	}
+	if err := transaction.Exec(
+		"INSERT INTO events (campaign_id, email, time, message, details) VALUES (?, ?, NOW(), ?, ?)",
+		campaignID, "legacy@example.test", "Clicked Link", details,
+	).Error; err != nil {
+		transaction.Rollback()
+		t.Fatalf("seed MySQL legacy event row: %v", err)
+	}
+	var id int64
+	if err := transaction.Raw("SELECT LAST_INSERT_ID()").Row().Scan(&id); err != nil {
+		transaction.Rollback()
+		t.Fatalf("read seeded MySQL event id: %v", err)
+	}
+	if err := transaction.Commit().Error; err != nil {
+		t.Fatalf("commit MySQL seed transaction: %v", err)
+	}
+	return id
+}
+
+// assertMySQLEventDetailsRoundTrip migrates exactly one pending legacy row
+// and proves the resulting details_ciphertext (the real MEDIUMBLOB column,
+// not a mock) round-trips the full plaintext byte-for-byte: read-back and
+// decrypt-compare -- not reliance on strict SQL mode -- is what catches
+// silent truncation, exactly as docs/EVENT_DETAILS_ENCRYPTION.md's "MySQL
+// strict/non-strict testing" section describes.
+func assertMySQLEventDetailsRoundTrip(t *testing.T, cipher *credentials.Cipher, campaignID, eventID int64, wantPlaintext string) {
+	t.Helper()
+	result, err := MigrateEventDetailsBatch(cipher)
+	if err != nil {
+		t.Fatalf("migrate MySQL near-cap legacy row %d: %v", eventID, err)
+	}
+	if result.RowsEncrypted != 1 {
+		t.Fatalf("migrate MySQL near-cap legacy row %d: rows encrypted = %d, want 1", eventID, result.RowsEncrypted)
+	}
+	var legacy sql.NullString
+	var ciphertext []byte
+	if err := db.Raw("SELECT details, details_ciphertext FROM events WHERE id = ?", eventID).
+		Row().Scan(&legacy, &ciphertext); err != nil {
+		t.Fatalf("read back MySQL event %d: %v", eventID, err)
+	}
+	if legacy.Valid {
+		t.Fatalf("MySQL event %d retained legacy plaintext after migration", eventID)
+	}
+	// Matches TestEnvelopeNearLegacyBlobCapExceedsStandardBlob's proof, but
+	// against a real MEDIUMBLOB column instead of crypto math alone: the
+	// stored envelope itself must exceed a standard BLOB's 64 KiB cap, or
+	// the MEDIUMBLOB column choice was never actually exercised.
+	if len(ciphertext) <= eventDetailsLegacyBlobCapacityBytes {
+		t.Fatalf(
+			"MySQL ciphertext length %d for event %d does not exceed the standard BLOB cap %d -- the MEDIUMBLOB column was not meaningfully exercised",
+			len(ciphertext), eventID, eventDetailsLegacyBlobCapacityBytes,
+		)
+	}
+	plaintext, err := cipher.Decrypt(eventDetailsContext(campaignID, eventID), credentials.Envelope(ciphertext))
+	if err != nil {
+		t.Fatalf("decrypt MySQL event %d: %v", eventID, err)
+	}
+	if len(plaintext) != len(wantPlaintext) || !bytes.Equal(plaintext, []byte(wantPlaintext)) {
+		t.Fatalf(
+			"MySQL round-trip for event %d mismatched: got %d bytes, want %d bytes -- possible silent truncation",
+			eventID, len(plaintext), len(wantPlaintext),
+		)
+	}
+}
+
+// TestMySQLEventDetailsNearLegacyCapRoundTripsStrictAndNonStrict is the real
+// MySQL counterpart to TestEnvelopeNearLegacyBlobCapExceedsStandardBlob
+// (which never opens a database connection at all). It migrates a
+// legacy-style event whose plaintext is near the historical 65,535-byte
+// MySQL BLOB cap into the details_ciphertext MEDIUMBLOB column and proves a
+// byte-exact round-trip, once under the default strict SQL session and once
+// under an explicitly disabled non-strict session -- the exact
+// strict/non-strict gating convention already used by
+// TestMySQLSMTPCredentialStorageBoundsNonStrict,
+// TestMySQLWebhookCredentialStorageBoundsNonStrict, and
+// TestMySQLIMAPCredentialLifecycle.
+func TestMySQLEventDetailsNearLegacyCapRoundTripsStrictAndNonStrict(t *testing.T) {
+	connectionString := testingMySQLDSN(t)
+	if connectionString == "" {
+		return
+	}
+	database, err := openDatabase("mysql", connectionString)
+	if err != nil {
+		t.Fatalf("open MySQL database: %v", err)
+	}
+	db = database
+	db.LogMode(false)
+	// Pin the pool to a single connection so SET SESSION sql_mode below
+	// (and every statement that follows it) is guaranteed to observe the
+	// same session, exactly as TestMySQLSMTPCredentialStorageBoundsNonStrict
+	// and TestMySQLWebhookCredentialStorageBoundsNonStrict already do.
+	db.DB().SetMaxOpenConns(1)
+	db.DB().SetMaxIdleConns(1)
+	conf = &config.Config{
+		DBName:         "mysql",
+		DBPath:         connectionString,
+		MigrationsPath: "../db/db_mysql/migrations",
+	}
+	if err := migrateDatabase(db.DB(), conf.DBName, conf.MigrationsPath); err != nil {
+		t.Fatalf("migrate MySQL database: %v", err)
+	}
+	if err := db.Exec("DELETE FROM events").Error; err != nil {
+		t.Fatalf("clear MySQL events rows: %v", err)
+	}
+	if err := db.Exec(
+		"UPDATE event_details_migration_state SET state = 'migrating', updated_at = NOW() WHERE id = 1",
+	).Error; err != nil {
+		t.Fatalf("reset MySQL migration marker: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.Exec("DELETE FROM events").Error
+		_ = database.Close()
+	})
+
+	cipher := testCredentialCipher(t, "event-key", map[string][]byte{
+		"event-key": bytes.Repeat([]byte{0x2e}, 32),
+	})
+	// Same near-cap sizing as TestEnvelopeNearLegacyBlobCapExceedsStandardBlob:
+	// a legacy row written by an older binary, with no application-level
+	// bound, could be as large as the historical MySQL BLOB cap itself.
+	nearCapPlaintext := strings.Repeat("Z", eventDetailsLegacyBlobCapacityBytes-64)
+
+	strictID := seedMySQLLegacyEventRow(t, 1, nearCapPlaintext)
+	assertMySQLEventDetailsRoundTrip(t, cipher, 1, strictID, nearCapPlaintext)
+
+	var originalSQLMode string
+	if err := db.Raw("SELECT @@SESSION.sql_mode").Row().Scan(&originalSQLMode); err != nil {
+		t.Fatalf("read MySQL session SQL mode: %v", err)
+	}
+	if err := db.Exec("SET SESSION sql_mode = ''").Error; err != nil {
+		t.Fatalf("disable MySQL strict mode: %v", err)
+	}
+	var nonStrictSQLMode string
+	if err := db.Raw("SELECT @@SESSION.sql_mode").Row().Scan(&nonStrictSQLMode); err != nil {
+		t.Fatalf("verify MySQL session SQL mode: %v", err)
+	}
+	if nonStrictSQLMode != "" {
+		t.Fatalf("MySQL test requires non-strict mode, got %q", nonStrictSQLMode)
+	}
+	t.Cleanup(func() {
+		_ = db.Exec("SET SESSION sql_mode = ?", originalSQLMode).Error
+	})
+
+	nonStrictID := seedMySQLLegacyEventRow(t, 2, nearCapPlaintext)
+	assertMySQLEventDetailsRoundTrip(t, cipher, 2, nonStrictID, nearCapPlaintext)
+}
+
 // --- BULK_ROTATION / OLD_KEY_RETIREMENT -------------------------------------
 
 func TestRotateEventDetailsCredentialsAndInventory(t *testing.T) {

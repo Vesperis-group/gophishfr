@@ -1,7 +1,7 @@
 {
   "goal_id": "encrypt-event-details",
   "status": "built",
-  "iteration": 1,
+  "iteration": 2,
   "builder_model": "Claude:Sonnet-5",
   "inspector_model": "Claude:Haiku-4.5",
   "initial_sha": "d54fd4ea8c55008f204138f8239cbc8529db94ed",
@@ -21,6 +21,13 @@
       "verdict": "PASS",
       "commit_sha": "2ec115c4e6ae4dfad4e586314499d32b3bbe339d",
       "summary": "All 20 acceptance criteria verified as correctly and completely implemented via comprehensive code reading, test file analysis, and static verification. No security regressions, plaintext leakage paths, or functional gaps found. Two-phase write path is bulletproof; read path fail-closed; migration resumable; AAD authentication enforced; no new plaintext persisted; webhook ordering and API contract unchanged; logging sanitized; dependencies byte-identical to base. Production-ready."
+    },
+    {
+      "iteration": 2,
+      "role": "builder",
+      "model": "Claude:Sonnet-5",
+      "commit_sha": "3bbe1873aea9078f7bf19747b27f87d49f9fb88d",
+      "summary": "Independent code review found that docs/EVENT_DETAILS_ENCRYPTION.md claimed MySQL-gated tests exercised both strict and non-strict SQL modes for event-details ciphertext storage, but no such test existed -- only a pure crypto/math test (TestEnvelopeNearLegacyBlobCapExceedsStandardBlob) and SQLite-only migration tests. Added TestMySQLEventDetailsNearLegacyCapRoundTripsStrictAndNonStrict to models/event_details_migration_test.go, following the exact GOPHISHFR_MYSQL_TEST_DSN-gated / testingMySQLDSN(t) / SET SESSION sql_mode = '' convention already used by TestMySQLSMTPCredentialStorageBoundsNonStrict, TestMySQLWebhookCredentialStorageBoundsNonStrict, and TestMySQLIMAPCredentialLifecycle. The new test migrates a legacy-style event with a near-65,535-byte plaintext details value into the real details_ciphertext MEDIUMBLOB column (via MigrateEventDetailsBatch) and proves a byte-exact read-back/decrypt round-trip in both the default strict session and an explicitly disabled non-strict session. Verified it actually passes against a real MySQL 8.4.6 instance (disposable Docker container) in both modes before removing the container. Updated the doc to name the specific test instead of making a vague unverifiable claim. Full ./scripts/verify.sh, go test ./..., and go test -race ./models/... all pass."
     }
   ]
 }
