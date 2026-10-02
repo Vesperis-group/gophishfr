@@ -236,7 +236,7 @@
                         "iteration":  6,
                         "role":  "builder",
                         "model":  "Claude:Sonnet-5",
-                        "commit_sha":  "PENDING",
+                        "commit_sha":  "26d7d5d7ee29f27428d45472bf6254336e0e83c6",
                         "commit_title":  "fix(docs): [B] detect legacy transport recommendations",
                         "summary":  "Fixed the iteration-5 review finding, docs/test-only: extended internal/docsguard's existing KindUndeprecatedParameterMention rule (no new Kind) with ordinary recommendation-prose detection. The word 'authenticate' (any inflection) co-occurring with api_key and no deprecation context is flagged on its own (specific enough to stand alone); the more generic verbs use/using/via/with/accept/accepts/accepted additionally require a companion anchor word (parameter/param/query/field/header/credential) on the same line, which is exactly what distinguishes 'use the api_key query parameter' from an incidental mention like '--form with an api_key value' in this project's own meta-documentation. Added 8 new positive fixtures (query/form variants, multiple casings, use/via/using/accept/authenticate-with phrasings) and 6 new negative fixtures (internal/DB-schema prose, a migration-script description, two historical statements, and a migration/deprecation description naming the trigger verbs only to contrast them with Bearer) alongside the existing table/alternative fixtures, none of which regressed. Reworded three sentences in docs/API_KEY_TRANSPORT_DEPRECATION_SELF_REVIEW.md that the new rule correctly caught as unintentional false positives (historical/descriptive prose that happened to combine 'authentication'/'api_key'/'parameter' on one line) without changing their meaning. Searched all shipped Markdown with the extended gate: zero violations, no other doc needed changes. All prior rules (encoded-parameter, Bearer-casing, scanner-error fail-closed, table, alternative-wording) unchanged and still fully tested. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
                         "validation":  {
@@ -259,6 +259,15 @@
                                            "git_diff_check":  "clean",
                                            "lockfiles_unchanged":  true
                                        }
+                    },
+                    {
+                                        "iteration":  6,
+                                        "feedback_file":  ".goals/deprecate-api-key-transports/inspector-feedback-6.md",
+                                        "verdict":  "PASS",
+                                        "model":  "Claude:Haiku-4.5",
+                                        "role":  "inspector",
+                                        "summary":  "Prose detection extended with strong/weak recommendation verbs; anchor words narrow false-positive scope. Self-review exemption: 2 files, exact paths, declared once. All 14 new fixtures pass. Gate: 0 violations. No runtime changes.",
+                                        "completed_at":  "2026-10-02T14:45:00+02:00"
                     }
                 ]
 }
