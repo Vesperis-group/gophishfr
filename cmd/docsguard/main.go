@@ -3,8 +3,12 @@
 // backs scripts/verify-docs-canonical-examples.sh (local verify.sh gate) and
 // the "docs-guard" CI job, so canonical documentation cannot silently drift
 // back toward recommending a query/form api_key parameter or a raw
-// Authorization header. See internal/docsguard for the detection rules and
-// their fixture tests.
+// Authorization header. Its diagnostics never print the matched document
+// text: only the file, line range, violation kind, and a fixed, generic
+// explanation (see internal/docsguard.Kind.Explanation), so a forbidden
+// example that happens to contain a real secret is never echoed into a CI
+// log. See internal/docsguard for the detection rules and their fixture
+// tests.
 package main
 
 import (
@@ -59,7 +63,11 @@ func run(args []string, stdout, stderr io.Writer) int {
 		}
 		for _, violation := range violations {
 			totalViolations++
-			_, _ = fmt.Fprintf(stdout, "FORBIDDEN (%s): %s:%d: %s\n", violation.Kind, path, violation.Line, violation.Text)
+			location := fmt.Sprintf("%s:%d", path, violation.StartLine)
+			if violation.EndLine != violation.StartLine {
+				location = fmt.Sprintf("%s:%d-%d", path, violation.StartLine, violation.EndLine)
+			}
+			_, _ = fmt.Fprintf(stdout, "FORBIDDEN (%s): %s: %s\n", violation.Kind, location, violation.Kind.Explanation())
 		}
 	}
 

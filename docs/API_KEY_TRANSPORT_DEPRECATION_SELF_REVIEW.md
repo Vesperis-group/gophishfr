@@ -369,6 +369,98 @@ A full run of the extended gate against every tracked Markdown file found
 zero violations outside this now-exempted document; no other shipped doc
 needed a wording change.
 
+## Iteration 7: independent review findings and fixes
+
+[`review-feedback-6.md`](../.goals/deprecate-api-key-transports/review-feedback-6.md)
+returned a FAIL on iteration 6. Security review passed; code review found
+two release-blocking issues in `internal/docsguard` itself.
+
+### Finding 1 — recommendation prose split across physical lines, and negated context, both bypassed detection
+
+The iteration-6 recommendation check (`recommendationMention`, then still
+named `undeprecatedParameterMention`) matched one physical line at a time,
+so a sentence wrapped across two or more Markdown lines — the normal
+result of a line-length-limited editor — was invisible to it. Separately,
+`hasDeprecationContext` matched the word "deprecated" (and siblings)
+anywhere nearby with no regard for negation, so a sentence asserting the
+opposite of the real contract, e.g. "the `api_key` parameter is **not**
+deprecated," incorrectly suppressed a violation instead of raising one.
+
+Fixed by:
+
+- grouping non-blank lines into paragraphs (`paragraph`,
+  `paragraphsFromLines`) and normalizing each into one whitespace-collapsed
+  string, so a recommendation wrapped across lines reads as continuous
+  text; the per-line table-row check (`tableRowMention`) and the two
+  per-line credential-syntax checks (`KindParameterCredential`,
+  `KindRawAuthorization`) are unaffected, since Markdown table rows and
+  single credential tokens are inherently single-line;
+- adding `negationWordPattern` (not/never/no longer/isn't/aren't/wasn't/
+  weren't/doesn't/didn't/won't/wont) and `hasAffirmativeDeprecationContext`,
+  which only treats a deprecation-context match as suppressing when no
+  negation word immediately precedes it in the same sentence.
+
+Widening the recommendation check from one line to a whole paragraph
+initially introduced a new false positive: a purely descriptive paragraph
+in `docs/API_AUTHENTICATION.md` explains that "the presence of any
+Authorization header, query `api_key`, or form `api_key` ... selects
+API-key-only authentication" — two unrelated sentences inside the same
+paragraph each independently mention `api_key` and "authentication" with
+no actual recommendation relationship between them, and the former
+anywhere-in-text pattern matched regardless. Fixed by bounding both the
+strong ("authenticate") and weak (use/via/with/accept, paired with an
+anchor word) recommendation patterns to require the trigger word within a
+small number of intervening words of the `api_key` mention
+(`recommendationProximity`, currently four words either side), rather than
+merely co-occurring anywhere in a paragraph. Every existing positive
+fixture still matches well within that window; the `API_AUTHENTICATION.md`
+paragraph — whose "authentication" and `api_key` mentions are separated by
+an unrelated clause — no longer does, with no rewording needed.
+
+New fixtures: `TestScanTextWrappedRecommendation` (positive: recommendation
+text split across 2–4 physical lines; negative: wrapped historical/
+deprecation-context, wrapped internal-schema text, and a two-paragraph case
+proving paragraph-by-paragraph independence) and
+`TestScanTextNegatedContextDoesNotSuppress` (positive: "not deprecated"/
+"no longer legacy"/"isn't deprecated" phrasing, each paired with a genuine
+nearby recommendation, must still violate; negative: genuine affirmative
+"is deprecated" phrasing still suppresses). All prior fixtures, including
+`TestScanTextUndeprecatedParameterMention`'s 8 positive/6 negative cases
+from iteration 6, pass unchanged.
+
+### Finding 2 — the CLI echoed the offending document text, risking a real secret in CI logs
+
+`cmd/docsguard`'s diagnostic output previously printed the full matched
+line, including the actual `api_key` value or `Authorization` header
+content it had just flagged. A real, accidentally-committed credential
+would therefore be echoed verbatim into CI logs by the very tool meant to
+catch the mistake.
+
+Fixed structurally rather than by runtime redaction: the `Violation`
+struct no longer carries any document text at all — it was changed from
+`{Line int; Text string; Kind Kind}` to `{StartLine, EndLine int; Kind
+Kind}` (`EndLine` lets the paragraph-level check report the whole matching
+span). A new `Kind.Explanation()` method returns a fixed, generic,
+non-sensitive description per `Kind`, computed independently of any scanned
+text. `cmd/docsguard/main.go`'s print loop was changed to use only
+`path:StartLine[-EndLine]: FORBIDDEN (Kind): <Explanation>` — it has no
+document text available to print even if it tried. `rawAuthorization`'s
+signature was simplified from `(string, bool)` to just `bool` for the same
+reason: it no longer has a reason string containing the actual token to
+return.
+
+New fixture: `cmd/docsguard/main_test.go` adds a subtest embedding a
+distinctive synthetic secret
+(`sk-SYNTH7f3c9a1b-not-a-real-credential-9e2d4f`) in both an `api_key=`
+value and a raw `Authorization:` value, and asserts the secret string never
+appears anywhere in stdout or stderr while `FORBIDDEN (parameter_credential)`,
+`FORBIDDEN (raw_authorization)`, and the correct `path:line` locations do.
+
+Both fixes preserve every prior detection rule, the fail-closed oversized-
+line behaviour, and all existing CI wiring; no runtime authentication,
+middleware, header, status code, logging, version, or dependency behaviour
+changed.
+
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |
@@ -487,6 +579,22 @@ needed a wording change.
 - `npx --yes retire --path static --outputformat text`: pass, no findings.
 - `git diff --check`: clean. `go.mod`, `go.sum`, `package.json`, and
   `yarn.lock` are byte-identical to `HEAD`.
+- `TestScanTextWrappedRecommendation` and
+  `TestScanTextNegatedContextDoesNotSuppress` (iteration 7, new): wrapped-
+  line recommendation detection and negation-aware context suppression,
+  both described above; all prior `internal/docsguard` fixtures, including
+  iteration 6's 8 positive/6 negative recommendation-prose cases, pass
+  unchanged under the new paragraph-wide, proximity-bounded logic.
+- The CLI-level "a secret-bearing forbidden example is never echoed"
+  subtest in `cmd/docsguard/main_test.go` (iteration 7, new): a distinctive
+  synthetic secret embedded in both a flagged `api_key=` value and a
+  flagged raw `Authorization:` value never appears in stdout or stderr,
+  while the correct `FORBIDDEN (Kind)` and `path:line` diagnostics do.
+- `./scripts/verify-docs-canonical-examples.sh` re-run against every
+  tracked Markdown file after the iteration-7 fixes: 0 violations, and the
+  `docs/API_AUTHENTICATION.md` false positive surfaced mid-iteration by the
+  new paragraph-wide scope (see "Finding 1" above) no longer appears, with
+  no doc wording changed to achieve that.
 
 ## Why a bounded deprecation window instead of immediate removal
 

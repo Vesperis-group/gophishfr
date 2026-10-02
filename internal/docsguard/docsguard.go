@@ -5,12 +5,12 @@
 // `?api_key=`/form `api_key` example, a raw (non-scheme) Authorization
 // header example, or ordinary prose recommending a deprecated transport
 // (a table row, an "or an api_key" alternative, or a sentence like "use the
-// api_key query parameter") as if it were a canonical, recommended
-// transport.
+// api_key query parameter", even one wrapped across several Markdown lines)
+// as if it were a canonical, recommended transport.
 //
 // This package intentionally does not parse Markdown. It scans plain text
-// line by line for the literal substrings that would make an example
-// authenticate against the real credential extractor in
+// for the literal substrings that would make an example authenticate
+// against the real credential extractor in
 // middleware.extractExplicitAPICredential: the query/form parameter is named
 // exactly "api_key" (decoded, since Go's URL/form parsing percent-decodes
 // parameter names before comparing them), and the Authorization header is
@@ -18,6 +18,12 @@
 // against the runtime's exact, case-sensitive "Bearer " prefix. Matching that
 // same literal contract is what keeps false positives and false negatives
 // both low without a real HTTP/Markdown parser.
+//
+// Every reported Violation carries only a file-relative line range and a
+// Kind; it never carries the matched text, so a forbidden example that
+// happens to contain a real secret is never echoed by a caller that prints
+// violations (see Kind.Explanation, which returns a fixed, generic
+// description instead).
 package docsguard
 
 import (
@@ -57,24 +63,77 @@ const (
 	// KindUndeprecatedParameterMention covers a Markdown table row, a
 	// "presented as an alternative" sentence, or ordinary recommendation
 	// prose (e.g. "use the api_key query parameter", "authenticate via
-	// api_key") that presents `api_key` as an ordinary, currently supported
-	// authentication option with no deprecation context on the same line.
-	// Unlike KindParameterCredential, this has no `=` sign and would never
-	// authenticate anything -- it is a documentation-accuracy check, not a
-	// credential-syntax check: it exists because a contract table or a
-	// recommendation sentence can quietly fall out of sync with the
-	// deprecation even when no example near it is directly copy-pasteable.
+	// api_key") -- including one wrapped across several physical lines --
+	// that presents `api_key` as an ordinary, currently supported
+	// authentication option with no *affirmative* deprecation context
+	// nearby. A negated context ("not deprecated", "no longer legacy")
+	// does not suppress this: it means the surrounding text is actively
+	// asserting the opposite of the real contract, which is itself the
+	// violation. Unlike KindParameterCredential, this has no `=` sign and
+	// would never authenticate anything -- it is a documentation-accuracy
+	// check, not a credential-syntax check.
 	KindUndeprecatedParameterMention Kind = "undeprecated_parameter_mention"
 )
 
-// deprecationContextPattern matches any of the words/strings that, if present
-// on the same line as an `api_key` mention, show the mention already carries
-// its required deprecation context (the removal version, the word
-// "deprecated"/"deprecation", "legacy", "sunset", or "migrat(e/ion)"). This
-// list is deliberately short: every entry is a plain-language signal a human
-// reviewer would also accept as "this is clearly marked deprecated", which is
-// what keeps the policy narrow and auditable rather than a loophole.
-var deprecationContextPattern = regexp.MustCompile(`(?i)deprecat|0\.13\.0|remov|sunset|migrat|legacy`)
+// Explanation returns a fixed, non-sensitive description of what this kind
+// of violation means. It deliberately never includes any text from the
+// document being scanned: callers must report only a Violation's file, line
+// range, Kind, and this Explanation -- never source text, so a forbidden
+// example that happens to contain a real secret is never echoed into a CI
+// log.
+func (k Kind) Explanation() string {
+	switch k {
+	case KindParameterCredential:
+		return "a query or form parameter here decodes to exactly \"api_key\", the deprecated credential parameter name"
+	case KindRawAuthorization:
+		return "the Authorization header value here is not the runtime's exact canonical \"Bearer\" scheme (or another recognized scheme), so it is a raw/legacy credential"
+	case KindUndeprecatedParameterMention:
+		return "this text presents the deprecated api_key parameter as an ordinary, currently supported option without clear affirmative deprecation context"
+	default:
+		return "a deprecated API-key transport example"
+	}
+}
+
+// deprecationContextPattern matches any of the words/strings that can show a
+// nearby `api_key` mention already carries its required deprecation context
+// (the removal version, the word "deprecated"/"deprecation", "legacy",
+// "sunset", or "migrat(e/ion)"). A match here is only treated as *affirmative*
+// context if hasAffirmativeDeprecationContext also confirms it is not
+// negated (see negationWordPattern). This list is deliberately short: every
+// entry is a plain-language signal a human reviewer would also accept as
+// "this is clearly marked deprecated", which is what keeps the policy narrow
+// and auditable rather than a loophole.
+var deprecationContextPattern = regexp.MustCompile(`(?i)deprecat\w*|0\.13\.0|remov\w*|sunset\w*|migrat\w*|legacy`)
+
+// negationWordPattern matches common negation words/contractions. If one of
+// these appears between the start of the current sentence and a
+// deprecation-context match, that match does not count as affirmative
+// context: "not deprecated" and "no longer legacy" assert the opposite of
+// the real contract, which must remain a violation, not be suppressed by it.
+var negationWordPattern = regexp.MustCompile(`(?i)\b(not|never|no longer|isn't|aren't|wasn't|weren't|doesn't|didn't|won't|wont)\b`)
+
+// hasAffirmativeDeprecationContext reports whether block contains at least
+// one deprecation-context word or phrase that is not negated in its own
+// sentence. It is used both per-line (for table rows) and per-paragraph
+// (for recommendation prose), so a negated or merely-nearby-but-unrelated
+// mention elsewhere cannot accidentally suppress a genuine violation.
+func hasAffirmativeDeprecationContext(block string) bool {
+	for _, match := range deprecationContextPattern.FindAllStringIndex(block, -1) {
+		start := match[0]
+		windowStart := start - 40
+		if windowStart < 0 {
+			windowStart = 0
+		}
+		preceding := block[windowStart:start]
+		if idx := strings.LastIndexAny(preceding, ".!?"); idx != -1 {
+			preceding = preceding[idx+1:]
+		}
+		if !negationWordPattern.MatchString(preceding) {
+			return true
+		}
+	}
+	return false
+}
 
 // tableRowPattern matches a Markdown table row: a line whose first
 // non-whitespace character is a pipe.
@@ -86,25 +145,42 @@ var tableRowPattern = regexp.MustCompile(`^\s*\|`)
 // in docs/GROUP_IMPORT_LIMITS.md.
 var offeredAsAlternativePattern = regexp.MustCompile("(?i)\\bor\\s+an?\\s+`?api_key`?")
 
+// recommendationProximity bounds how many intervening words a recommendation
+// verb may be from "api_key" and still count as describing it, rather than
+// coincidentally sharing a (now paragraph-wide, potentially multi-sentence)
+// block of text with it. Without this bound, a purely descriptive paragraph
+// that happens to use the word "authentication" in one sentence and mention
+// `api_key` in an unrelated sentence nearby would falsely violate; this is
+// exactly the false positive a real paragraph in docs/API_AUTHENTICATION.md
+// surfaced once detection moved from single lines to whole paragraphs.
+const recommendationProximity = `(?:\s+\S+){0,4}\s+`
+
 // strongRecommendationPattern matches the word "authenticate" (and its
 // inflections: authenticates, authenticated, authenticating,
-// authentication) anywhere on the line. Paired with an `api_key` mention
-// and no deprecation context, this word alone is specific enough to signal
-// a recommendation ("authenticate via api_key", "authenticate with the
-// api_key parameter") without needing a separate anchor word.
-var strongRecommendationPattern = regexp.MustCompile(`(?i)authenticat\w*`)
+// authentication) within recommendationProximity words of `api_key`, in
+// either order. Paired with no affirmative deprecation context, this word
+// alone is specific enough to signal a recommendation ("authenticate via
+// api_key", "authenticate with the api_key parameter") without needing a
+// separate anchor word -- but only when it is actually close to the
+// `api_key` mention, not merely present somewhere in the same paragraph.
+var strongRecommendationPattern = regexp.MustCompile(
+	`(?i)\bauthenticat\w*\b` + recommendationProximity + `api_key\b|\bapi_key\b` + recommendationProximity + `authenticat\w*\b`,
+)
 
-// weakRecommendationVerbPattern matches common, much more generic verbs
-// that only signal a recommendation when they also co-occur with an
-// authentication-flavored anchor word (recommendationAnchorPattern) on the
-// same line -- otherwise "with", "via", and "use" are far too common in
-// ordinary prose (including this package's own documentation) to use alone.
-var weakRecommendationVerbPattern = regexp.MustCompile(`(?i)\b(use\w*|via|with|accept\w*)\b`)
+// weakRecommendationVerbPattern matches common, much more generic verbs --
+// "use", "via", "with", "accept" -- within recommendationProximity words of
+// `api_key`. These words are far too common in ordinary prose (including
+// this package's own documentation) to use unbounded across a whole
+// paragraph; requiring proximity to `api_key`, in addition to the
+// recommendationAnchorPattern check below, is what keeps this narrow.
+var weakRecommendationVerbPattern = regexp.MustCompile(
+	`(?i)\b(?:use\w*|via|with|accept\w*)\b` + recommendationProximity + `api_key\b|\bapi_key\b` + recommendationProximity + `\b(?:use\w*|via|with|accept\w*)\b`,
+)
 
 // recommendationAnchorPattern matches a word that anchors a weak
 // recommendation verb to the authentication-transport meaning of `api_key`,
 // as opposed to an incidental mention (a curl flag, a value, a variable
-// name) that happens to share the line with one of those common verbs.
+// name) that happens to share the text with one of those common verbs.
 var recommendationAnchorPattern = regexp.MustCompile(`(?i)\b(parameter|param|query|field|header|credential)\b`)
 
 // candidateKeyPattern finds every "key=" token in a line, in either a URL
@@ -116,11 +192,20 @@ var recommendationAnchorPattern = regexp.MustCompile(`(?i)\b(parameter|param|que
 // spelling in the document.
 var candidateKeyPattern = regexp.MustCompile("[^&?=\\s\"'`]+=")
 
-// Violation is one deprecated-transport example found on one line.
+// Violation is one deprecated-transport example found in a document. It
+// carries only its location and Kind -- never the matched text -- so a
+// caller can safely print every field of a Violation (see Kind.Explanation)
+// without risk of echoing a real secret a forbidden example happened to
+// contain.
 type Violation struct {
-	Line int
-	Kind Kind
-	Text string
+	// StartLine and EndLine are the 1-indexed, inclusive line range the
+	// violation was found in. For a single-line violation (parameter
+	// credential, raw Authorization, a table row) they are equal; a
+	// recommendation-prose violation spanning a wrapped Markdown paragraph
+	// reports that paragraph's full line range.
+	StartLine int
+	EndLine   int
+	Kind      Kind
 }
 
 // canonicalBearerScheme is the exact, case-sensitive prefix the real
@@ -144,33 +229,104 @@ var recognizedAuthSchemes = map[string]bool{
 }
 
 // ScanText scans arbitrary text (typically one Markdown file's contents) and
-// returns every deprecated-transport example it finds, in line order. It
-// returns a non-nil error if the scanner itself failed -- most importantly
-// bufio.ErrTooLong on a line that exceeds the internal buffer -- in which
-// case the returned violations are necessarily incomplete and callers must
-// fail closed rather than trust them as "no violations found".
+// returns every deprecated-transport example it finds. It returns a non-nil
+// error if the scanner itself failed -- most importantly bufio.ErrTooLong on
+// a line that exceeds the internal buffer -- in which case the returned
+// violations are necessarily incomplete and callers must fail closed rather
+// than trust them as "no violations found".
 func ScanText(text string) ([]Violation, error) {
 	var violations []Violation
+	var lines []string
+
 	scanner := bufio.NewScanner(strings.NewReader(text))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	lineNo := 0
 	for scanner.Scan() {
 		lineNo++
 		line := scanner.Text()
+		lines = append(lines, line)
 		if hasParameterCredential(line) {
-			violations = append(violations, Violation{Line: lineNo, Kind: KindParameterCredential, Text: strings.TrimSpace(line)})
+			violations = append(violations, Violation{StartLine: lineNo, EndLine: lineNo, Kind: KindParameterCredential})
 		}
-		if reason, ok := rawAuthorization(line); ok {
-			violations = append(violations, Violation{Line: lineNo, Kind: KindRawAuthorization, Text: strings.TrimSpace(reason)})
+		if rawAuthorization(line) {
+			violations = append(violations, Violation{StartLine: lineNo, EndLine: lineNo, Kind: KindRawAuthorization})
 		}
-		if undeprecatedParameterMention(line) {
-			violations = append(violations, Violation{Line: lineNo, Kind: KindUndeprecatedParameterMention, Text: strings.TrimSpace(line)})
+		if tableRowMention(line) {
+			violations = append(violations, Violation{StartLine: lineNo, EndLine: lineNo, Kind: KindUndeprecatedParameterMention})
 		}
 	}
 	if err := scanner.Err(); err != nil {
 		return violations, fmt.Errorf("scanning line %d: %w", lineNo+1, err)
 	}
-	return violations, nil
+
+	// Recommendation prose is analyzed per Markdown paragraph (a run of
+	// non-blank lines), not per physical line, so a recommendation wrapped
+	// across several lines by normal Markdown line-wrapping is still
+	// caught.
+	for _, p := range paragraphsFromLines(lines) {
+		if recommendationMention(p.text) {
+			violations = append(violations, Violation{StartLine: p.startLine, EndLine: p.endLine, Kind: KindUndeprecatedParameterMention})
+		}
+	}
+
+	return dedupeViolations(violations), nil
+}
+
+// dedupeViolations removes exact (StartLine, EndLine, Kind) duplicates,
+// which can occur when a single-line paragraph independently matches both
+// the per-line table-row check and the per-paragraph recommendation check.
+func dedupeViolations(violations []Violation) []Violation {
+	seen := make(map[Violation]bool, len(violations))
+	deduped := violations[:0]
+	for _, v := range violations {
+		if seen[v] {
+			continue
+		}
+		seen[v] = true
+		deduped = append(deduped, v)
+	}
+	return deduped
+}
+
+// paragraph is a run of consecutive non-blank lines, normalized into one
+// whitespace-collapsed string so a sentence wrapped across several physical
+// lines reads as continuous text for the recommendation-prose checks.
+type paragraph struct {
+	startLine int
+	endLine   int
+	text      string
+}
+
+// paragraphsFromLines groups lines into paragraphs the way Markdown does:
+// runs of non-blank lines separated by one or more blank (or
+// whitespace-only) lines.
+func paragraphsFromLines(lines []string) []paragraph {
+	var paragraphs []paragraph
+	var current []string
+	start := 0
+
+	flush := func(end int) {
+		if len(current) == 0 {
+			return
+		}
+		text := strings.Join(strings.Fields(strings.Join(current, " ")), " ")
+		paragraphs = append(paragraphs, paragraph{startLine: start, endLine: end, text: text})
+		current = nil
+	}
+
+	for i, line := range lines {
+		lineNo := i + 1
+		if strings.TrimSpace(line) == "" {
+			flush(lineNo - 1)
+			continue
+		}
+		if len(current) == 0 {
+			start = lineNo
+		}
+		current = append(current, line)
+	}
+	flush(len(lines))
+	return paragraphs
 }
 
 // hasParameterCredential reports whether the line contains a "key=" token
@@ -203,13 +359,13 @@ func hasParameterCredential(line string) bool {
 // the header name case-insensitively, because HTTP header names are
 // case-insensitive and the real middleware reads it via net/http's
 // canonicalized http.Header.Values("Authorization").
-func rawAuthorization(line string) (string, bool) {
+func rawAuthorization(line string) bool {
 	lowered := strings.ToLower(line)
 	searchFrom := 0
 	for {
 		idx := strings.Index(lowered[searchFrom:], "authorization:")
 		if idx < 0 {
-			return "", false
+			return false
 		}
 		idx += searchFrom
 		rest := line[idx+len("authorization:"):]
@@ -226,12 +382,12 @@ func rawAuthorization(line string) (string, bool) {
 				// exact "Bearer " prefix, so this value authenticates (if at
 				// all) as a raw token, not as Bearer -- a canonical example
 				// must not show a casing that cannot possibly work that way.
-				return fmt.Sprintf("Authorization: %s ... (wrong case; runtime requires exact %q)", token, canonicalBearerScheme+" "), true
+				return true
 			}
 			continue
 		}
 		if !recognizedAuthSchemes[strings.ToLower(token)] {
-			return fmt.Sprintf("Authorization: %s...", token), true
+			return true
 		}
 	}
 }
@@ -248,26 +404,39 @@ func firstToken(s string) string {
 	return s[:end]
 }
 
-// undeprecatedParameterMention reports whether the line presents `api_key`
-// as an ordinary, currently supported authentication option -- a Markdown
-// table row, prose offering it as an alternative to Bearer, or ordinary
-// recommendation prose (e.g. "use the api_key query parameter",
-// "authenticate via api_key") -- with no deprecation context (a removal
-// version, "deprecated", "legacy", "sunset", or "migrat...") on that same
-// line. It is case-insensitive on "api_key" itself to catch a capitalized
-// table header or sentence start.
-func undeprecatedParameterMention(line string) bool {
+// tableRowMention reports whether a single physical line is a Markdown
+// table row presenting `api_key` with no affirmative deprecation context.
+// Table rows stay a per-line check (unlike recommendationMention) because a
+// Markdown table row is always exactly one physical line by construction.
+func tableRowMention(line string) bool {
 	if !strings.Contains(strings.ToLower(line), "api_key") {
 		return false
 	}
-	if deprecationContextPattern.MatchString(line) {
+	if !tableRowPattern.MatchString(line) {
 		return false
 	}
-	if tableRowPattern.MatchString(line) || offeredAsAlternativePattern.MatchString(line) {
+	return !hasAffirmativeDeprecationContext(line)
+}
+
+// recommendationMention reports whether normalized paragraph text presents
+// `api_key` as an alternative or recommended authentication option -- "or
+// an api_key parameter", "use the api_key query parameter", "authenticate
+// via api_key" -- with no affirmative deprecation context anywhere in the
+// paragraph. Operating on the whole paragraph (rather than one line) is
+// what catches a recommendation wrapped across several physical lines by
+// ordinary Markdown line-wrapping.
+func recommendationMention(paragraphText string) bool {
+	if !strings.Contains(strings.ToLower(paragraphText), "api_key") {
+		return false
+	}
+	if hasAffirmativeDeprecationContext(paragraphText) {
+		return false
+	}
+	if offeredAsAlternativePattern.MatchString(paragraphText) {
 		return true
 	}
-	if strongRecommendationPattern.MatchString(line) {
+	if strongRecommendationPattern.MatchString(paragraphText) {
 		return true
 	}
-	return weakRecommendationVerbPattern.MatchString(line) && recommendationAnchorPattern.MatchString(line)
+	return weakRecommendationVerbPattern.MatchString(paragraphText) && recommendationAnchorPattern.MatchString(paragraphText)
 }

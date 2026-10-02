@@ -79,4 +79,40 @@ func TestRunFlagsAndExitCodes(t *testing.T) {
 			t.Fatalf("expected a scanning-error message, got stderr=%q", stderr.String())
 		}
 	})
+
+	// A forbidden example can carry a real secret value -- e.g. an operator
+	// pasted a live token into a doc by mistake. The CLI's diagnostics must
+	// never echo it: only file, line range, kind, and a fixed explanation.
+	// This uses a distinctive synthetic string that would never appear in
+	// legitimate diagnostic output, so any leak is unambiguous.
+	t.Run("a secret-bearing forbidden example is never echoed", func(t *testing.T) {
+		const distinctiveSecret = "sk-SYNTH7f3c9a1b-not-a-real-credential-9e2d4f"
+		content := "curl -d \"api_key=" + distinctiveSecret + "\" https://gophishfr.example/api/campaigns/42/complete\n" +
+			"curl -H \"Authorization: " + distinctiveSecret + "\" https://gophishfr.example/api/campaigns/42/complete\n"
+		path := writeTempFile(t, dir, "secret-bearing.md", content)
+
+		var stdout, stderr bytes.Buffer
+		code := run([]string{path}, &stdout, &stderr)
+		if code != 1 {
+			t.Fatalf("expected exit 1 (violations found), got %d (stdout=%q stderr=%q)", code, stdout.String(), stderr.String())
+		}
+		if strings.Contains(stdout.String(), distinctiveSecret) {
+			t.Fatalf("stdout leaked the secret-bearing example text: %q", stdout.String())
+		}
+		if strings.Contains(stderr.String(), distinctiveSecret) {
+			t.Fatalf("stderr leaked the secret-bearing example text: %q", stderr.String())
+		}
+		if !strings.Contains(stdout.String(), "FORBIDDEN (parameter_credential)") {
+			t.Fatalf("expected a parameter_credential FORBIDDEN line with useful location, got stdout=%q", stdout.String())
+		}
+		if !strings.Contains(stdout.String(), "FORBIDDEN (raw_authorization)") {
+			t.Fatalf("expected a raw_authorization FORBIDDEN line with useful location, got stdout=%q", stdout.String())
+		}
+		if !strings.Contains(stdout.String(), path+":1") {
+			t.Fatalf("expected the file:line location for the first violation, got stdout=%q", stdout.String())
+		}
+		if !strings.Contains(stdout.String(), path+":2") {
+			t.Fatalf("expected the file:line location for the second violation, got stdout=%q", stdout.String())
+		}
+	})
 }

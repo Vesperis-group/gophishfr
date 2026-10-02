@@ -1,7 +1,7 @@
 {
     "goal_id":  "deprecate-api-key-transports",
     "status":  "inspecting",
-    "iteration":  6,
+    "iteration":  7,
     "builder_model":  "Claude:Sonnet-5",
     "inspector_model":  "Claude:Haiku-4.5",
     "initial_sha":  "99c9a50848e8a826360ea7585a57d7e6f753a34c",
@@ -268,6 +268,41 @@
                                         "role":  "inspector",
                                         "summary":  "Prose detection extended with strong/weak recommendation verbs; anchor words narrow false-positive scope. Self-review exemption: 2 files, exact paths, declared once. All 14 new fixtures pass. Gate: 0 violations. No runtime changes.",
                                         "completed_at":  "2026-10-02T14:45:00+02:00"
+                    },
+                    {
+                                        "iteration":  6,
+                                        "role":  "code-review",
+                                        "verdict":  "FAIL",
+                                        "feedback_file":  ".goals/deprecate-api-key-transports/review-feedback-6.md",
+                                        "summary":  "Security review passed. internal/docsguard had two release-blocking issues: (1) line-by-line scanning missed recommendation prose wrapped across Markdown lines, and any deprecation-context keyword suppressed detection even when negated (e.g. 'not deprecated'); (2) the CLI printed the full offending line, so a real committed credential would be echoed verbatim into CI logs. Required paragraph/block-aware analysis with negation-aware context suppression, non-sensitive fixed-explanation diagnostics with no source text, and new fixtures for both."
+                    },
+                    {
+                                        "iteration":  7,
+                                        "role":  "builder",
+                                        "model":  "Claude:Sonnet-5",
+                                        "commit_sha":  "PENDING",
+                                        "commit_title":  "fix(docs): [B] redact and normalize guard findings",
+                                        "summary":  "Fixed both iteration-6 review findings in internal/docsguard, test/docs-only. (1) Paragraph/negation bypass: added paragraph/paragraphsFromLines to group and normalize wrapped Markdown lines into one continuous string for the recommendation-prose check (table-row and credential-syntax checks stay per-line, since those are inherently single-line syntax); added negationWordPattern and hasAffirmativeDeprecationContext so only non-negated deprecation-context words suppress a violation. Widening the scope to whole paragraphs initially introduced a false positive in docs/API_AUTHENTICATION.md, where two unrelated sentences in the same paragraph each independently mention 'api_key' and 'authentication' with no recommendation relationship; fixed by bounding the strong/weak recommendation patterns to require the trigger word within a small word-proximity window of the api_key mention (recommendationProximity) rather than merely co-occurring anywhere in the paragraph. Added TestScanTextWrappedRecommendation and TestScanTextNegatedContextDoesNotSuppress; all prior fixtures, including iteration 6's 8 positive/6 negative recommendation-prose cases, pass unchanged. (2) Diagnostic secret echo: Violation no longer carries any document text -- replaced Line/Text with StartLine/EndLine, and added Kind.Explanation() returning a fixed, generic, non-sensitive description per Kind, computed independently of scanned text. cmd/docsguard's print loop now emits only path:StartLine[-EndLine]: FORBIDDEN (Kind): <Explanation>, never source text. rawAuthorization no longer returns a reason string containing the actual token. Added a CLI-level test embedding a distinctive synthetic secret in both a flagged api_key value and a flagged raw Authorization value, asserting it never appears in stdout/stderr while the correct FORBIDDEN (Kind) and path:line diagnostics do. Searched all shipped Markdown with the extended gate: 0 violations across 28 files, no doc wording changed. All prior rules (encoded-parameter, Bearer-casing, scanner-error fail-closed, table, alternative-wording, recommendation-prose) preserved and still fully tested. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
+                                        "validation":  {
+                                           "verify_sh":  "pass",
+                                           "go_test":  "pass (including 2 new docsguard test functions covering wrapped-recommendation and negated-context fixtures, plus the new CLI secret-leak subtest; all prior fixtures unchanged and passing)",
+                                           "go_test_race":  "pass",
+                                           "go_vet":  "pass",
+                                           "go_build":  "pass",
+                                           "golangci_lint":  "0 issues",
+                                           "govulncheck":  "pass (0 reachable vulnerabilities)",
+                                           "gosec":  "12 pre-existing findings, same baseline; no new finding",
+                                           "gitleaks":  "1 pre-existing finding from 2026-09-03 history, unrelated to this PR; current working tree clean (--no-git); no new finding",
+                                           "actionlint":  "pass",
+                                           "zizmor":  "pass (2 pre-existing documented suppressions)",
+                                           "yarn_audit":  "4 pre-existing moderate findings in transitive webpack devDependency, lockfile unchanged",
+                                           "retire_js":  "pass",
+                                           "browser_tests":  "pass (scripts/test-browser.sh)",
+                                           "docker_compat_tests":  "pass (scripts/test-container-api-session-auth.sh, scripts/test-container-api-key-verifier.sh)",
+                                           "docs_gate_sanity_check":  "scripts/verify-docs-canonical-examples.sh reports 0 violations across all 28 tracked shipped Markdown files; the API_AUTHENTICATION.md false positive surfaced mid-iteration by the new paragraph-wide scope is resolved by the proximity-bounded recommendation patterns, with no doc wording changed",
+                                           "git_diff_check":  "clean",
+                                           "lockfiles_unchanged":  true
+                                       }
                     }
                 ]
 }

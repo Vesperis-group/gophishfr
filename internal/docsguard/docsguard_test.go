@@ -127,10 +127,10 @@ func TestScanTextMultiLineAndLineNumbers(t *testing.T) {
 	if len(violations) != 2 {
 		t.Fatalf("expected exactly 2 violations, got %d: %v", len(violations), violations)
 	}
-	if violations[0].Line != 2 || violations[0].Kind != KindParameterCredential {
+	if violations[0].StartLine != 2 || violations[0].EndLine != 2 || violations[0].Kind != KindParameterCredential {
 		t.Fatalf("unexpected first violation: %+v", violations[0])
 	}
-	if violations[1].Line != 4 || violations[1].Kind != KindRawAuthorization {
+	if violations[1].StartLine != 4 || violations[1].EndLine != 4 || violations[1].Kind != KindRawAuthorization {
 		t.Fatalf("unexpected second violation: %+v", violations[1])
 	}
 }
@@ -214,6 +214,85 @@ func TestScanTextUndeprecatedParameterMention(t *testing.T) {
 			violations := mustScan(t, line)
 			if containsKind(violations, KindUndeprecatedParameterMention) {
 				t.Fatalf("unexpected undeprecated-parameter-mention violation for %q: %v", line, violations)
+			}
+		})
+	}
+}
+
+// TestScanTextWrappedRecommendation proves recommendation prose is detected
+// even when ordinary Markdown line-wrapping splits it across several
+// physical lines -- the paragraph-level analysis this test exercises is
+// what line-local scanning alone could never catch.
+func TestScanTextWrappedRecommendation(t *testing.T) {
+	positive := []string{
+		// The verb, the anchor word, and "api_key" are each on a different
+		// physical line of the same paragraph.
+		"Use the\napi_key query\nparameter for authentication.\n",
+		"Clients should\nauthenticate\nvia the api_key\nparameter.\n",
+		"This endpoint\naccepts the api_key\ncredential in the\nquery string.\n",
+	}
+	for _, text := range positive {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if !containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("expected a wrapped-recommendation violation for %q, got %v", text, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// Wrapped, but already carrying affirmative deprecation context
+		// somewhere in the same paragraph -- a historical statement, not a
+		// live recommendation.
+		"Earlier releases let clients\nauthenticate via the api_key parameter\nbefore this deprecation.\n",
+		// Wrapped internal/schema prose with no recommendation verb+anchor
+		// pairing at all.
+		"SQLite stores a\nnullable legacy `api_key`,\na raw BLOB verifier,\nand a key ID.\n",
+		// A blank line separates the recommendation-shaped second paragraph
+		// from unrelated content; each paragraph is still judged on its own
+		// merits, and this one is pure deprecation description.
+		"Unrelated heading text.\n\nThe api_key query parameter\nis deprecated and targeted\nfor removal.\n",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("unexpected wrapped-recommendation violation for %q: %v", text, violations)
+			}
+		})
+	}
+}
+
+// TestScanTextNegatedContextDoesNotSuppress proves a negated
+// deprecation-context word ("not deprecated", "no longer legacy") does not
+// suppress a violation: the surrounding text is asserting the opposite of
+// the real contract, which is itself the problem, not a legitimate
+// deprecation notice.
+func TestScanTextNegatedContextDoesNotSuppress(t *testing.T) {
+	positive := []string{
+		"The api_key query parameter is not deprecated, so use the api_key query parameter for authentication.",
+		"This option is no longer legacy -- authenticate with the api_key parameter.",
+		"The api_key header isn't deprecated, so clients should use the api_key header for authentication.",
+	}
+	for _, line := range positive {
+		t.Run(line, func(t *testing.T) {
+			violations := mustScan(t, line)
+			if !containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("expected negated-context text to still violate for %q, got %v", line, violations)
+			}
+		})
+	}
+
+	// A genuine affirmative deprecation notice, for contrast: no negation
+	// word precedes "deprecated" in its sentence, so it still suppresses.
+	negative := []string{
+		"The api_key query parameter is deprecated; use Bearer for authentication instead.",
+	}
+	for _, line := range negative {
+		t.Run(line, func(t *testing.T) {
+			violations := mustScan(t, line)
+			if containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("unexpected violation for a genuine affirmative deprecation notice %q: %v", line, violations)
 			}
 		})
 	}
