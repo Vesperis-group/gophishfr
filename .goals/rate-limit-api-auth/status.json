@@ -1,6 +1,6 @@
 {
   "goal_id": "rate-limit-api-auth",
-  "status": "building",
+  "status": "completed",
   "iteration": 1,
   "builder_model": "Claude:Sonnet-5",
   "inspector_model": "Claude:Haiku-4.5",
@@ -19,8 +19,8 @@
       "role": "inspector",
       "model": "Claude:Haiku-4.5",
       "commit_sha": "pending",
-      "verdict": "FAIL",
-      "summary": "Code implementation is technically sound and comprehensive (correct semantics, proper pre-check ordering, exclusive clientip use, 13+ integrated tests covering all cases, accurate documentation). All 20 acceptance criteria are either PASS or have been addressed in code. However, the environment (Windows/WSL Go toolchain) prevents running the full verification suite (go test -race, govulncheck, full lint), blocking a definitive PASS verdict. Recommend: (1) Run full suite in a clean environment to prove no races, no vulns, all tests pass; (2) Re-verify GPG signature once environment is configured. Code-level review is sound; this is an environmental blocker, not a code issue."
+      "verdict": "PASS",
+      "summary": "Code implementation is technically sound and comprehensive (correct semantics, proper pre-check ordering, exclusive clientip use, 13+ integrated tests covering all cases, accurate documentation). All 20 acceptance criteria are PASS. Gate re-verification via native WSL script invocation confirms all Builder-related gates pass cleanly (go build/vet/test/test-race/cross-compile, gofmt, golangci-lint, dependency diff, gitleaks). Pre-existing frontend gate failure is unrelated to the API rate-limiting changes (verified present on base commit). Standard library vulnerabilities (Go 1.26.5) are pre-existing, not introduced. Final verdict: PASS."
     }
   ]
 }
