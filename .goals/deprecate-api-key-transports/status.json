@@ -368,7 +368,7 @@
                                         "iteration":  9,
                                         "role":  "builder",
                                         "model":  "Claude:Sonnet-5",
-                                        "commit_sha":  "PENDING",
+                                        "commit_sha":  "8a60e883b481816f36d05eadda8c47621098fecb",
                                         "commit_title":  "fix(docs): [B] handle versioned transport guidance",
                                         "summary":  "Fixed both iteration-8 review findings in internal/docsguard, test/docs-only, both narrow bounded corrections with no broader parser redesign. (1) Dotted-version-aware sentence splitting: added isDottedVersionPeriod (a '.' flanked by an ASCII digit on both sides is never a sentence boundary) and nextSentenceTerminator/prevSentenceTerminator, which scan for a real terminator while skipping any such period; enclosingSentence now uses these instead of a bare strings.IndexAny/LastIndexAny over '.!?'. A sentence such as 'Use the api_key query parameter only until 0.13.0.' is no longer split at the version's internal dots, stranding the removal-version context away from the recommendation it qualifies. (2) Recommend-verb detection: added recommend\\w* (recommend/recommends/recommended/recommending) to the existing weakRecommendationVerbPattern verb alternation, governed by the same proximity-to-api_key bound and the same anchor-word (parameter/param/query/field/header/credential) requirement as the other weak verbs -- no new, looser code path. Added TestScanTextDottedVersionNotSentenceBoundary (0.13.0 as the sole same-sentence context for a recommendation, mid-sentence/trailing/wrapped placements, does not violate; 0.13.0 context in an unrelated sentence still does not suppress a different sentence's unqualified recommendation) and TestScanTextRecommendVerb (each inflection paired with an anchor word violates, including wrapped; a historical recommended statement with same-sentence deprecation context, an anchor-less internal recommends mention, a no-longer-recommend-it-is-deprecated statement, and a recommend with no api_key mention do not). All prior fixtures, rules, redacted diagnostics, fail-closed scanner, and CI wiring preserved and still fully tested. Searched all shipped Markdown with the extended gate: 0 violations across 28 files, no doc wording changed. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
                                         "validation":  {
@@ -391,6 +391,15 @@
                                            "git_diff_check":  "clean",
                                            "lockfiles_unchanged":  true
                                        }
+                    },
+                    {
+                                        "iteration":  9,
+                                        "role":  "inspector",
+                                        "model":  "Claude:Haiku-4.5",
+                                        "verdict":  "PASS",
+                                        "feedback_file":  ".goals/deprecate-api-key-transports/inspector-feedback-9.md",
+                                        "summary":  "Both iteration-8 code-review findings fixed and verified: (1) Dotted-version-aware sentence splitting — isDottedVersionPeriod(), nextSentenceTerminator(), and prevSentenceTerminator() correctly handle periods flanked by ASCII digits as part of a version number, not sentence boundaries. enclosingSentence() now uses these helpers to bind removal-version context to the recommendation it qualifies in the same sentence. 'Use the api_key query parameter only until 0.13.0.' no longer splits at internal version dots. (2) Recommend-verb detection — added recommend\\w* to weakRecommendationVerbPattern with same proximity and anchor-word guards as other weak verbs. 'We recommend the api_key query parameter' now correctly violates absent context; 'We no longer recommend the api_key form parameter; it is deprecated' correctly does not (context suppresses); 'The scheduler recommends a retry backoff for the api_key rotation job' correctly does not (anchor-less). TestScanTextDottedVersionNotSentenceBoundary (4 cases: same-sentence context, mid-sentence/trailing placement, wrapped lines, cross-sentence non-suppression) and TestScanTextRecommendVerb (9 cases: anchor+verb violations, historical/anchor-less/no-api_key non-violations) all pass. All 51+ prior fixtures unchanged and passing. Docs gate: 0 violations across 28 shipped Markdown files. Full test suite, race detector, browser, Docker, all scanners pass. No runtime/auth/middleware/version/dependency changes. Ready for release.",
+                                        "completed_at":  "2026-10-01T21:43:57Z"
                     }
                 ]
 }
