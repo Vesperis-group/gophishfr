@@ -19,6 +19,14 @@ if (
 
 export default defineConfig({
   testDir: ".",
+  // event-details-purge.spec.ts has its own dedicated config
+  // (playwright.purge.config.ts) and Go test harness
+  // (controllers/browser_event_details_purge_test.go), which invoke it
+  // TWICE against the same server with a real purge executed in between.
+  // It must never also run here, under TestBrowserSmoke's single,
+  // unrestricted invocation of this default config, against that test's
+  // differently-shaped shared fixture data.
+  testIgnore: /event-details-purge\.spec\.ts$/,
   outputDir,
   fullyParallel: false,
   workers: 1,

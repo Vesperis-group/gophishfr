@@ -32,6 +32,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"time"
 
 	"gopkg.in/alecthomas/kingpin.v2"
 
@@ -105,6 +106,22 @@ var (
 		"inventory-event-details-keys",
 		"Read-only: count event details ciphertext rows by key ID, by parsing the envelope prefix only (no decryption).",
 	).Bool()
+	purgeEventDetailsBefore = kingpin.Flag(
+		"purge-event-details-before",
+		"Operator-triggered, irreversible: clear Event.Details/DetailsCiphertext (never decrypted) for every event older than this RFC3339 cutoff (e.g. 2026-07-01T00:00:00Z). There is no default cutoff and no automatic schedule. Requires exactly one of --dry-run or --yes.",
+	).String()
+	purgeEventDetailsDryRun = kingpin.Flag(
+		"dry-run",
+		"With --purge-event-details-before: report eligible counts only (oldest/newest time, min/max ID, distinct campaigns); writes nothing.",
+	).Bool()
+	purgeEventDetailsYes = kingpin.Flag(
+		"yes",
+		"With --purge-event-details-before: confirm and execute the real, irreversible purge. Required for any non-dry-run purge.",
+	).Bool()
+	purgeEventDetailsIncludeActiveCampaigns = kingpin.Flag(
+		"include-active-campaigns",
+		"With --purge-event-details-before: also consider events whose owning campaign is not yet Completed (excluded by default).",
+	).Bool()
 	mode = kingpin.Flag("mode", fmt.Sprintf("Run the binary in one of the modes (%s, %s or %s)", modeAll, modeAdmin, modePhish)).
 		Default("all").Enum(modeAll, modeAdmin, modePhish)
 )
@@ -133,6 +150,24 @@ func main() {
 		log.Warnf("Please consider adding a contact_address entry in your config.json")
 	}
 	config.Version = string(version)
+
+	// purgeEventDetailsRequested is computed once, from the raw flag value,
+	// rather than re-checking `*purgeEventDetailsBefore != ""` throughout
+	// this function: an empty/absent value means "purge not requested" --
+	// goal.md is explicit that this must never be a silent error, unlike a
+	// genuinely unparseable non-empty cutoff below.
+	purgeEventDetailsRequested := *purgeEventDetailsBefore != ""
+	var purgeEventDetailsCutoff time.Time
+	if purgeEventDetailsRequested {
+		if err := models.ValidateEventDetailsPurgeMode(*purgeEventDetailsDryRun, *purgeEventDetailsYes); err != nil {
+			log.Fatal(err)
+		}
+		purgeEventDetailsCutoff, err = models.ParseEventDetailsPurgeCutoff(*purgeEventDetailsBefore)
+		if err != nil {
+			log.Fatal(err)
+		}
+	}
+
 	credentialKeyringAction := *migrateIMAPCredentials ||
 		*rollbackIMAPCredentials ||
 		*migrateSMTPCredentials ||
@@ -157,6 +192,11 @@ func main() {
 		*finalizeEventDetails,
 		*rotateEventDetailsCredentials,
 		*inventoryEventDetailsKeys,
+		// The purge action counts toward this shared mutual-exclusivity
+		// counter -- it is irreversible and destructive, exactly like
+		// --rollback-event-details, and must never run combined with any
+		// other offline/online credential action in the same invocation.
+		purgeEventDetailsRequested,
 	} {
 		if selected {
 			credentialActions++
@@ -186,7 +226,7 @@ func main() {
 		}
 	}
 	if *migrateEventDetails || *rollbackEventDetails || *finalizeEventDetails ||
-		*rotateEventDetailsCredentials || *inventoryEventDetailsKeys {
+		*rotateEventDetailsCredentials || *inventoryEventDetailsKeys || purgeEventDetailsRequested {
 		if err := models.ValidateEventDetailsBackend(conf.DBName); err != nil {
 			log.Fatal(err)
 		}
@@ -353,6 +393,30 @@ func main() {
 		}
 		return
 	}
+	if purgeEventDetailsRequested {
+		// NEVER decrypt: this action needs no credentialCipher at all --
+		// see models.PurgeEventDetailsBefore's doc comment. It is never
+		// passed one, so decryption is structurally impossible here, not
+		// merely avoided by convention.
+		if *purgeEventDetailsDryRun {
+			report, err := models.ReportEventDetailsPurgeEligibility(purgeEventDetailsCutoff, *purgeEventDetailsIncludeActiveCampaigns)
+			if err != nil {
+				log.Fatal(err)
+			}
+			logEventDetailsPurgeReport("dry-run", report)
+			return
+		}
+		result, err := models.PurgeEventDetailsBefore(purgeEventDetailsCutoff, *purgeEventDetailsIncludeActiveCampaigns)
+		logEventDetailsPurgeReport("purge", result.EventDetailsPurgeReport)
+		log.Infof(
+			"event details purge: %d batches, %d purged, %d skipped (row no longer present)",
+			result.Batches, result.Purged, result.Skipped,
+		)
+		if err != nil {
+			log.Fatal(err)
+		}
+		return
+	}
 
 	// Unlock any maillogs that may have been locked for processing
 	// when GophishFR was last shut down.
@@ -474,6 +538,36 @@ func logEventDetailsBatchResult(
 	for _, failure := range failed {
 		log.Errorf("event %d %s failure: %s", failure.EventID, action, failure.Reason)
 	}
+}
+
+// logEventDetailsPurgeReport reports ONLY the non-secret aggregate counters
+// goal.md's CLI contract specifies -- eligible count, oldest/newest
+// eligible Event.Time, min/max eligible Event.Id, and distinct campaign
+// count -- for both --dry-run and the real purge's own pre-purge summary.
+// It never logs Details, DetailsCiphertext, or any other row content.
+func logEventDetailsPurgeReport(action string, report models.EventDetailsPurgeReport) {
+	log.Infof(
+		"event details %s: %d eligible, oldest=%s newest=%s min_id=%d max_id=%d campaigns=%d",
+		action,
+		report.Eligible,
+		formatOptionalEventTime(report.OldestEventTime),
+		formatOptionalEventTime(report.NewestEventTime),
+		report.MinEventID,
+		report.MaxEventID,
+		report.DistinctCampaigns,
+	)
+}
+
+// formatOptionalEventTime renders a zero time.Time (meaning "no eligible
+// rows, so there is no oldest/newest to report") as "n/a" instead of Go's
+// default zero-value string, and every other value as RFC3339 -- operator-
+// readable and unambiguous about the UTC normalization every eligible
+// Event.Time already uses.
+func formatOptionalEventTime(t time.Time) string {
+	if t.IsZero() {
+		return "n/a"
+	}
+	return t.Format(time.RFC3339)
 }
 
 func runSMTPCredentialAction(
