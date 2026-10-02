@@ -670,10 +670,29 @@
             "iteration": 16,
             "role": "builder",
             "model": "Claude:Sonnet-5",
-            "commit_sha": "PENDING",
+            "commit_sha": "33927492cfc57f2b9fd6105331666370ef662011",
             "commit_title": "fix(docs): [B] close bounded guard bypasses",
             "summary": "Closed all four iteration-15 security-review findings with bounded, deterministic stdlib-only logic, no dependency added: (1) markdownLinkPattern and htmlCommentInlinePattern strip rendered-link/comment splits, <a> added to the safe-inline-tag allow-list, &nbsp; added to the entity table decoding to the real non-breaking-space code point; (2) hasAffirmativeDeprecationContext reworked to require exact-occurrence binding (nearestAPIKeyOccurrence) between a context word and its recommendation, falling back to the prior transport-kind-only rule only when both sides are fully transport-ambiguous, plus a narrow only-for/just-for restrictiveQualifierPattern exclusion and a shared isNegatedAt helper now also excluding directly negated recommendation matches; (3) wholeSpanEmphasisPatterns/stripWholeSpanEmphasis strip a whole credential-shaped value wrapped end-to-end in a matching *//_ / ** / __ / ~~ delimiter run, with underscore variants boundary-restricted to avoid mis-stripping snake_case identifiers; (4) html.go's flattenHTMLBlockVisibleText refactored (htmlVisibleLine to htmlVisibleSegment) to track verbatim state per segment rather than per whole physical line, so mixed <code>/<pre>-plus-prose lines are scanned correctly. All prior iteration 1-15 fixtures pass unchanged; new permanent fixtures added for every reviewer example and composition. go.mod/go.sum re-verified byte-for-byte identical to the pre-goldmark base via sha256sum. Full go test ./..., scripts/verify-docs-canonical-examples.sh (0/28), ./scripts/verify.sh, gosec (12, unchanged), gitleaks (1, unchanged), actionlint, zizmor, ./scripts/test-browser.sh, Docker build + scripts/test-docker-config-no-log.sh all pass. No runtime auth/middleware/header/status/version/dependency change.",
-            "completed_at": "PENDING"
+            "completed_at": "2026-10-02T14:30:00Z",
+            "validation": {
+                "go_test": "pass (internal/docsguard: 26 test functions all pass)",
+                "go_mod_verify": "pass",
+                "go_mod_go_sum_identical": "confirmed (sha256sum both match base 99c9a50)",
+                "docsguard_gate": "pass (0 violations across 28 files)",
+                "browser_test": "pass",
+                "docker_test": "pass",
+                "security_scanners": "pass (unchanged baseline)"
+            }
+        },
+        {
+            "iteration": 16,
+            "role": "inspector",
+            "model": "Claude:Haiku-4.5",
+            "verdict": "PASS",
+            "feedback_file": ".goals/deprecate-api-key-transports/inspector-feedback-16.md",
+            "summary": "All four reviewer-identified bypasses fully closed with bounded, deterministic stdlib-only logic. Markdown links and HTML comments normalized before credential matching. &lt;a&gt; tags and &nbsp; entity properly handled. Whole-span emphasis recognized with nesting. Mixed HTML verbatim segments scanned per-segment. Deprecation context bound to exact occurrence. All 49+ acceptance criteria preserved. go.mod/go.sum byte-identical to base. 26 test functions all pass. Docs gate 0 violations. No runtime/auth/version changes.",
+            "completed_at": "2026-10-02T14:45:00Z",
+            "commit_sha": "pending"
         }
     ]
 }
