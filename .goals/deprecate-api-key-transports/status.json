@@ -1,7 +1,7 @@
 {
     "goal_id":  "deprecate-api-key-transports",
     "status":  "inspecting",
-    "iteration":  10,
+    "iteration":  11,
     "builder_model":  "Claude:Sonnet-5",
     "inspector_model":  "Claude:Haiku-4.5",
     "initial_sha":  "99c9a50848e8a826360ea7585a57d7e6f753a34c",
@@ -444,6 +444,41 @@
                                         "feedback_file":  ".goals/deprecate-api-key-transports/inspector-feedback-10.md",
                                         "summary":  "Iteration-9 code-review finding fixed and verified: clause scoping for adversative connectors. A deprecation-context keyword in one clause of a sentence, separated from an api_key recommendation in a different clause by an adversative connector (but/however/yet/though/although/nevertheless/nonetheless/whereas), no longer incorrectly suppresses that recommendation. Added adversativeBoundaryPattern regex and updated hasAffirmativeDeprecationContext to check whether an adversative connector sits between a deprecation-context word and the recommendation match being evaluated, in either direction. If an adversative separator exists, the context describes a contrasting clause and does not qualify the recommendation. Deliberate omission: semicolons and em/en dashes are NOT adversative; they mark elaboration and continue to suppress (\"Do not use the api_key query parameter; it is deprecated\"). Plain connectors like \"so\" and \"and\" also do not block (same-clause consequence/elaboration). One iteration-8 fixture corrected: \"The api_key query parameter is deprecated, but some old docs still say to use the api_key query parameter\" now correctly violates (\"but\" creates clause boundary; docsguard does not resolve coreference, only clause membership). TestScanTextDeprecationContextScopedToClause (9 fixtures: 6 positive adversative-separated violations both directions, wrapped forms; 3 negative same-clause elaborations/non-adversatives) all pass. All 70+ prior fixtures unchanged and passing. Docs gate: 0 violations across 28 shipped Markdown files. Full test suite, race detector, browser, Docker, all scanners pass. No runtime/auth/middleware/version/dependency changes. Release ready.",
                                         "completed_at":  "2026-10-02T00:03:24Z"
+                    },
+                    {
+                                        "iteration":  10,
+                                        "role":  "security-review",
+                                        "verdict":  "MEDIUM",
+                                        "feedback_file":  ".goals/deprecate-api-key-transports/review-feedback-10.md",
+                                        "summary":  "Confidence 9/10. internal/docsguard scans raw Markdown and did not normalize Markdown backslash escapes or HTML character references before matching. Canonical docs could pass while rendering a functional deprecated example, e.g. api\\_key=TOKEN, api&#95;key=TOKEN, Authorization&#58; TOKEN. Required a bounded normalization step (not a general Markdown parser) applied before matching, comprehensive positive fixtures for backslash escapes and named/numeric (decimal/hex, case variants) HTML references affecting api_key and Authorization:, negative fixtures against false positives from unrelated entities/escapes, and coverage of encoded characters throughout every protected anchor, not just the three given examples. User selected: fix all issues."
+                    },
+                    {
+                                        "iteration":  11,
+                                        "role":  "builder",
+                                        "model":  "Claude:Sonnet-5",
+                                        "commit_sha":  "PENDING",
+                                        "commit_title":  "fix(docs): [B] normalize rendered credential examples",
+                                        "summary":  "Fixed the security-review finding in internal/docsguard, test/docs-only. Added normalizeRenderedEscapes, applied to every physical line before any other pattern runs (credential-syntax checks, the table-row check, and the paragraph grouping that feeds the recommendation-prose check), so an escaped example cannot evade any check, not only the credential-syntax ones. Three bounded sub-transformations: (1) backslashEscapePattern undoes a backslash followed by any CommonMark/GFM-escapable ASCII punctuation character, covering every punctuation character in a protected anchor (api_key's underscore, Authorization's colon, query/form's =/&), not just the underscore named in the finding; (2) numericCharRefPattern decodes every decimal and hexadecimal HTML numeric character reference (any case mix of the x/X prefix and hex digits), safe and general by construction since each one names exactly one code point; (3) a narrow, explicit namedCharRefReplacements table recognizes only the handful of named HTML references that render as a punctuation character a protected anchor depends on (amp, lowbar/UnderBar, colon, equals, num, quest, semi, sol, bsol) -- an unrecognized name is left exactly as written, deliberately not a general ~2,000-entry HTML5 named-entity table, to avoid turning this package into a general HTML/Markdown parser. Added TestScanTextRenderedEscapeNormalization: 18 positive fixtures (backslash-escaped underscore/equals, both named-entity spellings and all four hex case combinations for the underscore, an HTML-encoded query-string ampersand not blocking detection, a combined backslash+entity token, Authorization's colon via backslash/named/decimal/hex references, and escaped api_key in recommendation prose and a table row) and 5 negative fixtures (unrecognized named entity, non-punctuation backslash escape, unrelated backslash/numeric decodes, and a genuine deprecation notice containing an unrelated entity). All prior fixtures (iterations 5-10) and the full repository test suite pass unchanged. Searched all shipped Markdown with the extended gate: 0 violations across 28 files, no doc wording changed. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
+                                        "validation":  {
+                                           "verify_sh":  "pass",
+                                           "go_test":  "pass (including the new 23-case docsguard escape-normalization test and the full repository suite go test ./...; all prior fixtures unchanged and passing)",
+                                           "go_test_race":  "pass",
+                                           "go_vet":  "pass",
+                                           "go_build":  "pass",
+                                           "golangci_lint":  "0 issues",
+                                           "govulncheck":  "pass (0 reachable vulnerabilities)",
+                                           "gosec":  "12 pre-existing findings, same baseline; no new finding",
+                                           "gitleaks":  "1 pre-existing finding from 2026-09-03 history, unrelated to this PR; current working tree clean (--no-git); no new finding",
+                                           "actionlint":  "pass",
+                                           "zizmor":  "pass (2 pre-existing documented suppressions)",
+                                           "yarn_audit":  "4 pre-existing moderate findings in transitive webpack devDependency, lockfile unchanged",
+                                           "retire_js":  "pass",
+                                           "browser_tests":  "pass (scripts/test-browser.sh)",
+                                           "docker_compat_tests":  "pass (scripts/test-container-api-session-auth.sh, scripts/test-container-api-key-verifier.sh)",
+                                           "docs_gate_sanity_check":  "scripts/verify-docs-canonical-examples.sh reports 0 violations across all 28 tracked shipped Markdown files",
+                                           "git_diff_check":  "clean",
+                                           "lockfiles_unchanged":  true
+                                       }
                     }
                 ]
 }

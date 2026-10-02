@@ -544,3 +544,87 @@ func TestScanTextRecommendVerb(t *testing.T) {
 		})
 	}
 }
+
+// TestScanTextRenderedEscapeNormalization proves a Markdown-source escape
+// that a renderer (GitHub's included) turns back into a literal character --
+// a CommonMark backslash escape or an HTML numeric/named character
+// reference -- cannot be used to hide a functional deprecated-transport
+// example from this literal scanner: `api\_key=TOKEN`, `api&#95;key=TOKEN`,
+// and `Authorization&#58; TOKEN` must all be caught exactly like their plain
+// forms, across every anchor this package protects (api_key's underscore,
+// Authorization's colon, and the `=`/`&` of query/form syntax), not just the
+// three examples named in the finding that prompted this fixture set.
+func TestScanTextRenderedEscapeNormalization(t *testing.T) {
+	positive := []struct {
+		text string
+		kind Kind
+	}{
+		// Backslash-escaped underscore and equals in a parameter credential.
+		{`curl -d "api\_key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		{`curl -d "api_key\=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		// Named HTML character references for the underscore, in both
+		// recognized spellings.
+		{`curl "https://gophishfr.example/api/groups/summary?api&lowbar;key=TOKEN"`, KindParameterCredential},
+		{`curl "https://gophishfr.example/api/groups/summary?api&UnderBar;key=TOKEN"`, KindParameterCredential},
+		// Decimal and hexadecimal numeric character references for the
+		// underscore, including both cases of the hex prefix and digits.
+		{`curl "https://gophishfr.example/api/groups/summary?api&#95;key=TOKEN"`, KindParameterCredential},
+		{`curl "https://gophishfr.example/api/groups/summary?api&#x5f;key=TOKEN"`, KindParameterCredential},
+		{`curl "https://gophishfr.example/api/groups/summary?api&#X5F;key=TOKEN"`, KindParameterCredential},
+		{`curl "https://gophishfr.example/api/groups/summary?api&#x5F;key=TOKEN"`, KindParameterCredential},
+		{`curl "https://gophishfr.example/api/groups/summary?api&#X5f;key=TOKEN"`, KindParameterCredential},
+		// An HTML-encoded query-string ampersand joining an otherwise
+		// plain api_key parameter must not block detection of it.
+		{`curl "https://gophishfr.example/api/groups/?other=1&amp;api_key=TOKEN"`, KindParameterCredential},
+		// Backslash and character-reference escapes combined in the same
+		// token, proving the normalization order handles both.
+		{`curl -d "api&#95;key\=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		// Authorization's colon, escaped three ways.
+		{`curl -H "Authorization\: TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
+		{`curl -H "Authorization&colon; TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
+		{`curl -H "Authorization&#58; TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
+		{`curl -H "Authorization&#x3a; TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
+		{`curl -H "Authorization&#X3A; TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
+		// Recommendation prose and a table row, each with an escaped
+		// api_key, proving the normalization also protects the
+		// documentation-accuracy checks, not just the credential-syntax
+		// ones.
+		{`Use the api\_key query parameter for authentication.`, KindUndeprecatedParameterMention},
+		{`Use the api&#95;key query parameter for authentication.`, KindUndeprecatedParameterMention},
+		{`| Auth | api\_key |`, KindUndeprecatedParameterMention},
+	}
+	for _, c := range positive {
+		t.Run(c.text, func(t *testing.T) {
+			violations := mustScan(t, c.text)
+			if !containsKind(violations, c.kind) {
+				t.Fatalf("expected a %s violation for %q, got %v", c.kind, c.text, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// An unrecognized named entity (not in the narrow table) must be
+		// left exactly as written, not decoded into something unexpected.
+		"Price: &euro;100 or &pound;80, see api_key docs for details.",
+		// A genuine affirmative deprecation notice that happens to also
+		// contain an unrelated named entity must still suppress.
+		"The `api_key` query parameter is deprecated &mdash; see the migration guide.",
+		// A backslash preceding a non-punctuation character (not in
+		// CommonMark's escapable set) must be left untouched.
+		`Use \n for newlines, not the api_key parameter, which is deprecated.`,
+		// A backslash-escaped character that decodes to something with no
+		// relationship to api_key at all.
+		"The regex uses `a\\.b` to match a literal dot, unrelated to api_key naming.",
+		// A numeric character reference that decodes to a character with
+		// no relationship to api_key.
+		"Use &#65; as a placeholder value; it has nothing to do with api_key.",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if len(violations) != 0 {
+				t.Fatalf("unexpected violation(s) for %q: %v", text, violations)
+			}
+		})
+	}
+}

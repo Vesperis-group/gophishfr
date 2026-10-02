@@ -19,6 +19,14 @@
 // same literal contract is what keeps false positives and false negatives
 // both low without a real HTTP/Markdown parser.
 //
+// Before any of that matching happens, every line is normalized (see
+// normalizeRenderedEscapes) to undo the one class of disguise a canonical
+// *source* Markdown file could use to hide a functional example from a
+// literal scanner while still rendering it in full: a CommonMark backslash
+// escape (`api\_key`) or an HTML numeric/narrow-named character reference
+// (`api&#95;key`, `Authorization&#58;`). This is a single, bounded,
+// documented transformation, not a general HTML/Markdown parser.
+//
 // Every reported Violation carries only a file-relative line range and a
 // Kind; it never carries the matched text, so a forbidden example that
 // happens to contain a real secret is never echoed by a caller that prints
@@ -31,6 +39,7 @@ import (
 	"fmt"
 	"net/url"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -366,6 +375,93 @@ var recognizedAuthSchemes = map[string]bool{
 	"ntlm":      true,
 }
 
+// backslashEscapePattern matches a backslash followed by one of the ASCII
+// punctuation characters CommonMark/GitHub Flavored Markdown treats as
+// escapable (`!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~`). A renderer turns each such
+// pair into the bare punctuation character alone -- `api\_key` and
+// `Authorization\:` render identically to `api_key` and `Authorization:` --
+// so this must be undone before any pattern matching, or an escaped example
+// would read as canonical prose while still rendering as a working,
+// deprecated credential example.
+var backslashEscapePattern = regexp.MustCompile(`\\([\x21-\x2F\x3A-\x40\x5B-\x60\x7B-\x7E])`)
+
+// numericCharRefPattern matches a decimal (`&#95;`) or hexadecimal
+// (`&#x5f;`, `&#X5F;`, and any other case mix of the `x`/`X` prefix and hex
+// digits) numeric character reference. Decoding every numeric reference this
+// way is safe and unambiguous -- each one names exactly one Unicode code
+// point -- unlike named references, which this package only recognizes for
+// a narrow, explicit list (see namedCharRefReplacements); it is not a
+// general HTML/XML entity parser, only this one well-defined, bounded
+// transformation.
+var numericCharRefPattern = regexp.MustCompile(`&#(?:[xX]([0-9a-fA-F]+)|([0-9]+));`)
+
+// namedCharRefReplacements maps a narrow, explicit list of HTML named
+// character references to the single literal character each one renders as,
+// restricted to exactly the punctuation that appears in the protected
+// anchors this package matches against: the underscore in `api_key`, the
+// colon after `Authorization`, the `=`/`&`/`?`/`;` of query and form syntax,
+// and the backslash/other delimiters that could themselves be used to
+// reference one of those. This is deliberately not a general named-entity
+// table (the full HTML5 list has over 2,000 entries): adding an unrelated
+// one here would risk decoding something this package was never meant to
+// touch, which is exactly the "general Markdown/HTML parser" scope this
+// package avoids.
+var namedCharRefReplacements = map[string]string{
+	"&amp;":      "&",
+	"&AMP;":      "&",
+	"&lowbar;":   "_",
+	"&UnderBar;": "_",
+	"&colon;":    ":",
+	"&equals;":   "=",
+	"&num;":      "#",
+	"&quest;":    "?",
+	"&semi;":     ";",
+	"&sol;":      "/",
+	"&bsol;":     "\\",
+}
+
+// namedCharRefPattern finds every candidate `&name;` token so
+// normalizeRenderedEscapes can look each one up in namedCharRefReplacements
+// without a full named-entity table: an unrecognized name (e.g. `&copy;`,
+// `&hearts;`) is left exactly as written.
+var namedCharRefPattern = regexp.MustCompile(`&[A-Za-z][A-Za-z0-9]*;`)
+
+// normalizeRenderedEscapes rewrites a line into the plain text it would
+// render as in GitHub's Markdown, undoing exactly two escape mechanisms a
+// canonical-looking documentation example could otherwise hide behind: a
+// CommonMark backslash escape (see backslashEscapePattern) and an HTML
+// numeric or narrowly-recognized named character reference (see
+// numericCharRefPattern and namedCharRefReplacements). It intentionally does
+// not parse Markdown or HTML more generally -- no tags, no CDATA, no
+// arbitrary named-entity table -- only this bounded, documented
+// transformation, applied before every other pattern in this package so a
+// rendered-but-disguised example (`api\_key=TOKEN`, `api&#95;key=TOKEN`,
+// `Authorization&#58; TOKEN`) is caught the same way its plain form is.
+func normalizeRenderedEscapes(line string) string {
+	line = numericCharRefPattern.ReplaceAllStringFunc(line, func(ref string) string {
+		m := numericCharRefPattern.FindStringSubmatch(ref)
+		var codePoint int64
+		var err error
+		if m[1] != "" {
+			codePoint, err = strconv.ParseInt(m[1], 16, 32)
+		} else {
+			codePoint, err = strconv.ParseInt(m[2], 10, 32)
+		}
+		if err != nil || codePoint <= 0 || codePoint > 0x10FFFF {
+			return ref
+		}
+		return string(rune(codePoint))
+	})
+	line = namedCharRefPattern.ReplaceAllStringFunc(line, func(ref string) string {
+		if replacement, ok := namedCharRefReplacements[ref]; ok {
+			return replacement
+		}
+		return ref
+	})
+	line = backslashEscapePattern.ReplaceAllString(line, "$1")
+	return line
+}
+
 // ScanText scans arbitrary text (typically one Markdown file's contents) and
 // returns every deprecated-transport example it finds. It returns a non-nil
 // error if the scanner itself failed -- most importantly bufio.ErrTooLong on
@@ -381,7 +477,12 @@ func ScanText(text string) ([]Violation, error) {
 	lineNo := 0
 	for scanner.Scan() {
 		lineNo++
-		line := scanner.Text()
+		// Normalize the Markdown/HTML escape forms a renderer would turn
+		// back into a literal character before any pattern matching: a
+		// canonical-looking `api\_key=TOKEN` or `api&#95;key=TOKEN` renders
+		// in GitHub's Markdown exactly like `api_key=TOKEN` and must be
+		// caught the same way. See normalizeRenderedEscapes.
+		line := normalizeRenderedEscapes(scanner.Text())
 		lines = append(lines, line)
 		if hasParameterCredential(line) {
 			violations = append(violations, Violation{StartLine: lineNo, EndLine: lineNo, Kind: KindParameterCredential})

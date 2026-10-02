@@ -648,6 +648,75 @@ diagnostic-redaction — pass unchanged.
 A full run of `scripts/verify-docs-canonical-examples.sh` against every
 tracked Markdown file found 0 violations; no doc wording changed.
 
+## Iteration 11: independent security-review finding and fix
+
+An independent security review of the iteration-10 state returned a
+MEDIUM-severity finding (9/10 confidence): `internal/docsguard` scans raw
+Markdown source and did not normalize Markdown backslash escapes or HTML
+character references before matching. A canonical-looking documentation
+example could render as a fully functional deprecated-transport example in
+GitHub's Markdown while evading this literal scanner --
+`api\_key=TOKEN`, `api&#95;key=TOKEN`, and `Authorization&#58; TOKEN` all
+render identically to their plain forms but previously matched none of
+this package's patterns.
+
+### Finding — rendered Markdown/HTML escapes could hide a functional example from the literal scanner
+
+Fixed by adding a single, bounded normalization step
+(`normalizeRenderedEscapes`), applied to every line before any other
+pattern in this package runs:
+
+- **Backslash escapes** — `backslashEscapePattern` undoes a backslash
+  followed by any of the ASCII punctuation characters CommonMark/GFM treats
+  as escapable (`!"#$%&'()*+,-./:;<=>?@[\]^_`{|}~`), covering every
+  punctuation character that appears in a protected anchor (`api_key`'s
+  underscore, `Authorization`'s colon, and query/form syntax's `=`/`&`),
+  not just the underscore named in the finding.
+- **Numeric character references** — `numericCharRefPattern` decodes every
+  decimal (`&#95;`) and hexadecimal (`&#x5f;`, `&#X5F;`, and any other case
+  mix of the `x`/`X` prefix and hex digits) reference. This is safe and
+  general by construction (each one names exactly one code point); it is
+  not a loophole-prone guess, unlike named references.
+- **Named character references** — a narrow, explicit
+  `namedCharRefReplacements` table recognizes only the handful of HTML
+  named references that render as a punctuation character this package's
+  protected anchors depend on (`&amp;`, `&lowbar;`/`&UnderBar;`, `&colon;`,
+  `&equals;`, `&num;`, `&quest;`, `&semi;`, `&sol;`, `&bsol;`). An
+  unrecognized name (`&copy;`, `&mdash;`, `&euro;`, ...) is left exactly as
+  written -- this is deliberately not a general ~2,000-entry HTML5
+  named-entity table, which would turn this package into the general
+  HTML/Markdown parser it is explicitly designed not to be.
+
+Normalization happens once, per physical line, before the line is used for
+*any* check -- the credential-syntax checks (`KindParameterCredential`,
+`KindRawAuthorization`), the per-line table-row check, and the
+paragraph-grouping that feeds the recommendation-prose check -- so an
+escaped `api_key` cannot evade the documentation-accuracy checks either,
+not only the credential-syntax ones. No downstream function needed to
+change: each already receives already-normalized plain text.
+
+New fixtures (`TestScanTextRenderedEscapeNormalization`): backslash-escaped
+underscore and equals in a parameter credential; the underscore via both
+recognized named references; the underscore via decimal and all four hex
+case combinations; an HTML-encoded query-string ampersand not blocking
+detection of the `api_key` it joins; a combined backslash+entity example in
+one token; `Authorization`'s colon via backslash, named, and decimal/hex
+numeric references; and an escaped `api_key` in recommendation prose and in
+a table row. Negative fixtures prove an unrecognized named entity, a
+backslash before a non-punctuation character, an unrelated backslash
+escape, and an unrelated numeric reference do not create false positives,
+and that a genuine deprecation notice containing an unrelated entity still
+suppresses correctly.
+
+All prior rules -- paragraph/clause-scoped context, direct-negation,
+dotted-version-aware sentence splitting, proximity bounds, percent-decoded
+parameter names, recommend-verb detection, the fail-closed scanner, and
+redacted diagnostics -- are unchanged. A full run of
+`scripts/verify-docs-canonical-examples.sh` against every tracked Markdown
+file found 0 violations; no doc wording changed. No runtime
+authentication/middleware/header/status/version/dependency behavior
+changed.
+
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |
@@ -828,6 +897,23 @@ tracked Markdown file found 0 violations; no doc wording changed.
   fixture, pass unchanged under the clause-scoped context association.
 - `./scripts/verify-docs-canonical-examples.sh` re-run against every
   tracked Markdown file after the iteration-10 fix: 0 violations across 28
+  shipped Markdown files, no doc wording changed.
+- `TestScanTextRenderedEscapeNormalization` (iteration 11, new): a
+  backslash-escaped underscore/equals in a parameter credential; the
+  underscore via both recognized named HTML references; the underscore via
+  decimal and all four hex-prefix/digit case combinations; an HTML-encoded
+  query-string ampersand not blocking detection of the `api_key` it joins;
+  a combined backslash+entity example in one token; `Authorization`'s
+  colon via backslash, named, and decimal/hex numeric references; and an
+  escaped `api_key` in both recommendation prose and a table row -- all
+  violate. An unrecognized named entity, a backslash before a
+  non-punctuation character, an unrelated backslash escape, an unrelated
+  numeric reference, and a genuine deprecation notice containing an
+  unrelated entity do not. All prior `internal/docsguard` fixtures,
+  including every iteration 5–10 fixture, and the full repository test
+  suite (`go test ./...`) pass unchanged under the new normalization step.
+- `./scripts/verify-docs-canonical-examples.sh` re-run against every
+  tracked Markdown file after the iteration-11 fix: 0 violations across 28
   shipped Markdown files, no doc wording changed.
 
 ## Why a bounded deprecation window instead of immediate removal
