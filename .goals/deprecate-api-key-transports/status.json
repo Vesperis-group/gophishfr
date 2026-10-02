@@ -191,7 +191,7 @@
                         "iteration":  5,
                         "role":  "builder",
                         "model":  "Claude:Sonnet-5",
-                        "commit_sha":  "PENDING",
+                        "commit_sha":  "d7a89ce1ed76eb1f1812421a9bb000554358ada3",
                         "commit_title":  "fix(docs): [B] fail closed on deprecated examples",
                         "summary":  "Fixed all four iteration-4 review findings in internal/docsguard, docs/test-only: (1) Authorization header name stays case-insensitive but the Bearer scheme itself now requires the runtime's exact case-sensitive 'Bearer' casing (strings.TrimPrefix in middleware.extractExplicitAPICredential is case-sensitive) -- any other casing (bearer/BEARER/BeaRer) is flagged as raw_authorization, while unrelated schemes (Basic/Digest/Negotiate/NTLM) remain case-insensitively allowed per RFC 7235; (2) hasParameterCredential now finds every key= token via regexp, percent-decodes the key with net/url.QueryUnescape, and compares the decoded value to exactly 'api_key', catching percent-encoded names like api%5Fkey that Go's net/url and net/http would also decode and accept at runtime; (3) ScanText's signature changed to ([]Violation, error), propagating bufio.Scanner's Err() (including ErrTooLong on an oversized line) instead of silently returning fewer violations, and cmd/docsguard fails closed (exit 2) on any scan error; (4) docs/API_KEY_TRANSPORT_DEPRECATION.md's Content-Type wording corrected to describe the parsed media type (via Go's mime.ParseMediaType, which ParseForm calls) rather than an exact string match, explicitly noting media-type parameters such as charset=UTF-8 are allowed and ignored -- verified empirically with a throwaway Go program. Added fixture tests for every new/changed rule: wrong-case Bearer (positive) alongside exact-case and header-name-case-insensitive (negative); percent-encoded api_key query/form parameters (positive) alongside a percent-encoded non-matching key (negative); an oversized-line-then-forbidden-suffix test at both the internal/docsguard and cmd/docsguard levels proving fail-closed behaviour. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
                         "validation":  {
@@ -215,6 +215,15 @@
                                            "git_diff_check":  "clean",
                                            "lockfiles_unchanged":  true
                                        }
+                    },
+                    {
+                        "iteration":  5,
+                        "feedback_file":  ".goals/deprecate-api-key-transports/inspector-feedback-5.md",
+                        "verdict":  "PASS",
+                        "model":  "Claude:Haiku-4.5",
+                        "role":  "inspector",
+                        "summary":  "All four iteration-4 review findings successfully fixed: (1) Bearer scheme casing now enforced exactly (header name stays case-insensitive per RFC 9110, scheme prefix is exact 'Bearer ' to match runtime strings.TrimPrefix behavior); (2) percent-encoded parameter names now detected via explicit URL decoding (api%5Fkey caught and decoded to api_key before comparison); (3) scanner errors propagated and CLI exits 2 (fail closed) on any error including bufio.ErrTooLong for oversized lines; (4) Content-Type documentation corrected to describe parsed media type with allowed parameters (matching Go's mime.ParseMediaType behavior). All 49 original + 7 review + 7 review + iteration-5 correctness criteria verified met. Comprehensive new/changed fixtures cover Bearer wrong-case variants (4), percent-encoded keys (3 positive + 1 negative), oversized-line fail-closed behavior (package + CLI level), header-name case-insensitivity. All gates pass. Zero runtime auth/middleware/dependency changes. VERSION unchanged (0.12.1).",
+                        "completed_at":  "2026-10-02T09:30:00+02:00"
                     }
                 ]
 }
