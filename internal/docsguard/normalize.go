@@ -49,6 +49,15 @@ var namedCharRefReplacements = map[string]string{
 	"&semi;":     ";",
 	"&sol;":      "/",
 	"&bsol;":     "\\",
+	// &nbsp; decodes to U+00A0 (non-breaking space), deliberately *not*
+	// a plain ASCII space: a browser renders it visually indistinguishably
+	// from one, but it is a different byte, so "Authorization:
+	// Bearer&nbsp;TOKEN" does not actually satisfy the runtime's exact
+	// literal "Bearer " (ASCII space) prefix check -- decoding to the true
+	// code point, rather than normalizing it away to a plain space, is
+	// what correctly leaves rawAuthorizationMatches flagging it as
+	// non-canonical.
+	"&nbsp;": "\u00A0",
 }
 
 // namedCharRefPattern finds every candidate `&name;` token so
@@ -60,15 +69,42 @@ var namedCharRefPattern = regexp.MustCompile(`&[A-Za-z][A-Za-z0-9]*;`)
 // safeInlineTagPattern matches an opening or closing tag for a narrow,
 // explicit allow-list of safe inline HTML formatting elements GitHub's
 // Markdown renders as real HTML, with or without attributes: em, i, b,
-// strong, u, s, del, ins, mark, small, sub, sup, span, abbr, code. A
+// strong, u, s, del, ins, mark, small, sub, sup, span, abbr, code, a. A
 // documentation example can use one of these purely to visually split one
 // of this package's protected anchors while still rendering as plain,
 // readable text -- `api<em>_</em>key=TOKEN` renders exactly like
-// `api_key=TOKEN` -- so these tags are stripped (never their content)
-// before any other pattern runs. This is deliberately a short, explicit
-// list of tag *names*, not a general HTML tag parser: anything else (a
-// `<script>`, an `<img>`, an unknown or custom element) is left untouched.
-var safeInlineTagPattern = regexp.MustCompile(`(?i)</?(?:em|i|b|strong|u|s|del|ins|mark|small|sub|sup|span|abbr|code)(?:\s[^>]*)?>`)
+// `api_key=TOKEN`, and `api<a>_</a>key=TOKEN` the same way -- so these tags
+// are stripped (never their content) before any other pattern runs. This is
+// deliberately a short, explicit list of tag *names*, not a general HTML
+// tag parser: anything else (a `<script>`, an `<img>`, an unknown or
+// custom element) is left untouched. An `<a href="...">` tag's attribute
+// (the destination URL) is dropped along with the tag markup itself, the
+// same way a Markdown link's destination is (see markdownLinkPattern):
+// neither is ever inspected as visible text.
+var safeInlineTagPattern = regexp.MustCompile(`(?i)</?(?:em|i|b|strong|u|s|del|ins|mark|small|sub|sup|span|abbr|code|a)(?:\s[^>]*)?>`)
+
+// htmlCommentInlinePattern matches an inline HTML comment within ordinary
+// Markdown prose (as opposed to a raw HTML block, which html.go handles
+// separately): `<!-- ... -->`. A comment never renders as visible text at
+// all, so it is dropped entirely -- `api<!-- -->_key=TOKEN` renders
+// exactly like `api_key=TOKEN`. This is bounded to a single physical line
+// (CommonMark's own inline-comment-within-a-paragraph case is always one
+// line in practice for the examples this package protects); a comment
+// genuinely spanning multiple physical lines inside a raw HTML block is
+// handled separately by html.go.
+var htmlCommentInlinePattern = regexp.MustCompile(`(?s)<!--.*?-->`)
+
+// markdownLinkPattern matches an inline Markdown link, `[text](url)`: only
+// the bracketed link text ever renders as visible text; the parenthesized
+// destination is never shown and must not be inspected as if it were --
+// `[api](url)_key=TOKEN` renders exactly like `api_key=TOKEN`, and
+// `Author[ization](url):` renders exactly like `Authorization:`. This is
+// deliberately a single, non-nested pattern (no nested `[...]` or `(...)`
+// inside the text or destination): a genuinely nested link is a rare,
+// malformed-looking construct this package conservatively leaves
+// unmatched (and therefore scanned as literal bracket/paren text) rather
+// than risk mismatching bracket pairs.
+var markdownLinkPattern = regexp.MustCompile(`\[([^\[\]]*)\]\([^()]*\)`)
 
 // renderedMarkupSplitPattern matches a Markdown emphasis/strong-emphasis/
 // strikethrough delimiter run (one to three asterisks, one to three
@@ -87,8 +123,92 @@ var safeInlineTagPattern = regexp.MustCompile(`(?i)</?(?:em|i|b|strong|u|s|del|i
 // avoids that ambiguity, since none of `_:=&` is itself a delimiter
 // character this pattern also tries to match as wrapped content.
 var renderedMarkupSplitPattern = regexp.MustCompile(
-	`(?:\*{1,3}|_{1,3}|~{1,2})([_:=&])(?:\*{1,3}|_{1,3}|~{1,2})`,
+	`(?:\*{1,3}|_{1,3}|~{1,2})([_:=&])(?:\*{1,3}|~{1,2}|_{1,3})`,
 )
+
+// wholeSpanEmphasisPatterns strip a *matching-length* emphasis/strong/
+// strikethrough delimiter run wrapping an entire credential-shaped span --
+// `**api_key=TOKEN**` renders exactly like `api_key=TOKEN` (genuine,
+// valid CommonMark strong emphasis around a whole non-whitespace run, not
+// the single-wrapped-character case renderedMarkupSplitPattern handles).
+// Go's regexp package has no backreferences (no way to write "a closing
+// run of the same length as the opening run" as one pattern -- see
+// inlineCodeSpanRanges), so this is a small, fixed enumeration of every
+// exact delimiter length CommonMark recognizes (`*`, `**`, `***`, `_`,
+// `__`, `___`, `~~`) instead, tried longest-first so a triple-delimiter
+// run is never partially matched by a shorter alternative first.
+//
+// The `_`/`__`/`___` patterns additionally require a non-alphanumeric/
+// non-underscore boundary (or start/end of string) immediately outside
+// each delimiter run: CommonMark does not allow "_" to form emphasis
+// *intraword* (unlike "*", which may), specifically so ordinary
+// snake_case identifiers are never mistaken for emphasis -- without this,
+// "my_variable_name" would be wrongly read as "my" + emphasis("variable")
+// + "name" and stripped to "myvariablename", merging unrelated identifier
+// parts together. `~~` has no such restriction (GFM strikethrough is
+// commonly intraword in practice) and `*` is deliberately left
+// unrestricted to match CommonMark's own, more permissive rule for it.
+//
+// Each wrapped span is matched via a non-greedy "." (Go's regexp "."
+// never matches a newline unless the (?s) flag is set, which these
+// patterns do not use, so this stays bounded to one physical line
+// automatically), not a character class excluding the delimiter itself:
+// the wrapped content can legitimately contain the delimiter character as
+// *content* (most importantly, "api_key" itself contains a literal "_",
+// which an underscore-excluding class would make unmatchable whenever the
+// delimiter is also "_" -- e.g. a double-underscore-wrapped api_key
+// credential would never complete a match, since the content capture
+// could never cross that inner "_" to reach the closing run). Non-greedy
+// "." still stops at the *nearest* subsequent delimiter run of the exact
+// required length, so two separate, unrelated emphasised spans on the
+// same line ("*first* and *second*") are still resolved independently
+// rather than one over-matching into the other.
+var wholeSpanEmphasisPatterns = []*regexp.Regexp{
+	regexp.MustCompile(`\*{3}(.+?)\*{3}`),
+	regexp.MustCompile(`\*{2}(.+?)\*{2}`),
+	regexp.MustCompile(`\*(.+?)\*`),
+	regexp.MustCompile(`(^|[^A-Za-z0-9_])_{3}(.+?)_{3}([^A-Za-z0-9_]|$)`),
+	regexp.MustCompile(`(^|[^A-Za-z0-9_])_{2}(.+?)_{2}([^A-Za-z0-9_]|$)`),
+	regexp.MustCompile(`(^|[^A-Za-z0-9_])_(.+?)_([^A-Za-z0-9_]|$)`),
+	regexp.MustCompile(`~~(.+?)~~`),
+}
+
+// wholeSpanEmphasisMaxPasses bounds how many times stripWholeSpanEmphasis
+// repeats its substitution pass to resolve genuine nesting (for example
+// `**_api_key=TOKEN_**`, strong wrapping emphasis): each pass can strip at
+// most one "layer" of wrapping delimiters, and real documentation nests at
+// most two or three layers deep, so this is a generous, still-bounded cap
+// -- not an unbounded fixed-point loop -- guarding against any pathological
+// input looping indefinitely.
+const wholeSpanEmphasisMaxPasses = 5
+
+// stripWholeSpanEmphasis repeatedly applies wholeSpanEmphasisPatterns until
+// a pass makes no further change (or wholeSpanEmphasisMaxPasses is reached),
+// so a nested combination of delimiters wrapping the same span -- strong
+// wrapping emphasis, emphasis wrapping strikethrough, and so on -- is fully
+// resolved down to its plain text, the same way a real renderer would
+// process nested inline emphasis.
+func stripWholeSpanEmphasis(s string) string {
+	for i := 0; i < wholeSpanEmphasisMaxPasses; i++ {
+		next := s
+		for _, p := range wholeSpanEmphasisPatterns {
+			// The "_" patterns capture their surrounding boundary
+			// characters (to require them) alongside the wrapped text;
+			// the "*"/"~~" patterns capture only the wrapped text. A
+			// substitution template referencing a group a pattern does
+			// not have is simply empty, so one shared "$1$2$3" template
+			// is safe to reuse: for "*"/"~~" patterns, $1 is the wrapped
+			// text and $2/$3 are empty; for "_" patterns, $1/$3 are the
+			// boundary characters and $2 is the wrapped text.
+			next = p.ReplaceAllString(next, "$1$2$3")
+		}
+		if next == s {
+			return s
+		}
+		s = next
+	}
+	return s
+}
 
 // codeFenceLinePattern matches a Markdown fenced code block delimiter line:
 // up to three leading spaces (per CommonMark) followed by three or more
@@ -163,18 +283,26 @@ func decodeEntities(s string) string {
 // content -- see decodeEntities/flattenHTMLVisibleText for that), in an
 // order where later steps can resolve what earlier ones reveal (an
 // HTML-tag-wrapped numeric reference, an emphasis-wrapped entity, and so
-// on): stripping safe inline HTML tags, decoding character references,
-// undoing CommonMark backslash escapes, and stripping an emphasis/
-// strikethrough delimiter wrapping exactly one protected punctuation
-// character. Callers must only apply this to text that Markdown would
-// actually render these ways -- never to inline code span content or code
-// block lines, where CommonMark renders every one of these mechanisms
-// completely literally (see normalizeRenderedEscapes, ScanText).
+// on): stripping Markdown links (keeping only their visible text, never
+// their destination), stripping inline HTML comments (never visible at
+// all), stripping safe inline HTML tags (including `<a>`, the same way),
+// decoding character references, undoing CommonMark backslash escapes,
+// stripping an emphasis/strikethrough delimiter wrapping exactly one
+// protected punctuation character, and stripping a *whole* matching
+// emphasis/strong/strikethrough delimiter run wrapping an entire
+// credential-shaped span (see stripWholeSpanEmphasis). Callers must only
+// apply this to text that Markdown would actually render these ways --
+// never to inline code span content or code block lines, where CommonMark
+// renders every one of these mechanisms completely literally (see
+// normalizeRenderedEscapes, ScanText).
 func decodeRenderedMarkup(s string) string {
+	s = markdownLinkPattern.ReplaceAllString(s, "$1")
+	s = htmlCommentInlinePattern.ReplaceAllString(s, "")
 	s = safeInlineTagPattern.ReplaceAllString(s, "")
 	s = decodeEntities(s)
 	s = backslashEscapePattern.ReplaceAllString(s, "$1")
 	s = renderedMarkupSplitPattern.ReplaceAllString(s, "$1")
+	s = stripWholeSpanEmphasis(s)
 	return s
 }
 

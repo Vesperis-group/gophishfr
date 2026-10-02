@@ -70,16 +70,20 @@ func hasNearbyConstructionWord(clauseText string, pos int) bool {
 	return deprecationConstructionWordPattern.MatchString(clauseText[windowStart:windowEnd])
 }
 
-// negationWordPattern matches common negation words/contractions. A match
-// only counts as negating a particular deprecationContextPattern match when
-// it is within negationProximityWords words of it, on the near side of any
-// negationBoundaryPattern punctuation (see hasAffirmativeDeprecationContext):
-// "not deprecated" and "no longer legacy" assert the opposite of the real
-// contract and must remain a violation, but a negation word governing some
-// other, earlier part of the same clause -- most commonly the recommendation
-// verb itself, as in "do NOT use the api_key parameter; it is deprecated" --
-// must not be read as negating "deprecated" too.
-var negationWordPattern = regexp.MustCompile(`(?i)\b(not|never|no longer|isn't|aren't|wasn't|weren't|doesn't|didn't|won't|wont)\b`)
+// negationWordPattern matches common negation words/contractions, plus
+// "avoid" (avoid/avoids/avoiding), which functions the same way a direct
+// negation does when it governs a recommendation verb ("avoid using the
+// api_key parameter" recommends against the transport, exactly like "do
+// not use" does, even though "avoid" is not a grammatical negator on its
+// own). A match only counts as negating a particular word when it is
+// within negationProximityWords words of it, on the near side of any
+// negationBoundaryPattern punctuation (see isNegatedAt): "not deprecated"
+// and "no longer legacy" assert the opposite of the real contract and must
+// remain a violation, but a negation word governing some other, earlier
+// part of the same clause -- most commonly the recommendation verb itself,
+// as in "do NOT use the api_key parameter; it is deprecated" -- must not be
+// read as negating "deprecated" too.
+var negationWordPattern = regexp.MustCompile(`(?i)\b(not|never|no longer|isn't|aren't|wasn't|weren't|doesn't|didn't|won't|wont|avoid|avoids|avoiding)\b`)
 
 // negationBoundaryPattern marks a punctuation boundary strong enough to stop
 // a negation word from being read as governing a deprecation-context word on
@@ -91,12 +95,37 @@ var negationWordPattern = regexp.MustCompile(`(?i)\b(not|never|no longer|isn't|a
 var negationBoundaryPattern = regexp.MustCompile(`[.!?;—–]|--`)
 
 // negationProximityWords bounds how many words may separate a negation
-// word/phrase from the deprecation-context word it must directly govern to
-// count as negating it (for example "is not actually deprecated"). Keeping
-// this small, in addition to negationBoundaryPattern, is what ensures only a
-// negation that grammatically governs the deprecation-context word itself --
-// not an unrelated negation earlier in the same clause -- suppresses it.
+// word/phrase from the word it must directly govern to count as negating
+// it (for example "is not actually deprecated", "avoid using the api_key
+// parameter"). Keeping this small, in addition to negationBoundaryPattern,
+// is what ensures only a negation that grammatically governs the word
+// itself -- not an unrelated negation earlier in the same clause --
+// suppresses it.
 const negationProximityWords = 3
+
+// isNegatedAt reports whether the word/phrase starting at pos in text is
+// directly governed by a negation word (see negationWordPattern) within
+// negationProximityWords words before it, on the near side of any
+// negationBoundaryPattern punctuation. It is used both for a
+// deprecation-context word (hasAffirmativeDeprecationContext: "not
+// deprecated" must still violate) and for a recommendation verb itself
+// (recommendationMention: "avoid using the api_key parameter" is a warning
+// against the transport, not a live recommendation of it, regardless of
+// whether any deprecation-context word happens to be nearby too).
+func isNegatedAt(text string, pos int) bool {
+	pos = clampIndex(pos, len(text))
+	windowStart := clampIndex(pos-40, len(text))
+	preceding := text[windowStart:pos]
+	if locs := negationBoundaryPattern.FindAllStringIndex(preceding, -1); len(locs) > 0 {
+		last := locs[len(locs)-1]
+		preceding = preceding[last[1]:]
+	}
+	words := strings.Fields(preceding)
+	if len(words) > negationProximityWords {
+		words = words[len(words)-negationProximityWords:]
+	}
+	return negationWordPattern.MatchString(strings.Join(words, " "))
+}
 
 // adversativeBoundaryPattern matches a bounded adversative/contrastive
 // connector -- "but", "however", "yet", "though", "although", "nevertheless",
@@ -112,6 +141,19 @@ const negationProximityWords = 3
 // use api_key" and "Use api_key, but X is deprecated" both describe X, not
 // api_key's status, when X is a different subject.
 var adversativeBoundaryPattern = regexp.MustCompile(`(?i)\b(?:but|however|yet|though|although|nevertheless|nonetheless|whereas)\b`)
+
+// restrictiveQualifierPattern matches a narrow, explicit list of
+// permission-granting qualifiers -- "only for", "just for" -- that
+// restrict, rather than reassert, a transport's deprecated status: "use
+// the api_key query parameter only for legacy integrations" is granting
+// continued, conditional use of the transport, not describing it as
+// deprecated at the point of recommending it, even though "legacy" is a
+// deprecationConstructionWordPattern word sitting right there. A
+// deprecation-context word separated from the recommendation by one of
+// these qualifiers (see hasAffirmativeDeprecationContext) must not be read
+// as reaffirming deprecation, the same way adversativeBoundaryPattern
+// already excludes a word on the far side of a contrastive connector.
+var restrictiveQualifierPattern = regexp.MustCompile(`(?i)\bonly\s+for\b|\bjust\s+for\b`)
 
 // apiKeyMentionPattern matches a literal `api_key` occurrence
 // (case-insensitive). deprecationContextProximityDistance and
@@ -289,32 +331,44 @@ func transportKindNear(clauseText string, start, end int) (kind string, ambiguou
 // hasAffirmativeDeprecationContext reports whether clauseText contains at
 // least one deprecation-context word or phrase that is:
 //
-//   - not directly negated (see negationWordPattern/negationBoundaryPattern);
+//   - not directly negated (see isNegatedAt/negationWordPattern);
 //   - not separated from recommendationPos -- the byte offset, within
 //     clauseText, of the recommendation match being evaluated -- by an
-//     adversativeBoundaryPattern connector (see adversativeBoundaryPattern);
+//     adversativeBoundaryPattern connector (see adversativeBoundaryPattern)
+//     or a restrictiveQualifierPattern ("only for ...", "just for ...")
+//     granting continued, conditional use instead of reasserting
+//     deprecation;
 //   - within deprecationContextProximityWords of an actual `api_key`
 //     mention, so it describes that transport specifically rather than
 //     some other subject merely sharing the sentence or clause;
 //   - if the match is the bare removal version number, accompanied by an
 //     explicit construction word nearby (see hasNearbyConstructionWord) --
 //     a release number alone never asserts anything is deprecated; and
-//   - about the same specific transport (query/form/raw) as the
-//     recommendation, whenever both are unambiguously classified (see
-//     transportKindNear) -- a deprecation notice about one transport must
-//     not suppress a live recommendation of a different one, and an
-//     ambiguous classification on either side never suppresses either,
-//     since which transport it actually describes cannot be determined.
+//   - bound to the *same* `api_key` occurrence the recommendation itself
+//     names (see nearestAPIKeyOccurrence), not merely a different
+//     occurrence that happens to describe the same transport *kind* --
+//     "the OLD api_key query parameter is deprecated; use the api_key
+//     query parameter..." describes a different, earlier occurrence, so it
+//     must not suppress a live recommendation of a separate one, even
+//     though both happen to be about "query". The one exception is when
+//     *neither* occurrence names any specific transport at all (both
+//     unambiguously empty): with no stronger signal available either way,
+//     the prior, transport-agnostic behavior still applies. An ambiguous
+//     classification on either side (see transportKindNear) never
+//     suppresses either, since which transport -- or which occurrence --
+//     it actually describes cannot be determined; this is the "fail closed
+//     if association ambiguous" rule.
 //
 // It is used both for a table cell (with recommendationPos set to
 // len(cellText), so any qualifying context anywhere in the cell counts, as
 // a whole cell is a small, self-contained scope) and for recommendation
 // prose (scoped per candidate match to its own enclosing sentence via
 // sentenceBounds), so a negated mention, one that belongs to a different,
-// adversatively contrasted clause, one that is simply too far from any
-// `api_key` mention to describe it, an unaccompanied bare version number, or
-// one describing a different (or ambiguous) transport, cannot accidentally
-// suppress a genuine violation.
+// adversatively contrasted or restrictively qualified clause, one that is
+// simply too far from any `api_key` mention to describe it, an
+// unaccompanied bare version number, or one describing a different (or
+// ambiguous) transport or occurrence, cannot accidentally suppress a
+// genuine violation.
 func hasAffirmativeDeprecationContext(clauseText string, recommendationPos int) bool {
 	// Defensive clamp: every caller is expected to pass a valid index into
 	// clauseText, but guarding here means a future caller's off-by-one
@@ -335,20 +389,7 @@ func hasAffirmativeDeprecationContext(clauseText string, recommendationPos int) 
 
 	for _, match := range deprecationContextPattern.FindAllStringIndex(clauseText, -1) {
 		start := match[0]
-		windowStart := start - 40
-		if windowStart < 0 {
-			windowStart = 0
-		}
-		preceding := clauseText[windowStart:start]
-		if locs := negationBoundaryPattern.FindAllStringIndex(preceding, -1); len(locs) > 0 {
-			last := locs[len(locs)-1]
-			preceding = preceding[last[1]:]
-		}
-		words := strings.Fields(preceding)
-		if len(words) > negationProximityWords {
-			words = words[len(words)-negationProximityWords:]
-		}
-		if negationWordPattern.MatchString(strings.Join(words, " ")) {
+		if isNegatedAt(clauseText, start) {
 			continue
 		}
 
@@ -359,6 +400,9 @@ func hasAffirmativeDeprecationContext(clauseText string, recommendationPos int) 
 			between = clauseText[recommendationPos:start]
 		}
 		if adversativeBoundaryPattern.MatchString(between) {
+			continue
+		}
+		if restrictiveQualifierPattern.MatchString(between) {
 			continue
 		}
 
@@ -375,7 +419,7 @@ func hasAffirmativeDeprecationContext(clauseText string, recommendationPos int) 
 			if recAmbiguous || ctxAmbiguous {
 				continue
 			}
-			if recTransport != "" && ctxTransport != "" && recTransport != ctxTransport {
+			if recAPIFound && ctxAPIStart != recAPIStart && (recTransport != "" || ctxTransport != "") {
 				continue
 			}
 		}
@@ -510,10 +554,15 @@ var recommendationAnchorPattern = regexp.MustCompile(`(?i)\b(parameter|param|que
 // recommended authentication option -- "or an api_key parameter", "use the
 // api_key query parameter", "authenticate via api_key" -- with no
 // affirmative deprecation context in the same sentence as that particular
-// mention. Each candidate recommendation match is judged against only its
-// own enclosing sentence (see sentenceBounds), not the whole block: an
-// unrelated deprecation notice about a different subject, in an earlier or
-// later sentence of the same block, must not suppress a live recommendation
+// mention. A match whose own recommendation verb is itself directly
+// negated (see isNegatedAt: "do not use", "avoid using") is excluded
+// entirely before any context check even runs: it is a warning against the
+// transport, not a live recommendation of it, regardless of whether a
+// deprecation-context word happens to be nearby too. Each remaining
+// candidate recommendation match is judged against only its own enclosing
+// sentence (see sentenceBounds), not the whole block: an unrelated
+// deprecation notice about a different subject, in an earlier or later
+// sentence of the same block, must not suppress a live recommendation
 // elsewhere in it. Within that sentence, a context word separated from the
 // match by an adversativeBoundaryPattern connector ("but", "however", ...)
 // -- in either direction -- is likewise excluded, since it describes a
@@ -525,6 +574,9 @@ func recommendationMention(blockText string) bool {
 	}
 
 	checkMatch := func(loc []int, requireAnchor bool) bool {
+		if isNegatedAt(blockText, loc[0]) {
+			return false
+		}
 		sentenceStart, sentenceEnd := sentenceBounds(blockText, loc[0])
 		sentence := blockText[sentenceStart:sentenceEnd]
 		if requireAnchor && !recommendationAnchorPattern.MatchString(sentence) {

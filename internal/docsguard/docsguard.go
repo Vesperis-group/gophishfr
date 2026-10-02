@@ -221,12 +221,18 @@ func ScanText(text string) ([]Violation, error) {
 		if len(htmlBlockLines) == 0 {
 			return
 		}
-		for _, vl := range flattenHTMLBlockVisibleText(htmlBlockLines, htmlBlockStartLine) {
+		// A single physical line can produce more than one segment when
+		// it mixes verbatim and non-verbatim content ("<code>x</code> Use
+		// the api_key query parameter..."); each becomes its own
+		// scannedLine sharing that line's lineNo, so the surrounding
+		// prose is still scanned/joinable independently of the code
+		// segment (see htmlVisibleSegment).
+		for _, seg := range flattenHTMLBlockVisibleText(htmlBlockLines, htmlBlockStartLine) {
 			scannedLines = append(scannedLines, scannedLine{
-				lineNo:    vl.lineNo,
-				checkText: vl.text,
+				lineNo:    seg.lineNo,
+				checkText: seg.text,
 				kind:      kindHTML,
-				verbatim:  vl.verbatim,
+				verbatim:  seg.verbatim,
 			})
 		}
 		htmlBlockLines = nil

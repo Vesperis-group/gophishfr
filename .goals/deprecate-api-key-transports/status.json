@@ -1,7 +1,7 @@
 {
     "goal_id": "deprecate-api-key-transports",
-    "status": "inspecting",
-    "iteration": 15,
+    "status": "building",
+    "iteration": 16,
     "builder_model": "Claude:Sonnet-5",
     "inspector_model": "Claude:Haiku-4.5",
     "initial_sha": "99c9a50848e8a826360ea7585a57d7e6f753a34c",
@@ -656,6 +656,24 @@
             "summary": "All 49+ acceptance criteria verified met. Dependency-free stdlib-only implementation correct and secure. All three prior security findings (HTML-block entity decoding, soft-wrapped Authorization, transport context binding) and Bearer exactness code finding fully closed. go.mod/go.sum byte-identical to base. 23 test functions all pass. Docs gate 0 violations. No runtime/auth/version behavior changes. Commit properly signed.",
             "completed_at": "2026-10-02T13:06:04.490959Z",
             "commit_sha": "a4d26ec222625f117022088c310e193fc470e2a2"
+        },
+        {
+            "iteration": 15,
+            "role": "security-review",
+            "model": "external",
+            "verdict": "FAIL",
+            "feedback_file": ".goals/deprecate-api-key-transports/review-feedback-15.md",
+            "summary": "Four bypasses found in the iteration-15 dependency-free docsguard rebuild: (1) SECURITY, protected anchors split by a Markdown link / inline HTML comment / <a> tag, and a whitespace-producing &nbsp; entity not normalized; (2) SECURITY, deprecation context bound only to transport kind rather than the exact api_key occurrence being recommended, allowing a deprecation of one occurrence to wrongly suppress a live recommendation of a different occurrence; (3) CODE, whole-value balanced emphasis/strikethrough (**api_key=TOKEN**) not recognized; (4) CODE, a single HTML line mixing <code>/<pre> with ordinary prose treated as entirely verbatim, skipping recommendation prose on the same line.",
+            "completed_at": "2026-10-02T14:00:00Z"
+        },
+        {
+            "iteration": 16,
+            "role": "builder",
+            "model": "Claude:Sonnet-5",
+            "commit_sha": "PENDING",
+            "commit_title": "fix(docs): [B] close bounded guard bypasses",
+            "summary": "Closed all four iteration-15 security-review findings with bounded, deterministic stdlib-only logic, no dependency added: (1) markdownLinkPattern and htmlCommentInlinePattern strip rendered-link/comment splits, <a> added to the safe-inline-tag allow-list, &nbsp; added to the entity table decoding to the real non-breaking-space code point; (2) hasAffirmativeDeprecationContext reworked to require exact-occurrence binding (nearestAPIKeyOccurrence) between a context word and its recommendation, falling back to the prior transport-kind-only rule only when both sides are fully transport-ambiguous, plus a narrow only-for/just-for restrictiveQualifierPattern exclusion and a shared isNegatedAt helper now also excluding directly negated recommendation matches; (3) wholeSpanEmphasisPatterns/stripWholeSpanEmphasis strip a whole credential-shaped value wrapped end-to-end in a matching *//_ / ** / __ / ~~ delimiter run, with underscore variants boundary-restricted to avoid mis-stripping snake_case identifiers; (4) html.go's flattenHTMLBlockVisibleText refactored (htmlVisibleLine to htmlVisibleSegment) to track verbatim state per segment rather than per whole physical line, so mixed <code>/<pre>-plus-prose lines are scanned correctly. All prior iteration 1-15 fixtures pass unchanged; new permanent fixtures added for every reviewer example and composition. go.mod/go.sum re-verified byte-for-byte identical to the pre-goldmark base via sha256sum. Full go test ./..., scripts/verify-docs-canonical-examples.sh (0/28), ./scripts/verify.sh, gosec (12, unchanged), gitleaks (1, unchanged), actionlint, zizmor, ./scripts/test-browser.sh, Docker build + scripts/test-docker-config-no-log.sh all pass. No runtime auth/middleware/header/status/version/dependency change.",
+            "completed_at": "PENDING"
         }
     ]
 }

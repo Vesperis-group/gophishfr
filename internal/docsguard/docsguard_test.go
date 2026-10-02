@@ -618,6 +618,18 @@ func TestScanTextTransportMismatchDoesNotSuppress(t *testing.T) {
 		"The api_key response field is deprecated; use the api_key query parameter for authentication.",
 		// Same mismatch, wrapped across physical lines.
 		"The api_key form\nparameter is deprecated;\nuse the api_key query\nparameter instead.\n",
+		// Naming the *same* transport kind on both sides is not, by
+		// itself, enough evidence this is genuinely the same
+		// recommendation's own deprecation notice: these describe two
+		// separate api_key occurrences (the deprecated one, and the one
+		// being recommended), so deprecation context must be bound to the
+		// exact occurrence, not only the transport kind (see
+		// TestScanTextDeprecationBoundToExactOccurrence). The trailing
+		// "only for legacy integrations" qualifier grants continued,
+		// conditional use rather than reasserting deprecation, so it does
+		// not independently suppress either.
+		"The api_key query parameter is deprecated; use the api_key query parameter only for legacy integrations.",
+		"The api_key form parameter is deprecated; use the api_key form parameter only for legacy integrations.",
 	}
 	for _, text := range positive {
 		t.Run(text, func(t *testing.T) {
@@ -629,12 +641,10 @@ func TestScanTextTransportMismatchDoesNotSuppress(t *testing.T) {
 	}
 
 	negative := []string{
-		// The deprecation notice and the recommendation name the *same*
-		// transport, so it correctly still suppresses.
-		"The api_key query parameter is deprecated; use the api_key query parameter only for legacy integrations.",
-		"The api_key form parameter is deprecated; use the api_key form parameter only for legacy integrations.",
 		// Neither side names a specific transport (ambiguous on both
-		// sides), so the prior, transport-agnostic behavior applies.
+		// sides), so the prior, transport-agnostic behavior applies: with
+		// no stronger signal available at all, a different occurrence is
+		// still accepted.
 		"The api_key parameter is deprecated; use the api_key parameter only for legacy integrations.",
 	}
 	for _, text := range negative {
@@ -669,6 +679,12 @@ func TestScanTextCompactMixedTransportDirectional(t *testing.T) {
 		// and never suppress, even though the recommendation's own
 		// occurrence ("query") is perfectly unambiguous.
 		"The raw api_key form field is deprecated; use the api_key query parameter instead.",
+		// The same compact same-transport case, with the "only for
+		// legacy" qualifier: naming the same transport kind is not
+		// sufficient evidence of the same occurrence, and the qualifier
+		// grants continued use rather than reasserting deprecation (see
+		// TestScanTextDeprecationBoundToExactOccurrence).
+		"api_key query deprecated; use api_key query only for legacy integrations.",
 	}
 	for _, text := range positive {
 		t.Run(text, func(t *testing.T) {
@@ -683,9 +699,62 @@ func TestScanTextCompactMixedTransportDirectional(t *testing.T) {
 		// Preserve a natural, accepted warning with no distinguishing
 		// transport word at all on either side.
 		"Do not use the api_key parameter; it is deprecated.",
-		// Preserve the same-transport compact case: both sides are
-		// unambiguously "query", so this correctly still suppresses.
-		"api_key query deprecated; use api_key query only for legacy integrations.",
+		// A single api_key occurrence, named transport, genuine
+		// same-occurrence deprecation notice (no second occurrence to
+		// bind to the wrong one, no restrictive qualifier): still
+		// suppresses correctly.
+		"Use the api_key query parameter; it is deprecated and scheduled for removal.",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("unexpected violation for %q: %v", text, violations)
+			}
+		})
+	}
+}
+
+// TestScanTextDeprecationBoundToExactOccurrence proves a deprecation notice
+// binds to the exact `api_key` occurrence it describes, not merely "some
+// occurrence of the same transport kind": "The OLD api_key query parameter
+// is deprecated; use the api_key query parameter..." describes a different,
+// earlier occurrence than the one being recommended, even though both are
+// "query" -- naming the same transport kind on both sides is not, by
+// itself, sufficient evidence this is genuinely the same recommendation's
+// own deprecation notice. A genuine deprecation of the *recommended*
+// occurrence itself (the only occurrence present, or one a restrictive
+// qualifier doesn't undermine) continues to be accepted, and an ambiguous
+// association -- ties, or an unresolvable classification -- fails closed
+// and never suppresses.
+func TestScanTextDeprecationBoundToExactOccurrence(t *testing.T) {
+	positive := []string{
+		// The exact finding: a distinct, earlier occurrence (marked "old")
+		// is deprecated; a separate, later occurrence of the same
+		// transport kind is recommended with no qualifying context of its
+		// own.
+		"The old api_key query parameter is deprecated; use the api_key query parameter for authentication.",
+		// Same shape, wrapped across physical lines.
+		"The old api_key\nquery parameter is\ndeprecated; use the\napi_key query parameter\nfor authentication.\n",
+		// Same shape inside a single table row.
+		"| Note | The old api_key query parameter is deprecated; use the api_key query parameter for authentication. |",
+	}
+	for _, text := range positive {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if !containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("expected a violation when deprecation describes a different occurrence %q, got %v", text, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// Genuine deprecation of the recommended occurrence itself: only
+		// one occurrence exists, so the context necessarily describes it.
+		"The api_key query parameter is deprecated; it remains accepted for authentication until removal.",
+		// A warning ("do not use") is excluded from consideration as a
+		// recommendation entirely, regardless of occurrence binding.
+		"Do not use the old api_key query parameter; use the new Bearer scheme instead.",
 	}
 	for _, text := range negative {
 		t.Run(text, func(t *testing.T) {
@@ -990,6 +1059,18 @@ func TestScanTextRenderedMarkupSplit(t *testing.T) {
 		// safe tag wrapping an HTML character reference.
 		{`curl -d "api<em>*_*</em>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
 		{`curl -d "api<em>&#95;</em>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		// A Markdown link splitting a protected anchor: only the visible
+		// link text renders, the destination URL never does.
+		{`curl -d "[api](url)_key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		{`curl -H "Author[ization](url): TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
+		// An inline HTML comment splitting a protected anchor: a comment
+		// never renders as visible text at all.
+		{`curl -d "api<!-- -->_key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		// An <a> tag splitting a protected anchor, the same way the other
+		// allow-listed safe tags already do, including its href attribute
+		// -- never inspected as visible text.
+		{`curl -d "api<a>_</a>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		{`curl -d "api<a href=\"https://example.com\">_</a>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
 	}
 	for _, c := range positive {
 		t.Run(c.text, func(t *testing.T) {
@@ -1018,6 +1099,14 @@ func TestScanTextRenderedMarkupSplit(t *testing.T) {
 		"This is *emphasized* text, not a credential example.",
 		// A tag outside the allow-list, unrelated to api_key.
 		"Avoid embedding <script> tags in documentation examples.",
+		// An ordinary Markdown link unrelated to any protected anchor.
+		"See [the docs](https://example.com) for details about api_key history.",
+		// An ordinary inline comment unrelated to any protected anchor.
+		"This sentence has an inline comment<!-- note --> unrelated to credentials.",
+		// A nested, malformed-looking link (brackets inside the link
+		// text) is conservatively left unmatched rather than mismatching
+		// bracket pairs, and has nothing to do with api_key regardless.
+		"See [a [nested] link](url) for unrelated details.",
 	}
 	for _, text := range negative {
 		t.Run(text, func(t *testing.T) {
@@ -1029,7 +1118,108 @@ func TestScanTextRenderedMarkupSplit(t *testing.T) {
 	}
 }
 
-// TestScanTextHTMLBlockVisibleText proves a raw HTML block (a line
+// TestScanTextWholeSpanEmphasis proves a *whole* credential-shaped span
+// wrapped in a matching-length emphasis/strong/strikethrough delimiter run
+// -- `**api_key=TOKEN**`, as opposed to renderedMarkupSplitPattern's
+// single-wrapped-character case -- is caught the same way the unwrapped
+// form is, across `*`, `_`, `**`, `__`, `~~`, and nested combinations,
+// while a canonical Bearer example wrapped the same way is still
+// recognized as canonical (wrapping does not change what credential value
+// it renders as), and an ordinary snake_case identifier is never
+// mis-stripped into a merged, unrelated word.
+func TestScanTextWholeSpanEmphasis(t *testing.T) {
+	positive := []struct {
+		text string
+		kind Kind
+	}{
+		{`curl -d "**api_key=TOKEN**" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		{`curl -d "*api_key=TOKEN*" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		{`curl -d "***api_key=TOKEN***" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		{`curl -d "__api_key=TOKEN__" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		{`curl -d "_api_key=TOKEN_" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		{`curl -d "~~api_key=TOKEN~~" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		// Nested: strong wrapping emphasis, resolved in more than one
+		// substitution pass.
+		{`curl -d "**_api_key=TOKEN_**" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		// A whole recommendation-prose mention wrapped in strong emphasis.
+		{"Use the **api_key query parameter** for authentication.", KindUndeprecatedParameterMention},
+	}
+	for _, c := range positive {
+		t.Run(c.text, func(t *testing.T) {
+			violations := mustScan(t, c.text)
+			if !containsKind(violations, c.kind) {
+				t.Fatalf("expected a %s violation for %q, got %v", c.kind, c.text, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// A canonical Bearer example wrapped in strong emphasis still
+		// renders as "Authorization: Bearer TOKEN": wrapping it in
+		// markup does not change what credential value it demonstrates.
+		`curl -H "Authorization: **Bearer TOKEN**" https://gophishfr.example/api/campaigns/42/complete`,
+		// Ordinary snake_case identifiers must never be mis-stripped by
+		// treating an embedded "_" as an emphasis delimiter: the
+		// underscore-wrapping patterns require a non-alphanumeric
+		// boundary immediately outside the delimiter run, which an
+		// intraword "_" never has.
+		"the api_key_backup variable is unrelated to credentials",
+		"my_variable_name should not be merged",
+		"GOPHISH_API_KEY_SECRET is an unrelated environment variable name",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if len(violations) != 0 {
+				t.Fatalf("unexpected violation(s) for %q: %v", text, violations)
+			}
+		})
+	}
+}
+
+// TestScanTextHTMLMixedVerbatimSegments proves a single physical line
+// mixing verbatim (<code>/<pre>) and non-verbatim content is scanned
+// per-segment, not as one all-or-nothing verbatim line: the visible,
+// non-code prose on a mixed line is still scanned (and still joinable with
+// adjacent lines) exactly like ordinary prose, while a credential inside
+// the verbatim segment is still caught per line as literal, and <pre>/
+// <code> spanning multiple physical lines with prose immediately before
+// and after it is handled the same way.
+func TestScanTextHTMLMixedVerbatimSegments(t *testing.T) {
+	t.Run("recommendation prose after an inline code span on the same line", func(t *testing.T) {
+		text := "<code>x</code> Use the api_key query parameter for authentication.\n"
+		violations := mustScan(t, text)
+		if !containsKind(violations, KindUndeprecatedParameterMention) {
+			t.Fatalf("expected a violation for the non-verbatim segment of %q, got %v", text, violations)
+		}
+	})
+
+	t.Run("credential inside a multi-line pre, with prose before and after", func(t *testing.T) {
+		text := "Some text. <pre>\n" +
+			"curl -d \"api_key=TOKEN\" https://gophishfr.example/api/campaigns/42/complete\n" +
+			"</pre> Use the api_key query parameter for authentication.\n"
+		violations := mustScan(t, text)
+		if !containsKind(violations, KindParameterCredential) {
+			t.Fatalf("expected a parameter-credential violation inside the verbatim segment of %q, got %v", text, violations)
+		}
+		if !containsKind(violations, KindUndeprecatedParameterMention) {
+			t.Fatalf("expected a recommendation violation in the non-verbatim segment after </pre> of %q, got %v", text, violations)
+		}
+	})
+
+	t.Run("a credential only in the verbatim segment is still a literal check", func(t *testing.T) {
+		// The escaped form inside <code> never actually decodes (raw HTML
+		// never gets Markdown backslash-escape processing), so this must
+		// not violate -- the same literal-code-content rule already
+		// applied to fenced/indented code blocks.
+		text := "<code>api\\_key=TOKEN</code> is just a label, not an example.\n"
+		violations := mustScan(t, text)
+		if containsKind(violations, KindParameterCredential) {
+			t.Fatalf("unexpected parameter-credential violation for a literal, non-decoding verbatim segment %q: %v", text, violations)
+		}
+	})
+}
+
 // starting with a tag, continuing per CommonMark's own closing rule for
 // its kind) is scanned for only its *visible* rendered text (see
 // html.go): a credential or recommendation inside ordinary element content

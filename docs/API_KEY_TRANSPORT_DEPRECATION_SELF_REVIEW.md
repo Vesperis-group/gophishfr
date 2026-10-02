@@ -1327,6 +1327,186 @@ Markdown file: 0 violations across 28 files, no doc wording changed. No
 runtime authentication/middleware/header/status/version change. `VERSION`
 unchanged (`0.12.1`).
 
+## Iteration 16: closing four bounded-guard bypasses, still dependency-free
+
+A further review of the iteration-15 dependency-free guard found four
+more bypasses: two security, two code. All four are fixed with the same
+bounded, deterministic stdlib logic iteration 15 established -- no
+dependency was added, and `go.mod`/`go.sum` remain byte-for-byte identical
+to the pre-goldmark base (re-verified via `sha256sum`). See
+`.goals/deprecate-api-key-transports/review-feedback-15.md` for the full
+finding record.
+
+### Finding 1 (security) — protected anchors split by a Markdown link, an inline HTML comment, or an `<a>` tag; a whitespace-producing character reference
+
+`normalize.go`'s `decodeRenderedMarkup` already stripped a handful of
+safe inline tags (`<em>`, `<strong>`, `<b>`, `<i>`, `<code>`, `<span>`)
+wrapping a single protected character so the surrounding text still reads
+as the forbidden anchor once rendered. Three more ways the same rendered
+text can arise were not yet covered:
+
+- A Markdown link (`[api](url)_key=...`, `Author[ization](url): ...`)
+  renders as only its link text; the destination URL never displays. A
+  new `markdownLinkPattern` replaces `[text](url)` with just `text`
+  before any other normalization runs.
+- An inline HTML comment (`api<!-- -->_key=...`) never renders as visible
+  text at all. A new `htmlCommentInlinePattern` strips `<!-- ... -->`
+  the same way.
+- `<a>` was missing from the safe-inline-tag allow-list entirely; added
+  alongside the existing tags, including when it carries an `href`
+  attribute (attributes are never inspected as visible text, matching
+  how the existing allow-listed tags already behave).
+- `&nbsp;` was missing from the named-character-reference table. Fixed
+  by decoding it to the real non-breaking-space code point (`U+00A0`),
+  not a plain ASCII space -- deliberately so a `&nbsp;`-separated
+  Bearer example still fails the runtime's own exact-literal-space
+  prefix check and is correctly flagged as **non-canonical**, rather
+  than being normalized into looking like a canonical example.
+
+Both the link- and comment-stripping patterns run first, before the
+existing safe-tag stripper, so nested combinations (a safe tag wrapping a
+link, or a link whose text itself contains an entity) resolve correctly
+in one `decodeRenderedMarkup` pass. A conservative, non-greedy pattern is
+used for both, so an unrelated link or comment elsewhere in the same line
+is never touched, and a malformed, bracket-mismatched link is left alone
+rather than risking a wrong match.
+
+New fixtures (`TestScanTextRenderedMarkupSplit`, extended): the link,
+comment, and `<a>`-tag exact reviewer examples (plain and with an `href`
+attribute) all violate; an unrelated link, an unrelated inline comment,
+and a nested/bracket-mismatched link are correctly left alone.
+(`TestScanTextRenderedEscapeNormalization`, already covering the entity
+table) gains the `&nbsp;` case alongside the existing ones.
+
+### Finding 2 (security) — deprecation context bound to the exact occurrence, not merely the transport kind
+
+The existing occurrence-binding logic (iteration 14) still fell back to
+"same transport kind, any occurrence" whenever either side was
+transport-ambiguous. Two live fixtures turned out to rely on exactly that
+fallback for different reasons: one must remain suppressed, two others
+(one of them a brand-new reviewer example) must now violate, despite all
+three being structurally near-identical. Resolved empirically, fixture
+by fixture, rather than from first-principles grammar:
+
+- `hasAffirmativeDeprecationContext` now requires a context word to bind
+  to the **exact same `api_key` occurrence** as the recommendation it is
+  evaluating (via the existing `nearestAPIKeyOccurrence` nearest-by-word-
+  distance tie-break), dropping the old "same transport kind, any
+  occurrence" fallback -- **except** when neither side names a transport
+  at all (fully ambiguous on both sides), where the prior
+  transport-agnostic behavior is kept as the only fallback with no
+  stronger signal available.
+- A narrow `restrictiveQualifierPattern` ("only for ...", "just for
+  ...") excludes a context word even when it genuinely is the same
+  occurrence: "use X only for legacy integrations" grants *conditional
+  continued use*, not a reassertion of deprecation, and must not
+  suppress a recommendation.
+- `negationWordPattern` gained `avoid`/`avoids`/`avoiding`, and the
+  inline negation check used throughout `context.go` was extracted into
+  a shared `isNegatedAt` helper, now also applied as a match-exclusion
+  at the top of `recommendationMention`'s match loop: a directly negated
+  recommendation ("so avoid using the api_key query parameter...") is
+  excluded from consideration entirely, rather than needing the
+  deprecation-context logic to separately reason about it.
+
+Working through this surfaced one more subtlety: `nearestAPIKeyOccurrence`'s
+existing strict `<` tie-break (resolving an exact word-distance tie to
+whichever occurrence appears first) meant one existing fixture, assumed
+single-occurrence, actually had a genuine tie and silently flipped under
+the new exact-occurrence rule. Rather than touch the tie-break (correct,
+desired behavior from iteration 14), that one fixture was rewritten to an
+unambiguous single occurrence.
+
+New fixtures (`TestScanTextDeprecationBoundToExactOccurrence`): the exact
+reviewer example ("The old api_key query parameter is deprecated; use the
+api_key query parameter...") violates, plus a wrapped and a table-row
+variant; a genuine single-occurrence deprecation and a negated "do not
+use" remain correctly accepted.
+`TestScanTextTransportMismatchDoesNotSuppress` and
+`TestScanTextCompactMixedTransportDirectional` were updated: two fixtures
+that depended on the now-removed same-transport fallback moved from
+negative to positive, with the rationale recorded inline; the one
+genuinely fully-ambiguous fixture (no named transport on either side)
+remains negative, preserving that one fallback case.
+
+### Finding 3 (code) — whole-value balanced emphasis/strikethrough
+
+The existing emphasis handling only recognized a safe tag or delimiter
+wrapping a *single protected character* (`api<em>_</em>key`). A whole
+credential-shaped value wrapped end-to-end in a matching delimiter run
+(`**api_key=TOKEN**`) was not covered. A new, fixed enumeration,
+`wholeSpanEmphasisPatterns` (`***`, `**`, `*`, `___`, `__`, `_`, `~~`,
+longest-delimiter-first), is applied by `stripWholeSpanEmphasis`, run up
+to `wholeSpanEmphasisMaxPasses` (5) times to resolve nesting (e.g. `**_..._**`).
+Go's `regexp` package is RE2-based with no backreferences, so "a closing
+run of the same length as the opening run" cannot be expressed as one
+parametrized pattern; each exact delimiter length is therefore its own
+explicit pattern, the same constraint iteration 12/15 already applied to
+`inlineCodeSpanRanges`.
+
+The underscore-based patterns (`_`, `__`, `___`) require a
+non-alphanumeric, non-underscore boundary immediately outside each
+delimiter run (or start/end of line), so an ordinary snake_case
+identifier (`api_key_backup`, `my_variable_name`) is never
+mis-interpreted as emphasis-wrapped and merged across its own
+underscores -- real CommonMark itself restricts intraword `_`-emphasis
+for exactly this reason. `*` and `~~` are deliberately left unrestricted,
+matching real CommonMark/GFM's own allowance for intraword `*`-emphasis
+and `~~`-strikethrough. Content between delimiters is matched with a
+non-greedy `.` (not an explicit `[^_\n]` class): a character class
+excluding the delimiter character outright made it impossible to match
+*through* an embedded instance of that same character (e.g. the literal
+`_` inside "api_key" when the delimiter is itself `_`) to reach the real
+closing run; Go's default non-DOTALL `.` semantics already keeps each
+match line-bounded for free, since this stripper -- like the rest of
+`decodeRenderedMarkup` -- only ever runs on one already-extracted
+physical line at a time.
+
+New fixtures (`TestScanTextWholeSpanEmphasis`): `**api_key=TOKEN**`,
+`*...*`, `***...***`, `__...__`, `_..._`, `~~...~~`, nested `**_..._**`,
+and a whole recommendation phrase wrapped in `**...**` all violate; a
+canonical header example wrapped in `**...**` remains accepted as
+canonical (wrapping markup around a value does not change what
+credential it demonstrates); `api_key_backup`, `my_variable_name`, and a
+long environment-variable-style identifier are all correctly unaffected.
+
+### Finding 4 (code) — mixed raw-HTML lines tracked per verbatim segment, not per whole line
+
+`html.go`'s `flattenHTMLBlockVisibleText` previously emitted one
+verbatim/non-verbatim boolean per *whole physical line*, so a single line
+mixing a `<code>`/`<pre>` span with ordinary surrounding prose
+(`<code>x</code> Use the api_key query parameter...`) was marked entirely
+verbatim, silently skipping the recommendation in the visible prose that
+followed. Refactored (renamed `htmlVisibleLine` to `htmlVisibleSegment`)
+so a new segment is only started when either the line number or the
+verbatim state actually changes, with consecutive same-line/same-state
+text still coalesced into one segment rather than one byte at a time. No
+change was needed in `docsguard.go`: `joinableTextRuns`'s existing
+per-segment `verbatim` check and the per-line credential/raw-authorization
+loops already operate generically over however many segments share one
+line number.
+
+New fixtures (`TestScanTextHTMLMixedVerbatimSegments`): recommendation
+prose immediately after an inline `<code>` span on the same line is now
+caught; a credential inside a multi-line `<pre>` with prose both before
+and after it still isolates the literal credential (per line, unjoined)
+from the joined recommendation prose that follows; a credential-shaped
+string that only ever appears inside a verbatim segment still does not
+decode backslash escapes there (raw HTML content is never Markdown-
+escape-processed), matching the existing literal-code-content rule.
+
+All prior fixtures (iterations 1-15) pass unchanged. The full repository
+test suite (`go test ./...`), `go vet`, and `gofmt` are clean.
+`go.mod`/`go.sum` remain byte-for-byte identical to the pre-goldmark base
+(re-verified via `sha256sum` against `git show 3431add^:go.mod`/`go.sum`).
+`scripts/verify-docs-canonical-examples.sh` re-run against every tracked
+Markdown file: 0 violations across 28 files, no doc wording changed.
+`./scripts/verify.sh`, `gosec` (12, unchanged baseline), `gitleaks` (1,
+unchanged known fixture), `actionlint`, `zizmor`, `./scripts/test-browser.sh`,
+and a Docker build plus `./scripts/test-docker-config-no-log.sh` all pass.
+No runtime authentication/middleware/header/status/version change.
+`VERSION` unchanged (`0.12.1`).
+
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |

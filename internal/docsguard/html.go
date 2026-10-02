@@ -136,10 +136,17 @@ var htmlVerbatimTags = map[string]bool{
 	"code": true,
 }
 
-// htmlVisibleLine is one physical source line's extracted visible text
-// (see flattenHTMLBlockVisibleText), together with its source line number
-// and whether it fell inside a <pre>/<code> element.
-type htmlVisibleLine struct {
+// htmlVisibleSegment is one contiguous run of extracted visible text
+// within one physical source line (see flattenHTMLBlockVisibleText),
+// together with its source line number and whether it fell inside a
+// <pre>/<code> element. A single physical line can produce more than one
+// segment when it mixes verbatim and non-verbatim content ("<code>x</code>
+// Use the api_key query parameter..."): each segment shares that line's
+// lineNo but carries its own verbatim flag, so the surrounding, non-code
+// prose is still scanned as ordinary prose (and still joinable with
+// adjacent lines/paragraphs) while the code content is still scanned
+// per-line as literal, exactly like any other mixed line.
+type htmlVisibleSegment struct {
 	lineNo   int
 	text     string
 	verbatim bool
@@ -147,21 +154,17 @@ type htmlVisibleLine struct {
 
 // flattenHTMLBlockVisibleText extracts the plain, *visible* text a browser
 // would display for one raw HTML block's lines (see the package-section
-// doc comment above), returning one htmlVisibleLine per physical source
-// line. Comments, processing instructions, declarations, CDATA sections,
-// tag markup, and attribute values are dropped; <script>/<style> content is
-// dropped too; everything else is kept, with HTML character references
-// decoded the same narrow way decodeEntities does for ordinary prose
-// (backslash escapes are deliberately *not* decoded here: CommonMark never
-// Markdown-processes raw HTML block content, only a browser's own HTML
-// entity resolution applies to it).
-func flattenHTMLBlockVisibleText(lines []string, startLineNo int) []htmlVisibleLine {
+// doc comment above), returning one or more htmlVisibleSegments per
+// physical source line (see htmlVisibleSegment). Comments, processing
+// instructions, declarations, CDATA sections, tag markup, and attribute
+// values are dropped; <script>/<style> content is dropped too; everything
+// else is kept, with HTML character references decoded the same narrow
+// way decodeEntities does for ordinary prose (backslash escapes are
+// deliberately *not* decoded here: CommonMark never Markdown-processes raw
+// HTML block content, only a browser's own HTML entity resolution applies
+// to it).
+func flattenHTMLBlockVisibleText(lines []string, startLineNo int) []htmlVisibleSegment {
 	raw := strings.Join(lines, "\n")
-
-	out := make([]htmlVisibleLine, len(lines))
-	for i := range out {
-		out[i] = htmlVisibleLine{lineNo: startLineNo + i}
-	}
 
 	// lineStarts[k] is the byte offset in raw where lines[k] begins.
 	lineStarts := make([]int, len(lines))
@@ -178,15 +181,22 @@ func flattenHTMLBlockVisibleText(lines []string, startLineNo int) []htmlVisibleL
 		return idx
 	}
 
+	var segments []htmlVisibleSegment
+
 	// appendVisible attributes raw[from:to] (never containing a "<" that
 	// starts a recognized construct) to its original line(s), splitting on
 	// any embedded "\n" so a long run of plain text spanning several
-	// physical lines still lands on the right ones, and marks each
-	// affected line verbatim if verbatimDepth > 0 at the time.
+	// physical lines still lands on the right ones. A new segment is
+	// started whenever the line changes or the verbatim state changes
+	// from the previous one; consecutive same-line, same-verbatim text is
+	// appended to the current segment instead of starting a new one, so a
+	// line untouched by any verbatim transition still produces exactly
+	// one segment, same as before this supported mixed lines.
 	appendVisible := func(from, to int, verbatimDepth int) {
 		if from >= to {
 			return
 		}
+		verbatim := verbatimDepth > 0
 		segStart := from
 		for _, part := range strings.SplitAfter(raw[from:to], "\n") {
 			if part == "" {
@@ -194,14 +204,16 @@ func flattenHTMLBlockVisibleText(lines []string, startLineNo int) []htmlVisibleL
 			}
 			idx := lineIndexAt(segStart)
 			segStart += len(part)
-			if idx < 0 || idx >= len(out) {
+			if idx < 0 || idx >= len(lines) {
 				continue
 			}
-			clean := strings.TrimSuffix(part, "\n")
-			out[idx].text += decodeEntities(clean)
-			if verbatimDepth > 0 {
-				out[idx].verbatim = true
+			decoded := decodeEntities(strings.TrimSuffix(part, "\n"))
+			lineNo := startLineNo + idx
+			if n := len(segments); n > 0 && segments[n-1].lineNo == lineNo && segments[n-1].verbatim == verbatim {
+				segments[n-1].text += decoded
+				continue
 			}
+			segments = append(segments, htmlVisibleSegment{lineNo: lineNo, text: decoded, verbatim: verbatim})
 		}
 	}
 
@@ -262,7 +274,7 @@ func flattenHTMLBlockVisibleText(lines []string, startLineNo int) []htmlVisibleL
 		i++
 	}
 
-	return out
+	return segments
 }
 
 // skipHTMLComment, if raw[i:] begins with "<!--", returns the index just
