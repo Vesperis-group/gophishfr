@@ -1,38 +1,47 @@
 {
-  "goal_id": "deprecate-api-key-transports",
-  "status": "inspecting",
-  "iteration": 1,
-  "builder_model": "Claude:Sonnet-5",
-  "inspector_model": "Claude:Haiku-4.5",
-  "initial_sha": "99c9a50848e8a826360ea7585a57d7e6f753a34c",
-  "created_at": "2026-10-01T20:10:00+02:00",
-  "history": [
-    {
-      "iteration": 1,
-      "role": "builder",
-      "model": "Claude:Sonnet-5",
-      "commit_sha": "d249b11b4843889eab762930fb7697f9c25fd80d",
-      "commit_title": "docs(api): [B] deprecate legacy key transports",
-      "completed_at": "2026-10-01T20:23:25+02:00",
-      "summary": "Documentation-only deprecation of query/form/raw API-key transports: docs/API_AUTHENTICATION.md updated to make Authorization: Bearer the sole canonical transport; new docs/API_KEY_TRANSPORT_DEPRECATION.md (migration examples, 0.13.0 removal behaviour, leaked-key rotation/log-review guidance, explicit no-RFC-header rationale); new docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md; new docs/API_KEY_TRANSPORT_DEPRECATION_SELF_REVIEW.md; new scripts/verify-docs-canonical-examples.sh gate wired into scripts/verify.sh. No runtime/auth/middleware/schema/dependency change. VERSION unchanged (0.12.1).",
-      "validation": {
-        "verify_sh": "pass",
-        "go_test": "pass",
-        "go_test_race": "pass",
-        "go_vet": "pass",
-        "go_build": "pass",
-        "govulncheck": "pass (0 reachable vulnerabilities)",
-        "gosec": "12 pre-existing findings, none in files changed by this PR (only .md/.sh changed)",
-        "gitleaks": "2 pre-existing findings from 2026-09-03 history, unrelated to this PR",
-        "actionlint": "pass",
-        "zizmor": "pass (2 pre-existing documented suppressions)",
-        "yarn_audit": "4 pre-existing moderate findings in transitive webpack devDependency, lockfile unchanged",
-        "retire_js": "pass",
-        "browser_tests": "pass (scripts/test-browser.sh)",
-        "docker_compat_tests": "pass (scripts/test-container-api-session-auth.sh, scripts/test-container-api-key-verifier.sh)",
-        "git_diff_check": "clean",
-        "lockfiles_unchanged": true
-      }
-    }
-  ]
+    "goal_id":  "deprecate-api-key-transports",
+    "status":  "inspecting",
+    "iteration":  1,
+    "builder_model":  "Claude:Sonnet-5",
+    "inspector_model":  "Claude:Haiku-4.5",
+    "initial_sha":  "99c9a50848e8a826360ea7585a57d7e6f753a34c",
+    "created_at":  "2026-10-01T20:10:00+02:00",
+    "history":  [
+                    {
+                        "iteration":  1,
+                        "role":  "builder",
+                        "model":  "Claude:Sonnet-5",
+                        "commit_sha":  "d249b11b4843889eab762930fb7697f9c25fd80d",
+                        "commit_title":  "docs(api): [B] deprecate legacy key transports",
+                        "completed_at":  "2026-10-01T20:23:25+02:00",
+                        "summary":  "Documentation-only deprecation of query/form/raw API-key transports: docs/API_AUTHENTICATION.md updated to make Authorization: Bearer the sole canonical transport; new docs/API_KEY_TRANSPORT_DEPRECATION.md (migration examples, 0.13.0 removal behaviour, leaked-key rotation/log-review guidance, explicit no-RFC-header rationale); new docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md; new docs/API_KEY_TRANSPORT_DEPRECATION_SELF_REVIEW.md; new scripts/verify-docs-canonical-examples.sh gate wired into scripts/verify.sh. No runtime/auth/middleware/schema/dependency change. VERSION unchanged (0.12.1).",
+                        "validation":  {
+                                           "verify_sh":  "pass",
+                                           "go_test":  "pass",
+                                           "go_test_race":  "pass",
+                                           "go_vet":  "pass",
+                                           "go_build":  "pass",
+                                           "govulncheck":  "pass (0 reachable vulnerabilities)",
+                                           "gosec":  "12 pre-existing findings, none in files changed by this PR (only .md/.sh changed)",
+                                           "gitleaks":  "2 pre-existing findings from 2026-09-03 history, unrelated to this PR",
+                                           "actionlint":  "pass",
+                                           "zizmor":  "pass (2 pre-existing documented suppressions)",
+                                           "yarn_audit":  "4 pre-existing moderate findings in transitive webpack devDependency, lockfile unchanged",
+                                           "retire_js":  "pass",
+                                           "browser_tests":  "pass (scripts/test-browser.sh)",
+                                           "docker_compat_tests":  "pass (scripts/test-container-api-session-auth.sh, scripts/test-container-api-key-verifier.sh)",
+                                           "git_diff_check":  "clean",
+                                           "lockfiles_unchanged":  true
+                                       }
+                    },
+                    {
+                        "iteration":  1,
+                        "feedback_file":  ".goals/deprecate-api-key-transports/inspector-feedback-1.md",
+                        "verdict":  "PASS",
+                        "model":  "Claude:Haiku-4.5",
+                        "role":  "inspector",
+                        "summary":  "All acceptance criteria verified met. Documentation comprehensive and accurate. No runtime behavior changed. Docs gate working. Synthetic values only. RFC header rationale explicit. Release note ready. Scope properly bounded.",
+                        "completed_at":  "2026-10-01T18:29:33.4810253Z"
+                    }
+                ]
 }
