@@ -1,0 +1,17 @@
+{
+  "goal_id": "encrypt-event-details",
+  "status": "built",
+  "iteration": 1,
+  "builder_model": "Claude:Sonnet-5",
+  "inspector_model": "Claude:Haiku-4.5",
+  "initial_sha": "d54fd4ea8c55008f204138f8239cbc8529db94ed",
+  "created_at": "2026-10-02T22:05:00+02:00",
+  "history": [
+    {
+      "iteration": 1,
+      "role": "builder",
+      "model": "Claude:Sonnet-5",
+      "summary": "Implemented whole-blob AES-256-GCM encryption of events.details for SQLite and MySQL: schema migrations (details_ciphertext BLOB/MEDIUMBLOB plus a durable event_details_migration_state marker), AAD-bound Context (Kind=event-details, OwnerID=CampaignId, RecordID=event id), a two-phase encrypted new-write path wired through AddEvent, transparent decrypt-on-read in GetCampaign/GetCampaignResults with per-row availability isolation, a 44 KiB new-write plaintext size bound for rollback compatibility, online batched migrate/rollback/finalize/rotate/inventory CLI tooling, a Down-migration data-loss guard, and extensive tests covering every acceptance criterion. Full ./scripts/verify.sh plus gosec/gitleaks/zizmor/govulncheck pass; go.mod/go.sum/package.json/yarn.lock are byte-identical to base."
+    }
+  ]
+}

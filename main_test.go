@@ -16,9 +16,9 @@ import (
 
 func TestLoadCredentialCipher(t *testing.T) {
 	t.Setenv(models.IMAPCredentialKeyringEnvironment, "")
-	credentialCipher, err := loadCredentialCipher()
-	if err != nil || credentialCipher != nil {
-		t.Fatalf("unset keyring returned cipher=%v err=%v", credentialCipher, err)
+	credentialCipher, activeKeyID, err := loadCredentialCipher()
+	if err != nil || credentialCipher != nil || activeKeyID != "" {
+		t.Fatalf("unset keyring returned cipher=%v activeKeyID=%q err=%v", credentialCipher, activeKeyID, err)
 	}
 
 	keyringPath := filepath.Join(t.TempDir(), "keyring.json")
@@ -32,9 +32,12 @@ func TestLoadCredentialCipher(t *testing.T) {
 	}
 
 	t.Setenv(models.IMAPCredentialKeyringEnvironment, keyringPath)
-	credentialCipher, err = loadCredentialCipher()
+	credentialCipher, activeKeyID, err = loadCredentialCipher()
 	if err != nil {
 		t.Fatalf("load read-only keyring: %v", err)
+	}
+	if activeKeyID != "native-test-key" {
+		t.Fatalf("active key id = %q, want native-test-key", activeKeyID)
 	}
 
 	// The bootstrap loads once. Removing the file cannot affect the injected,
@@ -64,7 +67,7 @@ func TestLoadCredentialCipherRejectsUnsafeFile(t *testing.T) {
 		t.Fatalf("set unsafe keyring permissions: %v", err)
 	}
 	t.Setenv(models.IMAPCredentialKeyringEnvironment, keyringPath)
-	if _, err := loadCredentialCipher(); err == nil {
+	if _, _, err := loadCredentialCipher(); err == nil {
 		t.Fatal("unsafe keyring permissions were accepted")
 	}
 }

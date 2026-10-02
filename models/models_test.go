@@ -1,6 +1,7 @@
 package models
 
 import (
+	"bytes"
 	"crypto/rand"
 	"fmt"
 	"os"
@@ -8,6 +9,7 @@ import (
 
 	"github.com/Vesperis-group/gophishfr/config"
 	"github.com/Vesperis-group/gophishfr/internal/apikey"
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	"gopkg.in/check.v1"
 )
 
@@ -28,6 +30,30 @@ func TestMain(m *testing.M) {
 		panic(err)
 	}
 	SetAPIKeyVerifier(verifier)
+
+	// Every test in this package that creates a campaign event (directly or
+	// indirectly, e.g. via the mailer's MailLog.Backoff/HandleEmailError
+	// path) now goes through AddEvent's encrypted write path, which requires
+	// a configured cipher for any event with non-empty Details -- exactly
+	// like the pre-existing IMAP/SMTP/webhook credential paths already
+	// require one. This installs a synthetic default cipher for the whole
+	// suite, mirroring the API-key verifier setup immediately above. Tests
+	// that specifically exercise the "no cipher configured" fail-closed
+	// behavior save and restore this package-level variable around their own
+	// assertions (see TestAddEventRequiresCipherForNonEmptyDetails).
+	credentialKeyBytes := bytes.Repeat([]byte{0x5a}, 32)
+	credentialKeyring, err := credentials.NewKeyring("model-suite-active", map[string][]byte{
+		"model-suite-active": credentialKeyBytes,
+	})
+	if err != nil {
+		panic(err)
+	}
+	credentialCipher, err := credentials.New(credentialKeyring)
+	if err != nil {
+		panic(err)
+	}
+	SetEventDetailsCipher(credentialCipher)
+
 	os.Exit(m.Run())
 }
 
