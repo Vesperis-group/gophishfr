@@ -1,7 +1,7 @@
 {
     "goal_id": "deprecate-api-key-transports",
     "status": "inspecting",
-    "iteration": 11,
+    "iteration": 12,
     "builder_model": "Claude:Sonnet-5",
     "inspector_model": "Claude:Haiku-4.5",
     "initial_sha": "99c9a50848e8a826360ea7585a57d7e6f753a34c",
@@ -487,6 +487,40 @@
             "feedback_file": "inspector-feedback-11.md",
             "completed_at": "2026-10-02T11:25:00Z",
             "summary": "MEDIUM rendering-escape fixed; implementation sound, comprehensive tests, prior rules pass"
+        },
+        {
+            "iteration": 11,
+            "role": "security-review",
+            "verdict": "FAIL",
+            "summary": "Final independent reviews of the iteration-11 state returned three bounded parser findings in internal/docsguard. (1) SECURITY MEDIUM 9/10: rendered inline markup splits protected anchors and bypasses detection -- api<em>_</em>key=TOKEN, Authorization<em>:</em> TOKEN, 'Use the api<em>_</em>key query parameter...' -- across parameter/raw header/table/recommendation; Markdown emphasis and safe inline HTML must be analyzed/normalized, with combinations/nesting/case/attributes/malformed negatives covered, without a general Markdown/NLP parser and never leaking source in diagnostics. (2) CODE MEDIUM-high: normalization applied inside inline code spans and fenced/indented code blocks, where CommonMark does not decode escapes/entities, causing false positives for literal api\\_key and api&#95;key there; normalization must become context-aware (backtick variants, fenced blocks with backticks/tildes/info strings, indented code), while still catching literal or rendered-functional forbidden examples in those contexts. (3) CODE MEDIUM-high: unrelated words (migration, removal, legacy, ...) in a sentence suppressed forbidden recommendations regardless of whether they actually described the api_key mention; affirmative context must be bound to the relevant transport/legacy syntax specifically, preserving genuine deprecation/warning/do-not-use statements and all prior clause rules. User selected: fix all findings from final reviews. The nonconforming historical commit flagged separately by the reviewers is explicitly out of scope for this iteration; the orchestrator will obtain explicit user authorization for that separately."
+        },
+        {
+            "iteration": 12,
+            "role": "builder",
+            "model": "Claude:Sonnet-5",
+            "commit_sha": "PENDING",
+            "commit_title": "fix(docs): [B] harden rendered guidance detection",
+            "summary": "Fixed all three final-review findings in internal/docsguard, test/docs-only, surgically and without a general Markdown/NLP parser. (1) Rendered markup split: added safeInlineTagPattern, a short explicit allow-list of safe inline formatting tags (em/i/b/strong/u/s/del/ins/mark/small/sub/sup/span/abbr/code), case-insensitive and attribute-tolerant, stripped before matching; and renderedMarkupSplitPattern, which strips an emphasis/strong/strikethrough delimiter run (*/_, 1-3; ~, 1-2) wrapping exactly one protected punctuation character (_/:/=/&), narrow enough to avoid the ambiguity between a delimiter run and literal wrapped content that a general emphasis parser would need to resolve. (2) Code-aware normalization: added inlineCodeSpanRanges, a small manual scanner (Go's regexp has no backreferences, so 'a closing run of the same length as the opening run' cannot be expressed as one regex) that finds backtick code-span ranges within a line; normalizeRenderedEscapes now normalizes only the text outside those ranges. ScanText now tracks fenced-code-block state across lines (backtick or tilde, any length >=3, with or without an info string) and recognizes indented (>=4 space/tab) lines, scanning both raw -- never normalized -- so literal forbidden examples inside code are still caught while non-rendering escapes/entities there are not. (3) Context bound to transport syntax: added a proximity requirement to hasAffirmativeDeprecationContext -- a deprecation-context word must now be within 6 words of an actual api_key mention in the same clause to count, in addition to the existing negation and adversative-boundary checks, so an unrelated subject's nearby deprecation notice no longer suppresses a live, unqualified api_key recommendation. Added TestScanTextRenderedMarkupSplit (20 cases), TestScanTextCodeAwareNormalization (15 cases), and TestScanTextContextBoundToTransportSyntax (5 cases), covering positive and negative fixtures for every finding including combinations, nesting, case variants, attributes, and malformed-markup negatives. All prior fixtures (iterations 5-11) and the full repository test suite pass unchanged with all three fixes composed together. Searched all shipped Markdown with the extended gate: 0 violations across 28 files, no doc wording changed. The nonconforming historical commit is intentionally untouched in this iteration. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
+            "validation": {
+                "verify_sh": "pass",
+                "go_test": "pass (including 3 new docsguard test functions covering all three findings, 40 new sub-cases total, plus the full repository suite go test ./...; all prior fixtures unchanged and passing)",
+                "go_test_race": "pass",
+                "go_vet": "pass",
+                "go_build": "pass",
+                "golangci_lint": "0 issues",
+                "govulncheck": "pass (0 reachable vulnerabilities)",
+                "gosec": "12 pre-existing findings, same baseline; no new finding",
+                "gitleaks": "1 pre-existing finding from 2026-09-03 history, unrelated to this PR; current working tree clean (--no-git); no new finding",
+                "actionlint": "pass",
+                "zizmor": "pass (2 pre-existing documented suppressions)",
+                "yarn_audit": "4 pre-existing moderate findings in transitive webpack devDependency, lockfile unchanged",
+                "retire_js": "pass",
+                "browser_tests": "pass (scripts/test-browser.sh)",
+                "docker_compat_tests": "pass (scripts/test-container-api-session-auth.sh, scripts/test-container-api-key-verifier.sh)",
+                "docs_gate_sanity_check": "scripts/verify-docs-canonical-examples.sh reports 0 violations across all 28 tracked shipped Markdown files",
+                "git_diff_check": "clean",
+                "lockfiles_unchanged": true
+            }
         }
     ]
 }

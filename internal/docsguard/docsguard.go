@@ -162,15 +162,59 @@ const negationProximityWords = 3
 // api_key's status, when X is a different subject.
 var adversativeBoundaryPattern = regexp.MustCompile(`(?i)\b(?:but|however|yet|though|although|nevertheless|nonetheless|whereas)\b`)
 
+// apiKeyMentionPattern matches a literal `api_key` occurrence
+// (case-insensitive). deprecationContextProximityDistance uses it to bind a
+// deprecation-context word to the specific transport syntax it must
+// describe, rather than any similarly-placed but unrelated subject sharing
+// the same sentence or clause -- "Use the api_key query parameter for
+// authentication; our legacy billing system also needs migration, with
+// removal scheduled separately" mentions "legacy"/"migration"/"removal",
+// but none of them are about api_key's own deprecation.
+var apiKeyMentionPattern = regexp.MustCompile(`(?i)api_key`)
+
+// deprecationContextProximityWords bounds how many words may separate a
+// deprecation-context word from the nearest `api_key` mention in the same
+// clause and still count as describing that transport's own status. This
+// is deliberately generous enough for a context word to sit just past a
+// short verb phrase ("the api_key parameter is deprecated", "recommended
+// the api_key query parameter; it is now deprecated") while still excluding
+// a word that is merely nearby in the same sentence but describing an
+// unrelated subject.
+const deprecationContextProximityWords = 6
+
+// deprecationContextProximityDistance returns the number of
+// whitespace-separated words between pos and the closest `api_key` mention
+// in clauseText, or -1 if clauseText contains no such mention at all.
+func deprecationContextProximityDistance(clauseText string, pos int) int {
+	best := -1
+	for _, loc := range apiKeyMentionPattern.FindAllStringIndex(clauseText, -1) {
+		var between string
+		if loc[0] >= pos {
+			between = clauseText[pos:loc[0]]
+		} else {
+			between = clauseText[loc[1]:pos]
+		}
+		n := len(strings.Fields(between))
+		if best == -1 || n < best {
+			best = n
+		}
+	}
+	return best
+}
+
 // hasAffirmativeDeprecationContext reports whether clauseText contains at
-// least one deprecation-context word or phrase that is both (a) not
-// directly negated and (b) not separated from recommendationPos -- the byte
-// offset, within clauseText, of the recommendation match being evaluated --
-// by an adversativeBoundaryPattern connector. It is used both per-line (for
+// least one deprecation-context word or phrase that is (a) not directly
+// negated, (b) not separated from recommendationPos -- the byte offset,
+// within clauseText, of the recommendation match being evaluated -- by an
+// adversativeBoundaryPattern connector, and (c) within
+// deprecationContextProximityWords of an actual `api_key` mention, so it
+// describes that transport specifically rather than some other subject
+// merely sharing the sentence or clause. It is used both per-line (for
 // table rows, with recommendationPos set to len(line) so any context in the
 // row counts as before) and per-sentence (for recommendation prose, scoped
-// via sentenceBounds), so a negated mention, or one that belongs to a
-// different, adversatively-contrasted clause, cannot accidentally suppress a
+// via sentenceBounds), so a negated mention, one that belongs to a
+// different, adversatively-contrasted clause, or one that is simply too far
+// from any `api_key` mention to describe it, cannot accidentally suppress a
 // genuine violation.
 func hasAffirmativeDeprecationContext(clauseText string, recommendationPos int) bool {
 	for _, match := range deprecationContextPattern.FindAllStringIndex(clauseText, -1) {
@@ -199,6 +243,10 @@ func hasAffirmativeDeprecationContext(clauseText string, recommendationPos int) 
 			between = clauseText[recommendationPos:start]
 		}
 		if adversativeBoundaryPattern.MatchString(between) {
+			continue
+		}
+
+		if d := deprecationContextProximityDistance(clauseText, start); d == -1 || d > deprecationContextProximityWords {
 			continue
 		}
 
@@ -426,40 +474,195 @@ var namedCharRefReplacements = map[string]string{
 // `&hearts;`) is left exactly as written.
 var namedCharRefPattern = regexp.MustCompile(`&[A-Za-z][A-Za-z0-9]*;`)
 
-// normalizeRenderedEscapes rewrites a line into the plain text it would
-// render as in GitHub's Markdown, undoing exactly two escape mechanisms a
-// canonical-looking documentation example could otherwise hide behind: a
-// CommonMark backslash escape (see backslashEscapePattern) and an HTML
-// numeric or narrowly-recognized named character reference (see
-// numericCharRefPattern and namedCharRefReplacements). It intentionally does
-// not parse Markdown or HTML more generally -- no tags, no CDATA, no
-// arbitrary named-entity table -- only this bounded, documented
-// transformation, applied before every other pattern in this package so a
-// rendered-but-disguised example (`api\_key=TOKEN`, `api&#95;key=TOKEN`,
-// `Authorization&#58; TOKEN`) is caught the same way its plain form is.
-func normalizeRenderedEscapes(line string) string {
-	line = numericCharRefPattern.ReplaceAllStringFunc(line, func(ref string) string {
-		m := numericCharRefPattern.FindStringSubmatch(ref)
-		var codePoint int64
-		var err error
-		if m[1] != "" {
-			codePoint, err = strconv.ParseInt(m[1], 16, 32)
-		} else {
-			codePoint, err = strconv.ParseInt(m[2], 10, 32)
-		}
-		if err != nil || codePoint <= 0 || codePoint > 0x10FFFF {
-			return ref
-		}
-		return string(rune(codePoint))
-	})
-	line = namedCharRefPattern.ReplaceAllStringFunc(line, func(ref string) string {
-		if replacement, ok := namedCharRefReplacements[ref]; ok {
-			return replacement
-		}
+// safeInlineTagPattern matches an opening or closing tag for a narrow,
+// explicit allow-list of safe inline HTML formatting elements GitHub's
+// Markdown renders as real HTML, with or without attributes: em, i, b,
+// strong, u, s, del, ins, mark, small, sub, sup, span, abbr, code. A
+// documentation example can use one of these purely to visually split one
+// of this package's protected anchors while still rendering as plain,
+// readable text -- `api<em>_</em>key=TOKEN` renders exactly like
+// `api_key=TOKEN` -- so these tags are stripped (never their content)
+// before any other pattern runs. This is deliberately a short, explicit
+// list of tag *names*, not a general HTML tag parser: anything else (a
+// `<script>`, an `<img>`, an unknown or custom element) is left untouched.
+var safeInlineTagPattern = regexp.MustCompile(`(?i)</?(?:em|i|b|strong|u|s|del|ins|mark|small|sub|sup|span|abbr|code)(?:\s[^>]*)?>`)
+
+// renderedMarkupSplitPattern matches a Markdown emphasis/strong-emphasis/
+// strikethrough delimiter run (one to three asterisks, one to three
+// underscores, or one to two tildes, independently on each side) wrapping
+// exactly one of this package's protected punctuation characters (`_`,
+// `:`, `=`, `&`). A documentation example can use this purely to visually
+// split one of this package's protected anchors while still rendering as
+// plain, readable text -- `api*_*key=TOKEN` renders exactly like
+// `api_key=TOKEN` -- so the delimiter run on each side is stripped,
+// keeping only the wrapped character. This intentionally recognizes only
+// this one narrow, specific shape (a single wrapped protected character),
+// not general Markdown emphasis: a delimiter run can equally be literal
+// *content* rather than a wrapping delimiter (`**_**` strong-emphasizes a
+// literal underscore), and there is no way to tell those apart without a
+// real parser: recognizing only "exactly one wrapped protected character"
+// avoids that ambiguity, since none of `_:=&` is itself a delimiter
+// character this pattern also tries to match as wrapped content.
+var renderedMarkupSplitPattern = regexp.MustCompile(
+	`(?:\*{1,3}|_{1,3}|~{1,2})([_:=&])(?:\*{1,3}|_{1,3}|~{1,2})`,
+)
+
+// codeFenceLinePattern matches a Markdown fenced code block delimiter line:
+// up to three leading spaces (per CommonMark) followed by three or more
+// identical backticks or tildes. It is used only to detect where a fence
+// opens and closes, never to parse an info string or the fence's contents.
+var codeFenceLinePattern = regexp.MustCompile("^ {0,3}(`{3,}|~{3,})")
+
+// matchCodeFence reports whether line is a fenced-code-block delimiter,
+// returning the fence character and the length of its backtick/tilde run.
+func matchCodeFence(line string) (ch byte, length int, ok bool) {
+	m := codeFenceLinePattern.FindStringSubmatch(line)
+	if m == nil {
+		return 0, 0, false
+	}
+	return m[1][0], len(m[1]), true
+}
+
+// indentedCodeLinePattern matches a line CommonMark would treat as part of
+// an indented code block: four or more leading spaces, or a leading tab.
+// This package does not track list-item context (which can change whether
+// such indentation is actually a code block), so it conservatively treats
+// every such line as code content for normalization purposes -- this only
+// ever *skips* decoding an escape that would not actually render that way;
+// it never skips detecting a literal forbidden example.
+var indentedCodeLinePattern = regexp.MustCompile(`^(?: {4,}|\t)`)
+
+// decodeNumericCharRef decodes one `&#NN;`/`&#xHH;` match (see
+// numericCharRefPattern) into the literal character it names, or returns it
+// unchanged if the numeric value is not a valid code point.
+func decodeNumericCharRef(ref string) string {
+	m := numericCharRefPattern.FindStringSubmatch(ref)
+	var codePoint int64
+	var err error
+	if m[1] != "" {
+		codePoint, err = strconv.ParseInt(m[1], 16, 32)
+	} else {
+		codePoint, err = strconv.ParseInt(m[2], 10, 32)
+	}
+	if err != nil || codePoint <= 0 || codePoint > 0x10FFFF {
 		return ref
-	})
-	line = backslashEscapePattern.ReplaceAllString(line, "$1")
-	return line
+	}
+	return string(rune(codePoint))
+}
+
+// decodeNamedCharRef decodes one `&name;` match (see namedCharRefPattern)
+// via the narrow namedCharRefReplacements table, or returns it unchanged if
+// the name is not recognized.
+func decodeNamedCharRef(ref string) string {
+	if replacement, ok := namedCharRefReplacements[ref]; ok {
+		return replacement
+	}
+	return ref
+}
+
+// decodeRenderedMarkup applies every rendering-normalization transformation
+// this package recognizes, in an order where later steps can resolve what
+// earlier ones reveal (an HTML-tag-wrapped numeric reference, an
+// emphasis-wrapped entity, and so on): stripping safe inline HTML tags,
+// decoding numeric and narrowly-named HTML character references, undoing
+// CommonMark backslash escapes, and stripping an emphasis/strikethrough
+// delimiter wrapping exactly one protected punctuation character. Callers
+// must only apply this to text that Markdown would actually render these
+// ways -- never to inline code span content or code block lines, where
+// CommonMark renders every one of these mechanisms completely literally
+// (see normalizeRenderedEscapes, ScanText).
+func decodeRenderedMarkup(s string) string {
+	s = safeInlineTagPattern.ReplaceAllString(s, "")
+	s = numericCharRefPattern.ReplaceAllStringFunc(s, decodeNumericCharRef)
+	s = namedCharRefPattern.ReplaceAllStringFunc(s, decodeNamedCharRef)
+	s = backslashEscapePattern.ReplaceAllString(s, "$1")
+	s = renderedMarkupSplitPattern.ReplaceAllString(s, "$1")
+	return s
+}
+
+// inlineCodeSpanRanges returns the half-open byte ranges of line that fall
+// inside a Markdown inline code span: a run of one or more backticks,
+// followed by content, followed by a run of the exact same length. Per
+// CommonMark, a code span's content renders completely literally -- no
+// backslash escape, no character reference, no emphasis delimiter, and no
+// raw HTML tag is processed inside one -- so decodeRenderedMarkup must
+// never be applied to these ranges (see normalizeRenderedEscapes). Go's
+// regexp package cannot express "a closing run of the same length as the
+// opening run" (no backreferences), so this is a small manual scanner
+// instead of a single regular expression; it is deliberately a simplified
+// model of CommonMark's actual (more involved) code-span tokenization rule,
+// sufficient for this package's narrow purpose without being a Markdown
+// parser: it finds the first subsequent backtick run of matching length to
+// close a span, and if none exists before the end of the line, treats the
+// opening run as ordinary text (as CommonMark itself does).
+func inlineCodeSpanRanges(line string) [][2]int {
+	var ranges [][2]int
+	i := 0
+	for i < len(line) {
+		if line[i] != '`' {
+			i++
+			continue
+		}
+		openStart := i
+		for i < len(line) && line[i] == '`' {
+			i++
+		}
+		openLen := i - openStart
+		contentStart := i
+		closed := false
+		for i < len(line) {
+			if line[i] != '`' {
+				i++
+				continue
+			}
+			closeStart := i
+			for i < len(line) && line[i] == '`' {
+				i++
+			}
+			if i-closeStart == openLen {
+				ranges = append(ranges, [2]int{contentStart, closeStart})
+				closed = true
+				break
+			}
+		}
+		if !closed {
+			// No matching close before end of line: not a code span: fall
+			// through and keep scanning for a new opening run starting
+			// just after the one we tried, matching CommonMark's behavior
+			// of treating an unmatched backtick run as literal text.
+			i = contentStart
+		}
+	}
+	return ranges
+}
+
+// normalizeRenderedEscapes rewrites a line into the plain text it would
+// render as in GitHub's Markdown, undoing every rendering mechanism a
+// canonical-looking documentation example could otherwise hide a
+// deprecated-transport example behind (see decodeRenderedMarkup), while
+// leaving any inline code span's content completely untouched (see
+// inlineCodeSpanRanges): CommonMark renders code span content literally,
+// so an escape or entity or emphasis delimiter written there never
+// actually decodes when rendered, and normalizing it anyway would turn a
+// harmless literal example (“ `api\_key=TOKEN` “, which renders as the
+// non-functional literal text "api\_key=TOKEN") into a false positive. A
+// line that is itself part of a fenced or indented code block is handled
+// one level up, in ScanText, which does not call this function for such
+// lines at all, for the same reason.
+func normalizeRenderedEscapes(line string) string {
+	ranges := inlineCodeSpanRanges(line)
+	if len(ranges) == 0 {
+		return decodeRenderedMarkup(line)
+	}
+	var b strings.Builder
+	prev := 0
+	for _, r := range ranges {
+		b.WriteString(decodeRenderedMarkup(line[prev:r[0]]))
+		b.WriteString(line[r[0]:r[1]])
+		prev = r[1]
+	}
+	b.WriteString(decodeRenderedMarkup(line[prev:]))
+	return b.String()
 }
 
 // ScanText scans arbitrary text (typically one Markdown file's contents) and
@@ -475,14 +678,39 @@ func ScanText(text string) ([]Violation, error) {
 	scanner := bufio.NewScanner(strings.NewReader(text))
 	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
 	lineNo := 0
+	var inFence bool
+	var fenceChar byte
+	var fenceLen int
 	for scanner.Scan() {
 		lineNo++
-		// Normalize the Markdown/HTML escape forms a renderer would turn
-		// back into a literal character before any pattern matching: a
-		// canonical-looking `api\_key=TOKEN` or `api&#95;key=TOKEN` renders
-		// in GitHub's Markdown exactly like `api_key=TOKEN` and must be
-		// caught the same way. See normalizeRenderedEscapes.
-		line := normalizeRenderedEscapes(scanner.Text())
+		raw := scanner.Text()
+
+		// Markdown/HTML normalization (see normalizeRenderedEscapes) must
+		// only run on text CommonMark actually renders that way. A fenced
+		// or indented code block's content -- and its fence delimiter
+		// lines themselves -- render completely literally, the same as an
+		// inline code span's content; skip normalization for those lines
+		// entirely and scan the raw text, so a literal forbidden example
+		// inside a code block is still caught without a harmless escaped
+		// one being wrongly normalized into a false positive.
+		var line string
+		switch {
+		case inFence:
+			if ch, length, ok := matchCodeFence(raw); ok && ch == fenceChar && length >= fenceLen {
+				inFence = false
+			}
+			line = raw
+		default:
+			if ch, length, ok := matchCodeFence(raw); ok {
+				fenceChar, fenceLen = ch, length
+				inFence = true
+				line = raw
+			} else if indentedCodeLinePattern.MatchString(raw) {
+				line = raw
+			} else {
+				line = normalizeRenderedEscapes(raw)
+			}
+		}
 		lines = append(lines, line)
 		if hasParameterCredential(line) {
 			violations = append(violations, Violation{StartLine: lineNo, EndLine: lineNo, Kind: KindParameterCredential})

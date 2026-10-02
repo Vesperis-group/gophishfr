@@ -717,6 +717,129 @@ file found 0 violations; no doc wording changed. No runtime
 authentication/middleware/header/status/version/dependency behavior
 changed.
 
+## Iteration 12: final-review findings and fixes
+
+Final independent reviews of the iteration-11 state returned three bounded
+parser findings in `internal/docsguard`, addressed together and
+surgically, without a general Markdown/NLP parser and with no runtime
+behavior change.
+
+### Finding 1 (security, MEDIUM, 9/10) — rendered inline markup split protected anchors and bypassed detection
+
+A canonical-looking example could use a safe inline HTML tag or a Markdown
+emphasis delimiter to visually split one of this package's protected
+anchors while still rendering as plain, readable text:
+`api<em>_</em>key=TOKEN`, `Authorization<em>:</em> TOKEN`, and "Use the
+api<em>_</em>key query parameter..." all render exactly like their unsplit
+forms but previously matched none of this package's patterns, across the
+parameter-credential, raw-authorization, table-row, and
+recommendation-prose checks alike.
+
+Fixed with two narrow additions to `decodeRenderedMarkup`:
+
+- `safeInlineTagPattern` strips an opening or closing tag for a short,
+  explicit allow-list of safe inline formatting elements (`em`, `i`, `b`,
+  `strong`, `u`, `s`, `del`, `ins`, `mark`, `small`, `sub`, `sup`, `span`,
+  `abbr`, `code`), case-insensitively and tolerating any attributes,
+  leaving everything else (a `<script>`, an `<img>`, an unrecognized or
+  custom element) untouched.
+- `renderedMarkupSplitPattern` strips a Markdown emphasis/strong/
+  strikethrough delimiter run (`*`/`_`, one to three; `~`, one to two, each
+  side independent) wrapping **exactly one** of this package's protected
+  punctuation characters (`_`, `:`, `=`, `&`). This is deliberately
+  narrower than general emphasis recognition: a delimiter run can equally
+  be literal *content* rather than a wrapping delimiter (`**_**`
+  strong-emphasizes a literal underscore), and there is no way to
+  distinguish those without a real parser. Recognizing only "exactly one
+  wrapped protected character" sidesteps that ambiguity entirely, since
+  none of `_:=&` is itself a delimiter character this same pattern also
+  tries to match as wrapped content.
+
+New fixtures (`TestScanTextRenderedMarkupSplit`): the finding's exact
+examples across every anchor (parameter, raw header, table, recommendation
+prose); other allow-listed tags and a case variant; an attribute on a tag;
+each emphasis/strong/strikethrough delimiter type wrapping the protected
+character; mismatched delimiter-run lengths; a tag wrapping
+emphasis-wrapped content and a tag wrapping an HTML character reference
+(both nested combinations); and negative cases for an unrelated
+non-allow-listed tag (`<kbd>`), a malformed/unmatched single asterisk
+(which CommonMark renders as a literal character, never as emphasis), and
+ordinary whole-word emphasis unrelated to any anchor.
+
+### Finding 2 (code, MEDIUM-high) — normalization applied inside code spans and blocks, where CommonMark never decodes escapes/entities
+
+The normalization added in iteration 11 ran unconditionally on every line,
+but CommonMark does not process backslash escapes, HTML character
+references, or (per Finding 1) emphasis/raw-HTML-tag rendering inside an
+inline code span or a fenced/indented code block — that content renders
+completely literally. Normalizing it anyway turned a harmless, literal,
+non-functional example (`` `api\_key=TOKEN` ``, which renders as the
+visible literal text "api\_key=TOKEN", not a working credential) into a
+false positive.
+
+Fixed by making normalization code-aware at two levels:
+
+- `inlineCodeSpanRanges` is a small manual scanner (Go's `regexp` package
+  cannot express "a closing backtick run of the same length as the opening
+  one" — there are no backreferences) that finds backtick-delimited code
+  span ranges within one line; `normalizeRenderedEscapes` now splits a line
+  into alternating excluded (code span, left untouched) and included
+  (normalized) segments instead of normalizing the whole line uniformly.
+- `ScanText` now tracks fenced-code-block state across lines (recognizing
+  both backtick and tilde fences, of any length ≥3, with or without an
+  info string, closed only by a fence of the same character and at least
+  the same length) and recognizes an indented (≥4 space or tab) line as
+  code content. A line inside either is scanned **raw** — never passed to
+  `normalizeRenderedEscapes` at all — so a literal forbidden example is
+  still caught, while an escaped or entity-encoded one correctly is not.
+
+New fixtures (`TestScanTextCodeAwareNormalization`): literal examples
+inside a single-backtick span, a triple-backtick fence, a tilde fence with
+an info string, a backtick fence with an info string, and a 4-space
+indented block all still violate; the boundary case of exactly 3 spaces
+(not indented code) still normalizes and violates when escaped. Negative
+cases cover backslash-escaped and HTML-entity forms inside a code span (in
+both credential-syntax and recommendation-prose contexts) and inside every
+fence/indentation variant above, none of which violate.
+
+### Finding 3 (code, MEDIUM-high) — unrelated words in a sentence suppressed forbidden recommendations
+
+A deprecation-context word ("migration", "removal", "legacy", ...) counted
+as affirmative context anywhere it appeared in the same sentence or
+elaborating clause, with no requirement that it actually describe the
+`api_key` mention being evaluated. A sentence recommending `api_key` with
+no qualification of its own, merely co-occurring with an unrelated
+subject's deprecation notice ("our legacy billing system also needs
+migration, with removal scheduled separately"), was incorrectly suppressed.
+
+Fixed by adding a proximity requirement to `hasAffirmativeDeprecationContext`:
+a context word must now be within `deprecationContextProximityWords` (6)
+words of an actual `api_key` mention in the same clause to count, in
+addition to the existing negation and adversative-boundary checks. This is
+generous enough for the context word to sit just past a short verb phrase
+("the api_key parameter is deprecated", "recommended the api_key query
+parameter; it is now deprecated") while excluding one that is merely
+nearby but describes something else.
+
+New fixtures (`TestScanTextContextBoundToTransportSyntax`): a long sentence
+and a table-row cell, each pairing a live `api_key` recommendation with
+deprecation-sounding words about an unrelated subject far enough away not
+to qualify it (plain and wrapped), correctly violate; a genuinely close
+"migration"-only context, and a fully qualified same-sentence notice, both
+continue to suppress correctly.
+
+All three fixes compose correctly together and preserve every prior rule
+unchanged: dotted-version-aware sentence splitting, direct-negation,
+clause/adversative scoping, proximity-bounded recommendation verbs,
+percent-decoded parameter names, the iteration-11 escape normalization
+itself, the fail-closed scanner, and redacted diagnostics. The
+nonconforming historical commit flagged separately by the reviewers is
+intentionally **not** touched in this iteration; the orchestrator will
+seek explicit user authorization for that separately. No runtime
+authentication/middleware/header/status/version/dependency behavior
+changed. A full run of `scripts/verify-docs-canonical-examples.sh` against
+every tracked Markdown file found 0 violations; no doc wording changed.
+
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |
@@ -915,6 +1038,33 @@ changed.
 - `./scripts/verify-docs-canonical-examples.sh` re-run against every
   tracked Markdown file after the iteration-11 fix: 0 violations across 28
   shipped Markdown files, no doc wording changed.
+- `TestScanTextRenderedMarkupSplit` (iteration 12, new): the finding's
+  exact HTML-tag and emphasis-delimiter examples across every protected
+  anchor (parameter, raw header, table row, recommendation prose); other
+  allow-listed tags, a case variant, and an attribute; each delimiter type
+  (`*`/`_`/`~`) and mismatched run lengths; two nested combinations (a tag
+  wrapping emphasis, a tag wrapping an entity) -- all violate. An unrelated
+  non-allow-listed tag, a malformed/unmatched asterisk (rendered literally
+  by CommonMark), and ordinary whole-word emphasis do not.
+- `TestScanTextCodeAwareNormalization` (iteration 12, new): literal
+  examples inside a single-backtick span, a triple-backtick fence, a tilde
+  fence with an info string, a backtick fence with an info string, and a
+  4-space indented block all violate, as does the 3-space (not indented
+  code) boundary case when escaped. Backslash-escaped and HTML-entity forms
+  inside every one of those same code contexts -- credential syntax and
+  recommendation prose alike -- do not.
+- `TestScanTextContextBoundToTransportSyntax` (iteration 12, new): a long
+  sentence and a table-row cell pairing a live, unqualified `api_key`
+  recommendation with deprecation-sounding words describing an unrelated
+  subject far enough away not to qualify it (plain and wrapped) violate; a
+  genuinely close "migration"-only context and a fully qualified
+  same-sentence notice continue to suppress. All prior `internal/docsguard`
+  fixtures, including every iteration 5–11 fixture, and the full repository
+  test suite (`go test ./...`) pass unchanged under all three fixes
+  composed together.
+- `./scripts/verify-docs-canonical-examples.sh` re-run against every
+  tracked Markdown file after the iteration-12 fixes: 0 violations across
+  28 shipped Markdown files, no doc wording changed.
 
 ## Why a bounded deprecation window instead of immediate removal
 

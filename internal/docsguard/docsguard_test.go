@@ -628,3 +628,205 @@ func TestScanTextRenderedEscapeNormalization(t *testing.T) {
 		})
 	}
 }
+
+// TestScanTextContextBoundToTransportSyntax proves a deprecation-context
+// word ("migration", "removal", "legacy", ...) only counts as affirmative
+// context when it is close enough to an actual `api_key` mention to be
+// describing that transport specifically -- not merely sharing a sentence
+// or clause with an unrelated subject's own deprecation notice.
+func TestScanTextContextBoundToTransportSyntax(t *testing.T) {
+	positive := []string{
+		// "legacy"/"migration"/"removal" are all present, but describe an
+		// unrelated billing system, far enough from the live api_key
+		// recommendation to not qualify it.
+		"Use the api_key query parameter for authentication purposes in production environments; our legacy billing system also needs migration, with removal of old servers scheduled separately.",
+		// Table row variant: the row recommends api_key with no close
+		// context; the deprecation-sounding words describe something else
+		// entirely, much further along in the same cell.
+		"| `api_key` query parameter | see the separate, fully unrelated legacy billing migration and removal notes for other systems elsewhere |",
+		// Wrapped across physical lines.
+		"Use the api_key query\nparameter for authentication purposes\nin production environments; our\nlegacy billing system also\nneeds migration, with removal\nof old servers scheduled separately.\n",
+	}
+	for _, text := range positive {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if !containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("expected a violation when context describes an unrelated subject %q, got %v", text, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// "migration" sits close enough to a live-looking api_key mention
+		// to genuinely describe it, so it correctly still suppresses.
+		"Use the api_key query parameter; see the migration guide for the removal timeline.",
+		// A genuine, immediately adjacent deprecation notice.
+		"Use the api_key query parameter for authentication; it is deprecated and targeted for removal in 0.13.0, see the migration guide.",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if containsKind(violations, KindUndeprecatedParameterMention) {
+				t.Fatalf("unexpected violation for a genuinely close deprecation notice %q: %v", text, violations)
+			}
+		})
+	}
+}
+
+// TestScanTextCodeAwareNormalization proves rendering normalization (see
+// normalizeRenderedEscapes) only applies where CommonMark would actually
+// decode an escape or character reference: never inside an inline code
+// span, a fenced code block (backtick or tilde, with or without an info
+// string), or an indented code block. A literal forbidden example in any of
+// those must still be caught; a backslash-escaped or character-referenced
+// one -- which renders completely literally there, not as a working
+// credential -- must not be.
+func TestScanTextCodeAwareNormalization(t *testing.T) {
+	positive := []struct {
+		text string
+		kind Kind
+	}{
+		// A literal example inside a single-backtick inline code span.
+		{"`curl -d \"api_key=TOKEN\" https://gophishfr.example/api/campaigns/42/complete`", KindParameterCredential},
+		// A literal example inside a triple-backtick fenced code block.
+		{"```\n" +
+			"curl -d \"api_key=TOKEN\" https://gophishfr.example/api/campaigns/42/complete\n" +
+			"```\n", KindParameterCredential},
+		// A literal example inside a tilde-fenced code block with an info
+		// string.
+		{"~~~bash\n" +
+			"curl -H \"Authorization: TOKEN\" https://gophishfr.example/api/campaigns/42/complete\n" +
+			"~~~\n", KindRawAuthorization},
+		// A literal example inside a backtick-fenced block with an info
+		// string.
+		{"```bash\n" +
+			"curl -d \"api_key=TOKEN\" https://gophishfr.example/api/campaigns/42/complete\n" +
+			"```\n", KindParameterCredential},
+		// A literal example inside a 4-space indented code block.
+		{"    curl -d \"api_key=TOKEN\" https://gophishfr.example/api/campaigns/42/complete\n", KindParameterCredential},
+		// Exactly 3 spaces of indentation is *not* an indented code block
+		// per CommonMark, so this line is still normalized as ordinary
+		// text; included here as a positive case because the escaped form
+		// below (4 spaces) is the matching negative for the same text.
+		{"   Use the api\\_key parameter for authentication.", KindUndeprecatedParameterMention},
+	}
+	for _, c := range positive {
+		t.Run(c.text, func(t *testing.T) {
+			violations := mustScan(t, c.text)
+			if !containsKind(violations, c.kind) {
+				t.Fatalf("expected a %s violation for %q, got %v", c.kind, c.text, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// Backslash-escaped and HTML-entity forms inside a single-backtick
+		// inline code span: CommonMark renders these completely literally,
+		// so they never actually decode into a working credential.
+		"`curl -d \"api\\_key=TOKEN\" https://gophishfr.example/api/campaigns/42/complete`",
+		"`curl -d \"api&#95;key=TOKEN\" https://gophishfr.example/api/campaigns/42/complete`",
+		"`curl -H \"Authorization\\: TOKEN\" https://gophishfr.example/api/campaigns/42/complete`",
+		// The same two forms inside recommendation prose, wrapped in a
+		// code span: the paragraph never actually contains an unescaped
+		// "api_key" substring, so this must not even reach the
+		// recommendation check.
+		"Use the `api\\_key` query parameter for authentication.",
+		"Use the `api&#95;key` query parameter for authentication.",
+		// Backslash-escaped and HTML-entity forms inside a fenced code
+		// block (the content line, not the fence delimiters).
+		"```\n" +
+			"curl -d \"api\\_key=TOKEN\" https://gophishfr.example/api/campaigns/42/complete\n" +
+			"```\n",
+		"```bash\n" +
+			"curl -d \"api&#95;key=TOKEN\" https://gophishfr.example/api/campaigns/42/complete\n" +
+			"```\n",
+		"~~~\n" +
+			"curl -H \"Authorization&#58; TOKEN\" https://gophishfr.example/api/campaigns/42/complete\n" +
+			"~~~\n",
+		// Backslash-escaped form inside a 4-space indented code block.
+		"    curl -d \"api\\_key=TOKEN\" https://gophishfr.example/api/campaigns/42/complete\n",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if len(violations) != 0 {
+				t.Fatalf("unexpected violation(s) for a non-rendering encoding inside code %q: %v", text, violations)
+			}
+		})
+	}
+}
+
+// TestScanTextRenderedMarkupSplit proves a Markdown emphasis delimiter or a
+// safe inline HTML tag that splits one of this package's protected anchors
+// -- `api<em>_</em>key=TOKEN`, `Authorization<em>:</em> TOKEN`, "Use the
+// api<em>_</em>key query parameter..." -- is caught the same way the
+// unsplit form is, across the parameter-credential, raw-authorization,
+// table-row, and recommendation-prose checks, while unrelated or malformed
+// markup never creates a false positive.
+func TestScanTextRenderedMarkupSplit(t *testing.T) {
+	positive := []struct {
+		text string
+		kind Kind
+	}{
+		// The exact examples from the finding, across every anchor this
+		// package protects.
+		{`curl -d "api<em>_</em>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		{`curl -H "Authorization<em>:</em> TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
+		{"Use the api<em>_</em>key query parameter for authentication.", KindUndeprecatedParameterMention},
+		{"| Auth | api<em>_</em>key |", KindUndeprecatedParameterMention},
+		// Other safe inline tags on the allow-list, and a case variant.
+		{`curl -d "api<b>_</b>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		{`curl -H "Authorization<span>:</span> TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
+		{`curl -d "api<EM>_</EM>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		// A tag with an attribute.
+		{`curl -d "api<em class='x'>_</em>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		// Markdown emphasis/strong/strikethrough delimiters, each wrapping
+		// exactly the protected punctuation character.
+		{`curl -d "api*_*key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		{`curl -H "Authorization**:** TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
+		{`curl -H "Authorization_:_ TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindRawAuthorization},
+		{`curl -d "api~_~key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		// Mismatched delimiter run lengths on each side.
+		{`curl -d "api**_*key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		// Combinations: a safe tag wrapping emphasis-wrapped content, and a
+		// safe tag wrapping an HTML character reference.
+		{`curl -d "api<em>*_*</em>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+		{`curl -d "api<em>&#95;</em>key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`, KindParameterCredential},
+	}
+	for _, c := range positive {
+		t.Run(c.text, func(t *testing.T) {
+			violations := mustScan(t, c.text)
+			if !containsKind(violations, c.kind) {
+				t.Fatalf("expected a %s violation for %q, got %v", c.kind, c.text, violations)
+			}
+		})
+	}
+
+	negative := []string{
+		// An unrelated, non-whitelisted tag must not be touched, and is
+		// harmless regardless since nothing here relates to api_key.
+		"Press <kbd>Ctrl</kbd> to copy the value.",
+		// A table row using only a non-whitelisted tag, no api_key at all.
+		"| Shortcut | <kbd>Ctrl</kbd>+<kbd>C</kbd> |",
+		// Malformed/unmatched emphasis: a single opening asterisk with no
+		// matching close anywhere nearby renders as a *literal* asterisk
+		// character in CommonMark, not as emphasis, so the text never
+		// actually renders as "api_key".
+		`curl -d "api*_key=TOKEN" https://gophishfr.example/api/campaigns/42/complete`,
+		// Ordinary emphasis around a whole, unrelated word must not be
+		// touched (it wraps more than the single protected-character shape
+		// this package recognizes, and has nothing to do with api_key
+		// regardless).
+		"This is *emphasized* text, not a credential example.",
+		// A tag outside the allow-list, unrelated to api_key.
+		"Avoid embedding <script> tags in documentation examples.",
+	}
+	for _, text := range negative {
+		t.Run(text, func(t *testing.T) {
+			violations := mustScan(t, text)
+			if len(violations) != 0 {
+				t.Fatalf("unexpected violation(s) for %q: %v", text, violations)
+			}
+		})
+	}
+}
