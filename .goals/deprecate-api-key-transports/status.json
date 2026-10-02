@@ -1,7 +1,7 @@
 {
     "goal_id":  "deprecate-api-key-transports",
     "status":  "inspecting",
-    "iteration":  3,
+    "iteration":  4,
     "builder_model":  "Claude:Sonnet-5",
     "inspector_model":  "Claude:Haiku-4.5",
     "initial_sha":  "99c9a50848e8a826360ea7585a57d7e6f753a34c",
@@ -134,6 +134,42 @@
                         "role":  "inspector",
                         "summary":  "Iteration-2 review finding successfully fixed: docs/GROUP_IMPORT_LIMITS.md authentication table row now marks api_key deprecated with 0.13.0 removal target and links migration guide. internal/docsguard extended with new KindUndeprecatedParameterMention rule (stdlib-only, no new dependency) that detects table rows or 'or an api_key' prose offering api_key as normal option with no deprecation context (deprecat|0.13.0|remov|sunset|migrat|legacy). Comprehensive positive/negative fixture tests added, covering edge cases (meta-documentation, internal DB schema). Repository-wide search confirms GROUP_IMPORT_LIMITS.md was only canonical doc with issue; no other false positives. All 49 original acceptance criteria verified met. Zero runtime auth/middleware/dependency changes. All gates pass.",
                         "completed_at":  "2026-10-01T22:15:30+02:00"
+                    },
+                    {
+                        "iteration":  3,
+                        "role":  "code-review",
+                        "verdict":  "FAIL",
+                        "feedback_file":  ".goals/deprecate-api-key-transports/review-feedback-3.md",
+                        "summary":  "No production /api endpoint accepts URL-encoded business form fields, so the real campaign-complete example proves transport authentication equivalence but not the separate migration rule that an external client must remove only api_key and preserve every other form field byte-for-byte. Also requested precise ParseForm/multipart/GET-body wording."
+                    },
+                    {
+                        "iteration":  4,
+                        "role":  "builder",
+                        "model":  "Claude:Sonnet-5",
+                        "commit_sha":  "PENDING",
+                        "commit_title":  "docs(api): [B] preserve form migration payloads",
+                        "summary":  "Fixed the iteration-3 review finding, docs/test-only: docs/API_KEY_TRANSPORT_DEPRECATION.md now explicitly labels the real campaign-complete example as proving transport equivalence only (credential-only body by design, business semantics in method/path), adds a separate 'Generic form migration template (illustrative only)' section with before/after preserving two placeholder business fields byte-for-byte while removing only api_key, and adds a 'technical note on the form transport's exact scope' plus corrects the inaccurate 'GET cannot carry a body' claim to the precise ParseForm (POST/PUT/PATCH-only, never multipart) behaviour. middleware/api_auth_form_fields_test.go (new) wraps the real RequireAPIKey middleware around a local handler and proves two unrelated PostForm fields survive parsing/authentication byte-for-byte identical under both the deprecated form api_key transport and canonical Bearer. docs/GROUP_IMPORT_LIMITS.md's authentication row is corrected: its multipart/form-data content type means ParseForm never populates PostForm from its body, so api_key is accepted there only via query parameter or Authorization header, never as a form field -- verified empirically with a throwaway Go program using mime/multipart + httptest + req.ParseForm(). No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
+                        "validation":  {
+                                           "verify_sh":  "pass",
+                                           "go_test":  "pass (including the new middleware/api_auth_form_fields_test.go)",
+                                           "go_test_race":  "pass",
+                                           "go_vet":  "pass",
+                                           "go_build":  "pass",
+                                           "golangci_lint":  "0 issues",
+                                           "govulncheck":  "pass (0 reachable vulnerabilities)",
+                                           "gosec":  "12 pre-existing findings, same baseline; no new finding",
+                                           "gitleaks":  "1 pre-existing finding from 2026-09-03 history, unrelated to this PR; current working tree clean (--no-git); no new finding",
+                                           "actionlint":  "pass",
+                                           "zizmor":  "pass (2 pre-existing documented suppressions)",
+                                           "yarn_audit":  "4 pre-existing moderate findings in transitive webpack devDependency, lockfile unchanged",
+                                           "retire_js":  "pass",
+                                           "browser_tests":  "pass (scripts/test-browser.sh)",
+                                           "docker_compat_tests":  "pass (scripts/test-container-api-session-auth.sh, scripts/test-container-api-key-verifier.sh)",
+                                           "parseform_multipart_claim":  "empirically verified with a standalone Go program: a real multipart.Writer body with an api_key field, parsed via httptest.NewRequest + req.ParseForm(), leaves req.PostForm empty",
+                                           "docs_gate_sanity_check":  "scripts/verify-docs-canonical-examples.sh reports 0 violations across all 29 scanned files after every doc edit",
+                                           "git_diff_check":  "clean",
+                                           "lockfiles_unchanged":  true
+                                       }
                     }
                 ]
 }

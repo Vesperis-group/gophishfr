@@ -59,6 +59,23 @@ the real API router (including `RequireAPIKey` and the real route table, not
 a direct handler call) and asserts both authenticate and both actually
 complete the same campaign.
 
+**What these examples prove, and what they deliberately don't.** This
+endpoint's business semantics live entirely in its method and path; every
+form-transport example below sends an intentionally credential-only body, by
+design, so transport is the only thing that changes between "before" and
+"after." That proves transport-level authentication equivalence — exactly
+what `TestCampaignCompleteTransportDeprecationEquivalence` asserts. It does
+**not**, by itself, demonstrate the separate rule that matters for a client
+whose own form body also carries business data: migrating removes only
+`api_key` and preserves every other field byte-for-byte. For that rule, see
+["Generic form migration template"](#generic-form-migration-template-illustrative-only)
+below, and the middleware-level
+`TestFormTransportPreservesBusinessFields` (in
+`middleware/api_auth_form_fields_test.go`), which wraps the real
+`RequireAPIKey` middleware around a local handler and asserts non-`api_key`
+`PostForm` fields survive parsing and authentication unchanged under both
+the deprecated form transport and the canonical Bearer header.
+
 ### Query parameter → Bearer
 
 Before (deprecated, removal targeted for `0.13.0`):
@@ -77,10 +94,10 @@ curl -X POST "https://gophishfr.example/api/campaigns/42/complete" \
 
 ### Form parameter → Bearer
 
-Before (deprecated, removal targeted for `0.13.0`). The credential is the
-entire request body; `api_key` is a form-body transport for the credential
-itself, not a business field, so there is no separate business payload to
-preserve here:
+Before (deprecated, removal targeted for `0.13.0`). This endpoint needs no
+business fields, so — intentionally — the body here is nothing but the
+credential; this is not a template for a form body that also carries
+business data (see the generic template below for that):
 
 ```bash
 curl -X POST "https://gophishfr.example/api/campaigns/42/complete" \
@@ -115,9 +132,73 @@ curl -X POST "https://gophishfr.example/api/campaigns/42/complete" \
 ```
 
 The documented legacy completion `GET` (see API_AUTHENTICATION.md) works the
-same way for query, raw, and Bearer credentials — a `GET` request cannot
-carry a form-urlencoded body, so the form transport specifically requires
-`POST` as shown above.
+same way for query, raw, and Bearer credentials. The form transport
+specifically requires `POST` (or `PUT`/`PATCH`) — not because a `GET`
+request cannot carry a body (HTTP permits one), but because Go's
+`net/http` `ParseForm` only reads a request body into `PostForm` for
+`POST`, `PUT`, and `PATCH`; it never reads a `GET` request's body as form
+data, however that body is encoded.
+
+### A technical note on the form transport's exact scope
+
+The form `api_key` transport works only where all of the following hold:
+the request method is `POST`, `PUT`, or `PATCH`; the `Content-Type` is
+exactly `application/x-www-form-urlencoded`; and the credential is read
+from Go's `r.PostForm` (via `r.ParseForm()`, which `middleware.GetContext`
+and the credential extractor both call). In particular:
+
+- a **`multipart/form-data`** request — the content type every real
+  GophishFR file-upload endpoint uses, including
+  `POST /api/import/group` — is **not** parsed into `PostForm` by
+  `ParseForm` at all. A multipart field literally named `api_key` is never
+  read as a credential. `/api/import/group` is, in practice,
+  **header- or query-authenticated only**; see
+  [Group import limits](GROUP_IMPORT_LIMITS.md).
+- a `GET` request's body, if it has one, is never parsed into `PostForm`
+  either — again because of how `ParseForm` scopes itself to
+  `POST`/`PUT`/`PATCH`, not because `GET` cannot carry a body.
+
+## Generic form migration template (illustrative only)
+
+**This is not a real GophishFR endpoint.** No GophishFR API route accepts
+`application/x-www-form-urlencoded` business data — every real write
+endpoint (campaigns, groups, templates, pages, SMTP profiles, webhooks,
+users) expects a JSON body, which is exactly why the executable example
+above has to use a credential-only endpoint. This template instead shows
+the migration pattern an external client should apply to **its own**
+form-based integration: remove only the `api_key` field and keep every
+other field byte-for-byte identical.
+
+Before (illustrative; `your_field`/`another_field` stand in for that
+client's real business data):
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data "api_key=REPLACE_WITH_YOUR_TOKEN&your_field=unchanged-value&another_field=42" \
+  "https://your-service.example/some-endpoint"
+```
+
+After (illustrative; `your_field=unchanged-value&another_field=42` is
+copied byte-for-byte — nothing about the business payload changes, only
+the credential moves to a header):
+
+```bash
+curl -X POST \
+  -H "Content-Type: application/x-www-form-urlencoded" \
+  --data "your_field=unchanged-value&another_field=42" \
+  "https://your-service.example/some-endpoint" \
+  -H "Authorization: Bearer REPLACE_WITH_YOUR_TOKEN" # gitleaks:allow -- synthetic placeholder, not a real token
+```
+
+`TestFormTransportPreservesBusinessFields`
+(`middleware/api_auth_form_fields_test.go`) is the executable proof behind
+this rule: it wraps the real `RequireAPIKey` middleware (the same one every
+`/api/*` route uses) around a local handler, sends unrelated `PostForm`
+fields alongside the deprecated form `api_key` in one case and alongside a
+canonical Bearer header with `api_key` removed from the body in the other,
+and asserts the captured business fields are identical, byte-for-byte, in
+both cases.
 
 ## What changes in `0.13.0`
 

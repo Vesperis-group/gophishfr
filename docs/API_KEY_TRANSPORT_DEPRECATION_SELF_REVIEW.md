@@ -15,9 +15,12 @@ This PR is documentation/test/CI-only. It touches:
   and points at the new deprecation guide instead of restating the full
   rationale in two places.
 - `docs/GROUP_IMPORT_LIMITS.md` — the group-import authentication table row
-  now recommends `Authorization: Bearer` as canonical and marks the
-  `api_key` query/form parameter deprecated with removal targeted for
-  `0.13.0`, linking to the migration guide.
+  recommends `Authorization: Bearer` as canonical, marks the deprecated
+  `api_key` query parameter (removal targeted for `0.13.0`), and states
+  precisely — as of iteration 4 — that a multipart `api_key` form field is
+  **not** read as a credential (`ParseForm` never parses multipart bodies),
+  so this endpoint is effectively header- or query-authenticated only;
+  links to the migration guide.
 - `docs/API_KEY_TRANSPORT_DEPRECATION.md` — the canonical/deprecated
   contract table; old/new migration examples for query, form, and raw, all
   against the same real, executable business operation
@@ -26,6 +29,12 @@ This PR is documentation/test/CI-only. It touches:
   no-header/no-signal decision with rationale.
 - `docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md` — a concise,
   repository-conventional release-note artifact for the next GitHub Release.
+- `middleware/api_auth_form_fields_test.go` (new) — the executable proof
+  behind the migration guide's generic form template (added in iteration
+  4): wraps the real `RequireAPIKey` middleware around a local handler and
+  asserts unrelated `PostForm` business fields survive parsing and
+  authentication byte-for-byte identical under both the deprecated form
+  `api_key` transport and the canonical Bearer header.
 - `controllers/api/campaign_transport_deprecation_test.go` (new) — the
   executable regression for the migration guide: it dispatches each
   deprecated transport and the canonical Bearer transport through the real
@@ -163,6 +172,59 @@ only canonical doc with this wording; `API_KEY_VERIFIER.md`'s mentions of
 `api_key` describe an internal database column, not a client-facing
 transport, and do not match the new rule.
 
+## Iteration 4: independent review finding and fix
+
+[`review-feedback-3.md`](../.goals/deprecate-api-key-transports/review-feedback-3.md)
+returned a FAIL on iteration 3: the campaign-completion example is
+executable precisely *because* its business semantics live in method/path
+and its form body is credential-only — which proves transport
+authentication equivalence, but not the separate migration rule that an
+external client must remove only `api_key` from its own form body and
+preserve every other field byte-for-byte. The review also asked for
+precise language about Go's `ParseForm` scope and `/api/import/group`'s
+actual (multipart, not form) authentication surface.
+
+### Finding — the executable example couldn't demonstrate field preservation, and two technical claims needed precision
+
+Fixed in four parts, all documentation/test only:
+
+1. **Labelled the existing example's limits explicitly.** A new callout in
+   `docs/API_KEY_TRANSPORT_DEPRECATION.md` states, before the query/form/raw
+   examples, that the campaign-completion endpoint's business semantics live
+   in its method and path, that its body is intentionally credential-only
+   by design, and that this proves transport equivalence but not field
+   preservation — pointing at the new generic template and middleware test
+   for that separate claim. The "Form parameter" subsection repeats this
+   inline.
+2. **Added a separate, clearly-labelled generic migration template.** A new
+   "Generic form migration template (illustrative only)" section states up
+   front that no GophishFR endpoint accepts form-encoded business data and
+   that the template shows the pattern an *external client* applies to its
+   *own* form-based integration: before = `api_key` plus two placeholder
+   business fields; after = the identical two fields, byte-for-byte, with
+   `api_key` replaced by a canonical `Authorization: Bearer` header.
+3. **Added the middleware-level regression.**
+   `middleware/api_auth_form_fields_test.go`'s
+   `TestFormTransportPreservesBusinessFields` wraps the real `RequireAPIKey`
+   middleware (not a mock) around a local handler and asserts two
+   unrelated `PostForm` fields are present and byte-for-byte identical
+   after a request authenticated via the deprecated form `api_key`
+   transport, and after the equivalent request authenticated via
+   `Authorization: Bearer` with `api_key` removed from the body.
+4. **Corrected two technical claims.** Replaced "a `GET` request cannot
+   carry a form-urlencoded body" (false — HTTP permits a GET body; Go's
+   `ParseForm` simply never reads one into `PostForm`, regardless of
+   encoding) with that precise statement, and added "A technical note on
+   the form transport's exact scope" stating `ParseForm` only reads
+   `POST`/`PUT`/`PATCH` bodies, and specifically that a
+   `multipart/form-data` request is **never** parsed into `PostForm` at
+   all — confirmed empirically with a standalone Go program using
+   `mime/multipart` + `httptest.NewRequest` + `req.ParseForm()`, which
+   showed `PostForm` stayed empty for a multipart body containing an
+   `api_key` field. `docs/GROUP_IMPORT_LIMITS.md`'s authentication row is
+   corrected to match: that endpoint's `multipart/form-data` content type
+   means its `api_key` support is header/query only, never a form field.
+
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |
@@ -197,6 +259,17 @@ transport, and do not match the new rule.
   (`controllers/api`): query, form, raw, and Bearer each authenticate and
   complete a real campaign through the real router; a trailing-slash request
   does not match the route and does not complete its campaign.
+- `TestFormTransportPreservesBusinessFields` (`middleware`, new): two
+  unrelated `PostForm` fields survive, byte-for-byte, through the real
+  `RequireAPIKey` middleware under both the deprecated form `api_key`
+  transport and the canonical Bearer transport with `api_key` removed from
+  the body.
+- Standalone verification of `ParseForm`'s multipart scope: a throwaway Go
+  program built a real `multipart.Writer` body containing an `api_key`
+  field, called `httptest.NewRequest` + `req.ParseForm()` against it, and
+  printed `req.PostForm["api_key"]` — confirmed empty (`[]`), proving
+  `docs/GROUP_IMPORT_LIMITS.md`'s corrected claim that a multipart
+  `api_key` field is never read as a credential.
 - `./scripts/test-browser.sh`: the real, non-mocked `TestBrowser*` suite in
   `controllers` passes against a fresh `corepack yarn build`.
 - `scripts/test-container-api-session-auth.sh`: the PR #62/#63 real-container
