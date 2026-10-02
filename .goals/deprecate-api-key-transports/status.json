@@ -102,7 +102,7 @@
                         "iteration":  3,
                         "role":  "builder",
                         "model":  "Claude:Sonnet-5",
-                        "commit_sha":  "PENDING",
+                        "commit_sha":  "6b77dcb11746afaab7be3393b04bde229c515a0f",
                         "commit_title":  "docs(api): [B] align legacy transport references",
                         "summary":  "Fixed the iteration-2 review finding, docs/test-only: docs/GROUP_IMPORT_LIMITS.md's authentication table row now recommends Authorization: Bearer as canonical, marks the api_key query/form parameter deprecated with removal targeted for 0.13.0, and links docs/API_KEY_TRANSPORT_DEPRECATION.md. internal/docsguard gained a new KindUndeprecatedParameterMention rule (a regexp-based check, still stdlib-only, no new dependency) that flags a Markdown table row or an \"or an api_key parameter\" alternative-option sentence mentioning api_key with no deprecation-context keyword (deprecat/0.13.0/remov/sunset/migrat/legacy) on that same line, with positive/negative fixtures in internal/docsguard/docsguard_test.go covering the original bug wording, the fixed wording, the deprecation guide's own table, plain deprecation prose, and this guard's own meta-documentation (which must stay allowed). A repository-wide search of every shipped Markdown file confirmed GROUP_IMPORT_LIMITS.md was the only canonical doc with this wording; none of the API_KEY_VERIFIER.md internal schema/column mentions of api_key qualify as a client-facing transport table and none now match the new rule. No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
                         "validation":  {
@@ -125,6 +125,15 @@
                                            "git_diff_check":  "clean",
                                            "lockfiles_unchanged":  true
                                        }
+                    },
+                    {
+                        "iteration":  3,
+                        "feedback_file":  ".goals/deprecate-api-key-transports/inspector-feedback-3.md",
+                        "verdict":  "PASS",
+                        "model":  "Claude:Haiku-4.5",
+                        "role":  "inspector",
+                        "summary":  "Iteration-2 review finding successfully fixed: docs/GROUP_IMPORT_LIMITS.md authentication table row now marks api_key deprecated with 0.13.0 removal target and links migration guide. internal/docsguard extended with new KindUndeprecatedParameterMention rule (stdlib-only, no new dependency) that detects table rows or 'or an api_key' prose offering api_key as normal option with no deprecation context (deprecat|0.13.0|remov|sunset|migrat|legacy). Comprehensive positive/negative fixture tests added, covering edge cases (meta-documentation, internal DB schema). Repository-wide search confirms GROUP_IMPORT_LIMITS.md was only canonical doc with issue; no other false positives. All 49 original acceptance criteria verified met. Zero runtime auth/middleware/dependency changes. All gates pass.",
+                        "completed_at":  "2026-10-01T22:15:30+02:00"
                     }
                 ]
 }
