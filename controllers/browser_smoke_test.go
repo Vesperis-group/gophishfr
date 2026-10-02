@@ -63,8 +63,14 @@ func TestBrowserSmoke(t *testing.T) {
 		t.Fatalf("configure browser test user: %v", err)
 	}
 
-	seedBrowserFixtures(t, user.Id)
-
+	// The event-details cipher must be installed before any fixture event is
+	// recorded: AddEvent's encrypted write path silently drops (and only
+	// logs) events with non-empty Details when no cipher is configured yet
+	// (mirroring Result.createEvent's deliberate swallow-and-log contract,
+	// which never surfaces a t.Fatal here). Production startup in main.go
+	// already calls models.SetEventDetailsCipher before worker/admin-server
+	// construction; seedBrowserFixtures must follow the same order so all 5
+	// fixture events persist with real ciphertext, exactly like production.
 	keyring, err := credentials.NewKeyring(
 		"browser-test-key",
 		map[string][]byte{"browser-test-key": bytes.Repeat([]byte{0x58}, 32)},
@@ -76,6 +82,10 @@ func TestBrowserSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatalf("create browser credential cipher: %v", err)
 	}
+	models.SetEventDetailsCipher(credentialCipher)
+
+	seedBrowserFixtures(t, user.Id)
+
 	adminServer := NewAdminServer(
 		config.AdminServer{},
 		WithCredentialCipher(credentialCipher),
