@@ -1,12 +1,12 @@
 package ratelimit
 
 import (
-	"net"
 	"net/http"
 	"sync"
 	"time"
 
 	log "github.com/Vesperis-group/gophishfr/logger"
+	"github.com/Vesperis-group/gophishfr/middleware/clientip"
 	"golang.org/x/time/rate"
 )
 
@@ -27,6 +27,12 @@ type bucket struct {
 	lastSeen time.Time
 }
 
+// ClientIPFunc resolves the rate-limiting identity for a request. It must
+// never trust client-controlled headers unless the immediate socket peer is
+// an explicitly configured trusted proxy; see the middleware/clientip
+// package, which is what every production caller supplies.
+type ClientIPFunc func(*http.Request) string
+
 // PostLimiter is a simple rate limiting middleware which only allows n POST
 // requests per minute.
 type PostLimiter struct {
@@ -34,6 +40,10 @@ type PostLimiter struct {
 	requestLimit    int
 	cleanupInterval time.Duration
 	expiry          time.Duration
+	clientIP        ClientIPFunc
+	newTicker       func(time.Duration) *time.Ticker
+	stop            chan struct{}
+	stopOnce        sync.Once
 	sync.RWMutex
 }
 
@@ -64,6 +74,17 @@ func WithExpiry(expiry time.Duration) PostLimiterOption {
 	}
 }
 
+// WithClientIP configures the function used to resolve the rate-limiting
+// identity for each request. Callers behind a reverse proxy should supply a
+// (*clientip.Resolver).ClientIP configured with their trusted proxies; the
+// default (when this option is not supplied) trusts no proxy at all and
+// resolves to the direct socket peer only.
+func WithClientIP(fn ClientIPFunc) PostLimiterOption {
+	return func(p *PostLimiter) {
+		p.clientIP = fn
+	}
+}
+
 // NewPostLimiter returns a new instance of a PostLimiter
 func NewPostLimiter(opts ...PostLimiterOption) *PostLimiter {
 	limiter := &PostLimiter{
@@ -71,6 +92,9 @@ func NewPostLimiter(opts ...PostLimiterOption) *PostLimiter {
 		requestLimit:    DefaultRequestsPerMinute,
 		cleanupInterval: DefaultCleanupInterval,
 		expiry:          DefaultExpiry,
+		clientIP:        clientip.NewResolver(nil).ClientIP,
+		newTicker:       time.NewTicker,
+		stop:            make(chan struct{}),
 	}
 	for _, opt := range opts {
 		opt(limiter)
@@ -79,10 +103,27 @@ func NewPostLimiter(opts ...PostLimiterOption) *PostLimiter {
 	return limiter
 }
 
+// Stop terminates the periodic cleanup goroutine started by NewPostLimiter.
+// It is safe to call more than once, and safe to omit entirely in
+// production (the process lifetime bounds the goroutine); it exists mainly
+// so tests that construct many limiters do not accumulate live tickers for
+// the remainder of the test binary.
+func (limiter *PostLimiter) Stop() {
+	limiter.stopOnce.Do(func() {
+		close(limiter.stop)
+	})
+}
+
 func (limiter *PostLimiter) pollCleanup() {
-	ticker := time.NewTicker(time.Duration(limiter.cleanupInterval) * time.Second)
-	for range ticker.C {
-		limiter.Cleanup()
+	ticker := limiter.newTicker(limiter.cleanupInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ticker.C:
+			limiter.Cleanup()
+		case <-limiter.stop:
+			return
+		}
 	}
 }
 
@@ -129,10 +170,7 @@ func (limiter *PostLimiter) allow(ip string) bool {
 // way GophishFR routing is done.
 func (limiter *PostLimiter) Limit(next http.Handler) http.HandlerFunc {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		clientIP, _, err := net.SplitHostPort(r.RemoteAddr)
-		if err != nil {
-			clientIP = r.RemoteAddr
-		}
+		clientIP := limiter.clientIP(r)
 		if r.Method == http.MethodPost && !limiter.allow(clientIP) {
 			log.Error("")
 			http.Error(w, http.StatusText(http.StatusTooManyRequests), http.StatusTooManyRequests)

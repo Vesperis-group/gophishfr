@@ -75,3 +75,96 @@ func TestLoadConfig(t *testing.T) {
 		t.Fatalf("expected error when loading invalid config, but got %v", err)
 	}
 }
+
+// TestLoadConfigTrustedProxiesDefault verifies that a config without any
+// trusted_proxies configuration loads successfully and trusts no proxy.
+func TestLoadConfigTrustedProxiesDefault(t *testing.T) {
+	f := createTemporaryConfig(t)
+	defer removeTemporaryConfig(t, f)
+	if _, err := f.Write(validConfig); err != nil {
+		t.Fatalf("error writing config to temporary file: %v", err)
+	}
+	conf, err := LoadConfig(f.Name())
+	if err != nil {
+		t.Fatalf("error loading config from temporary file: %v", err)
+	}
+	if conf.AdminConf.TrustedProxies != nil {
+		t.Fatalf("expected admin_server.trusted_proxies to default to trust-none, got %v", conf.AdminConf.TrustedProxies)
+	}
+	if conf.PhishConf.TrustedProxies != nil {
+		t.Fatalf("expected phish_server.trusted_proxies to default to trust-none, got %v", conf.PhishConf.TrustedProxies)
+	}
+}
+
+// TestLoadConfigTrustedProxiesValid verifies that valid IP/CIDR entries are
+// accepted and parsed at config load time.
+func TestLoadConfigTrustedProxiesValid(t *testing.T) {
+	f := createTemporaryConfig(t)
+	defer removeTemporaryConfig(t, f)
+	validWithProxies := []byte(`{
+		"admin_server": {
+			"listen_url": "127.0.0.1:3333",
+			"use_tls": true,
+			"cert_path": "gophish_admin.crt",
+			"key_path": "gophish_admin.key",
+			"trusted_proxies": ["127.0.0.1", "10.0.0.0/8"]
+		},
+		"phish_server": {
+			"listen_url": "0.0.0.0:8080",
+			"use_tls": false,
+			"cert_path": "example.crt",
+			"key_path": "example.key",
+			"trusted_proxies": ["127.0.0.1/32"]
+		},
+		"db_name": "sqlite3",
+		"db_path": "gophish.db",
+		"migrations_prefix": "db/db_",
+		"contact_address": ""
+	}`)
+	if _, err := f.Write(validWithProxies); err != nil {
+		t.Fatalf("error writing config to temporary file: %v", err)
+	}
+	conf, err := LoadConfig(f.Name())
+	if err != nil {
+		t.Fatalf("error loading config with valid trusted_proxies: %v", err)
+	}
+	if len(conf.AdminConf.TrustedProxies) != 2 {
+		t.Fatalf("expected 2 admin trusted proxies, got %d", len(conf.AdminConf.TrustedProxies))
+	}
+	if len(conf.PhishConf.TrustedProxies) != 1 {
+		t.Fatalf("expected 1 phish trusted proxy, got %d", len(conf.PhishConf.TrustedProxies))
+	}
+}
+
+// TestLoadConfigTrustedProxiesInvalid verifies that an invalid CIDR/IP in
+// trusted_proxies produces a clear configuration error at load time rather
+// than being silently ignored.
+func TestLoadConfigTrustedProxiesInvalid(t *testing.T) {
+	f := createTemporaryConfig(t)
+	defer removeTemporaryConfig(t, f)
+	invalidProxies := []byte(`{
+		"admin_server": {
+			"listen_url": "127.0.0.1:3333",
+			"use_tls": true,
+			"cert_path": "gophish_admin.crt",
+			"key_path": "gophish_admin.key",
+			"trusted_proxies": ["not-an-ip-or-cidr"]
+		},
+		"phish_server": {
+			"listen_url": "0.0.0.0:8080",
+			"use_tls": false,
+			"cert_path": "example.crt",
+			"key_path": "example.key"
+		},
+		"db_name": "sqlite3",
+		"db_path": "gophish.db",
+		"migrations_prefix": "db/db_",
+		"contact_address": ""
+	}`)
+	if _, err := f.Write(invalidProxies); err != nil {
+		t.Fatalf("error writing config to temporary file: %v", err)
+	}
+	if _, err := LoadConfig(f.Name()); err == nil {
+		t.Fatalf("expected LoadConfig to reject an invalid trusted_proxies entry")
+	}
+}

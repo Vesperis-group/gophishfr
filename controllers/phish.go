@@ -15,6 +15,7 @@ import (
 	ctx "github.com/Vesperis-group/gophishfr/context"
 	"github.com/Vesperis-group/gophishfr/controllers/api"
 	log "github.com/Vesperis-group/gophishfr/logger"
+	"github.com/Vesperis-group/gophishfr/middleware/clientip"
 	"github.com/Vesperis-group/gophishfr/models"
 	"github.com/Vesperis-group/gophishfr/util"
 	"github.com/gorilla/handlers"
@@ -52,6 +53,7 @@ type PhishingServer struct {
 	server         *http.Server
 	config         config.PhishServer
 	contactAddress string
+	clientIP       *clientip.Resolver
 }
 
 // NewPhishingServer returns a new instance of the phishing server with
@@ -63,8 +65,9 @@ func NewPhishingServer(config config.PhishServer, options ...PhishingServerOptio
 		Addr:         config.ListenURL,
 	}
 	ps := &PhishingServer{
-		server: defaultServer,
-		config: config,
+		server:   defaultServer,
+		config:   config,
+		clientIP: clientip.NewResolver(config.TrustedProxies),
 	}
 	for _, opt := range options {
 		opt(ps)
@@ -121,9 +124,15 @@ func (ps *PhishingServer) registerRoutes() {
 	gzipWrapper, _ := gziphandler.NewGzipLevelHandler(gzip.BestCompression)
 	phishHandler := gzipWrapper(router)
 
-	// Respect X-Forwarded-For and X-Real-IP headers in case we're behind a
-	// reverse proxy.
-	phishHandler = handlers.ProxyHeaders(phishHandler)
+	// Resolve the real client IP from X-Forwarded-For/X-Real-IP, but only
+	// when the immediate socket peer is an explicitly configured trusted
+	// proxy (ps.config.TrustedProxies; empty/absent means trust none). This
+	// replaces gorilla/handlers.ProxyHeaders, which rewrote r.RemoteAddr
+	// unconditionally from those headers with no trust check at all. It is
+	// also what setupContext's GeoIP/event-details IP extraction below now
+	// relies on being safely resolved by the time it runs. See
+	// docs/TRUSTED_PROXY_RESOLUTION.md.
+	phishHandler = ps.clientIP.Middleware(phishHandler)
 
 	// Setup logging
 	phishHandler = handlers.CombinedLoggingHandler(log.Writer(), phishHandler)

@@ -19,6 +19,7 @@ import (
 	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	log "github.com/Vesperis-group/gophishfr/logger"
 	mid "github.com/Vesperis-group/gophishfr/middleware"
+	"github.com/Vesperis-group/gophishfr/middleware/clientip"
 	"github.com/Vesperis-group/gophishfr/middleware/ratelimit"
 	"github.com/Vesperis-group/gophishfr/models"
 	"github.com/Vesperis-group/gophishfr/util"
@@ -41,6 +42,7 @@ type AdminServer struct {
 	workerConfigured bool
 	config           config.AdminServer
 	limiter          *ratelimit.PostLimiter
+	clientIP         *clientip.Resolver
 	credentialCipher *credentials.Cipher
 }
 
@@ -87,11 +89,13 @@ func NewAdminServer(config config.AdminServer, options ...AdminServerOption) *Ad
 		ReadTimeout: 10 * time.Second,
 		Addr:        config.ListenURL,
 	}
-	defaultLimiter := ratelimit.NewPostLimiter()
+	resolver := clientip.NewResolver(config.TrustedProxies)
+	defaultLimiter := ratelimit.NewPostLimiter(ratelimit.WithClientIP(resolver.ClientIP))
 	as := &AdminServer{
-		server:  defaultServer,
-		limiter: defaultLimiter,
-		config:  config,
+		server:   defaultServer,
+		limiter:  defaultLimiter,
+		config:   config,
+		clientIP: resolver,
 	}
 	for _, opt := range options {
 		opt(as)
@@ -183,9 +187,14 @@ func (as *AdminServer) registerRoutes() {
 	gzipWrapper, _ := gziphandler.NewGzipLevelHandler(gzip.BestCompression)
 	adminHandler = gzipWrapper(adminHandler)
 
-	// Respect X-Forwarded-For and X-Real-IP headers in case we're behind a
-	// reverse proxy.
-	adminHandler = handlers.ProxyHeaders(adminHandler)
+	// Resolve the real client IP from X-Forwarded-For/X-Real-IP, but only
+	// when the immediate socket peer is an explicitly configured trusted
+	// proxy (as.config.TrustedProxies; empty/absent means trust none). This
+	// replaces gorilla/handlers.ProxyHeaders, which rewrote r.RemoteAddr
+	// unconditionally from those headers with no trust check at all, letting
+	// any direct client forge its own apparent IP. See
+	// docs/TRUSTED_PROXY_RESOLUTION.md.
+	adminHandler = as.clientIP.Middleware(adminHandler)
 
 	// Setup logging
 	adminHandler = handlers.CombinedLoggingHandler(log.Writer(), adminHandler)
