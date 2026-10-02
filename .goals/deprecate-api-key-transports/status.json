@@ -146,7 +146,7 @@
                         "iteration":  4,
                         "role":  "builder",
                         "model":  "Claude:Sonnet-5",
-                        "commit_sha":  "PENDING",
+                        "commit_sha":  "b3ba1bac0cb726388f46fe1df0910404f47c1b8d",
                         "commit_title":  "docs(api): [B] preserve form migration payloads",
                         "summary":  "Fixed the iteration-3 review finding, docs/test-only: docs/API_KEY_TRANSPORT_DEPRECATION.md now explicitly labels the real campaign-complete example as proving transport equivalence only (credential-only body by design, business semantics in method/path), adds a separate 'Generic form migration template (illustrative only)' section with before/after preserving two placeholder business fields byte-for-byte while removing only api_key, and adds a 'technical note on the form transport's exact scope' plus corrects the inaccurate 'GET cannot carry a body' claim to the precise ParseForm (POST/PUT/PATCH-only, never multipart) behaviour. middleware/api_auth_form_fields_test.go (new) wraps the real RequireAPIKey middleware around a local handler and proves two unrelated PostForm fields survive parsing/authentication byte-for-byte identical under both the deprecated form api_key transport and canonical Bearer. docs/GROUP_IMPORT_LIMITS.md's authentication row is corrected: its multipart/form-data content type means ParseForm never populates PostForm from its body, so api_key is accepted there only via query parameter or Authorization header, never as a form field -- verified empirically with a throwaway Go program using mime/multipart + httptest + req.ParseForm(). No runtime auth/middleware/header/status/version/dependency change. VERSION unchanged (0.12.1).",
                         "validation":  {
@@ -170,6 +170,15 @@
                                            "git_diff_check":  "clean",
                                            "lockfiles_unchanged":  true
                                        }
+                    },
+                    {
+                        "iteration":  4,
+                        "feedback_file":  ".goals/deprecate-api-key-transports/inspector-feedback-4.md",
+                        "verdict":  "PASS",
+                        "model":  "Claude:Haiku-4.5",
+                        "role":  "inspector",
+                        "summary":  "Iteration-3 review finding completely addressed: real campaign-complete example now explicitly labelled as proving transport-level authentication equivalence only (credential-only body by design), separated from new illustrative generic form migration template showing the business-field preservation pattern (remove only api_key, preserve all other fields byte-for-byte). New middleware/api_auth_form_fields_test.go wraps real RequireAPIKey middleware (used by every /api/* route) around local handler reading PostForm, proves identical non-api_key fields survive parsing byte-for-byte under both deprecated form and canonical Bearer transports. Documentation correctly specifies ParseForm scope (POST/PUT/PATCH only, not GET; multipart/form-data NOT parsed into PostForm). GROUP_IMPORT_LIMITS.md authentication row correctly identifies endpoint as header- or query-authenticated only due to multipart behavior. All 49 original acceptance criteria verified met. All gates pass. Zero runtime auth/middleware/dependency changes. VERSION 0.12.1 unchanged.",
+                        "completed_at":  "2026-10-02T08:45:00+02:00"
                     }
                 ]
 }
