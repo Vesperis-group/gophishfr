@@ -25,7 +25,6 @@ require (
 	github.com/oschwald/maxminddb-golang v1.6.0
 	github.com/pressly/goose/v3 v3.27.3
 	github.com/sirupsen/logrus v1.10.0
-	github.com/yuin/goldmark/v2 v2.1.6
 	golang.org/x/crypto v0.55.0
 	golang.org/x/time v0.0.0-20200416051211-89c76fbcd5d1
 	gopkg.in/alecthomas/kingpin.v2 v2.2.6

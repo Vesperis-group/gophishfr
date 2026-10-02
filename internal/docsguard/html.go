@@ -1,10 +1,120 @@
 package docsguard
 
 import (
+	"regexp"
 	"strings"
-
-	"github.com/yuin/goldmark/v2/ast"
 )
+
+// # Raw HTML blocks: a bounded, stdlib-only approximation
+//
+// CommonMark recognizes several kinds of "raw HTML block" (a line starting
+// with `<script`/`<pre`/`<style`, an HTML comment opener, a processing
+// instruction, a declaration, a CDATA section, or any other tag), each with
+// its own precise opening/closing rule. This package does not implement
+// that grammar exactly (in particular, it does not track whether a bare
+// tag-opening line is actually "interrupting a paragraph", which changes
+// whether CommonMark treats it as one of these blocks at all): instead, it
+// uses one bounded, deliberately *more inclusive* rule -- any line starting
+// with a syntactically valid tag opener is treated as starting a raw HTML
+// block -- documented here so the limitation is explicit rather than
+// silent. Treating a borderline case as an HTML block when CommonMark might
+// not have only means this package additionally applies entity decoding and
+// HTML-aware whitespace collapsing to it; it never *skips* a check ordinary
+// Markdown prose would otherwise get.
+//
+// Once a block's extent is known, its *visible* text -- what a browser
+// would actually display -- is extracted with a small, linear scanner
+// (flattenHTMLBlockVisibleText) recognizing exactly the handful of
+// constructs CommonMark's own HTML-block grammar defines: comments,
+// processing instructions, declarations, CDATA sections, tag markup/
+// attributes (all dropped -- none is ever visible text), and <script>/
+// <style> element content specifically (dropped too, since neither ever
+// displays as readable prose), while everything else -- including a
+// <div>'s or <pre>'s inner text -- is kept. An unterminated comment/CDATA/
+// processing-instruction/declaration/<script>/<style> element consumes the
+// rest of the block the same conservative way a real browser's tokenizer
+// does; anything this scanner cannot otherwise confidently classify (an
+// unterminated tag) fails closed the other way, keeping it as ordinary
+// visible text rather than risking silently hiding a real credential.
+//
+// <pre>/<code> content is visible text like any other element's, but its
+// whitespace is never collapsed across lines for detection purposes (see
+// ScanText): a real browser preserves <pre>/<code>'s line breaks visually
+// instead of collapsing them into a single space the way it does for
+// ordinary flowed text, so a credential split across <pre>/<code>'s own
+// line breaks is, correctly, not treated as if it were on one line --
+// exactly the same explicit choice this package already makes for an
+// ordinary fenced or indented code block.
+
+// htmlBlockOpenerPattern matches a line (ignoring up to three leading
+// spaces, as CommonMark allows) starting with a syntactically valid HTML
+// tag opener: "<" or "</", an ASCII letter, then more name characters,
+// followed by whitespace, ">", "/>", or end of line. This is the bounded,
+// more-inclusive rule described above.
+var htmlBlockOpenerPattern = regexp.MustCompile(`^ {0,3}</?[A-Za-z][A-Za-z0-9-]*(?:[\s>]|/>|$)`)
+
+// htmlCommentOpenPattern, htmlCDATAOpenPattern, htmlPIOpenPattern, and
+// htmlDeclOpenPattern each recognize one of CommonMark's special
+// HTML-block openers, used only to pick the right closing rule (see
+// htmlBlockCloses); the tag markup itself is still stripped by
+// flattenHTMLBlockVisibleText regardless of which of these matched.
+var (
+	htmlCommentOpenPattern = regexp.MustCompile(`^ {0,3}<!--`)
+	htmlCDATAOpenPattern   = regexp.MustCompile(`^ {0,3}<!\[CDATA\[`)
+	htmlPIOpenPattern      = regexp.MustCompile(`^ {0,3}<\?`)
+	htmlDeclOpenPattern    = regexp.MustCompile(`^ {0,3}<![A-Za-z]`)
+	htmlRawTextOpenPattern = regexp.MustCompile(`(?i)^ {0,3}<(?:script|style|pre|textarea)(?:[\s>]|/>|$)`)
+)
+
+// htmlRawTextClosePattern matches any of CommonMark's type-1 closing tags
+// (script/pre/style/textarea), case-insensitively, anywhere in a line --
+// matching CommonMark's own rule, which does not require the closer to name
+// the same tag that opened the block.
+var htmlRawTextClosePattern = regexp.MustCompile(`(?i)</(?:script|style|pre|textarea)>`)
+
+// detectHTMLBlockOpen classifies the kind of raw HTML block a line starts,
+// and whether line also closes it (a one-line block that opens and closes
+// on the same line). kind is one of "comment", "cdata", "pi", "decl",
+// "rawtext", or "generic" (CommonMark's merged type 6/7, see
+// htmlBlockOpenerPattern's doc comment).
+func detectHTMLBlockOpen(line string) (kind string, closedSameLine bool, ok bool) {
+	switch {
+	case htmlCommentOpenPattern.MatchString(line):
+		return "comment", strings.Contains(line, "-->"), true
+	case htmlCDATAOpenPattern.MatchString(line):
+		return "cdata", strings.Contains(line, "]]>"), true
+	case htmlPIOpenPattern.MatchString(line):
+		return "pi", strings.Contains(line, "?>"), true
+	case htmlDeclOpenPattern.MatchString(line):
+		return "decl", strings.Contains(line, ">"), true
+	case htmlRawTextOpenPattern.MatchString(line):
+		return "rawtext", htmlRawTextClosePattern.MatchString(line), true
+	case htmlBlockOpenerPattern.MatchString(line):
+		return "generic", strings.TrimSpace(line) == "", true
+	}
+	return "", false, false
+}
+
+// htmlBlockCloses reports whether line is the closing line of an
+// already-open raw HTML block of the given kind: "generic" closes at the
+// next blank line (CommonMark's own rule for its merged type 6/7); every
+// other kind closes at the line containing its specific closing marker.
+func htmlBlockCloses(line string, kind string) bool {
+	switch kind {
+	case "comment":
+		return strings.Contains(line, "-->")
+	case "cdata":
+		return strings.Contains(line, "]]>")
+	case "pi":
+		return strings.Contains(line, "?>")
+	case "decl":
+		return strings.Contains(line, ">")
+	case "rawtext":
+		return htmlRawTextClosePattern.MatchString(line)
+	default: // "generic"
+		return strings.TrimSpace(line) == ""
+	}
+}
 
 // htmlRawTextTags are the only tag names whose content is never rendered as
 // visible page text by a browser (the CommonMark/GFM "raw text" elements):
@@ -17,46 +127,85 @@ var htmlRawTextTags = map[string]bool{
 	"style":  true,
 }
 
-// flattenHTMLBlockText extracts the plain, *visible* text a browser would
-// actually display for one raw HTML block's content: comments
-// (`<!-- ... -->`), processing instructions (`<? ... ?>`), declarations
-// (`<!DOCTYPE ...>`), CDATA sections (`<![CDATA[ ... ]]>`), tag markup
-// itself, and attribute values are all dropped (none of them is ever
-// visible text), a <script>/<style> element's entire content is dropped
-// too (see htmlRawTextTags), and everything else -- ordinary text, and any
-// other element's inner content, including <pre>'s -- is kept.
-//
-// This intentionally does not attempt to be a general HTML parser: it is a
-// small, linear state machine recognizing only the handful of constructs
-// CommonMark's own HTML-block grammar defines, which is exactly the set
-// this package needs to decide what is, and is not, visible text. An
-// unterminated comment/CDATA/processing-instruction/declaration is handled
-// the same way a real browser's tokenizer does -- the rest of the block is
-// still never visible, so it is still dropped -- but anything this state
-// machine cannot otherwise confidently classify (an unterminated tag, or an
-// unterminated <script>/<style> element) fails closed the other way:
-// rather than risk silently treating genuinely visible text as invisible
-// markup, scanning falls back to keeping it as ordinary visible text, so a
-// forbidden example is never hidden from detection merely because some
-// other part of the same block happens to be malformed.
-//
-// The returned offsets slice has the same length as the returned text and
-// maps each byte of it back to its absolute offset in source, so a caller
-// can report a precise, contributing line range for any match found within
-// it (see scanHTMLBlock).
-func flattenHTMLBlockText(source []byte, block *ast.HTMLBlock) (text string, offsets []int) {
-	segs := block.Value.Segments()
-	if len(segs) == 0 {
-		return "", nil
-	}
-	start := segs[0].Start
-	stop := segs[len(segs)-1].Stop
-	if stop > len(source) {
-		stop = len(source)
-	}
-	raw := string(source[start:stop])
+// htmlVerbatimTags are the elements whose whitespace a browser never
+// collapses: a <pre> or <code> element preserves its content's actual line
+// breaks visually, instead of collapsing them into a single space the way
+// it does for ordinary flowed text (see flattenHTMLBlockVisibleText).
+var htmlVerbatimTags = map[string]bool{
+	"pre":  true,
+	"code": true,
+}
 
-	var sb strings.Builder
+// htmlVisibleLine is one physical source line's extracted visible text
+// (see flattenHTMLBlockVisibleText), together with its source line number
+// and whether it fell inside a <pre>/<code> element.
+type htmlVisibleLine struct {
+	lineNo   int
+	text     string
+	verbatim bool
+}
+
+// flattenHTMLBlockVisibleText extracts the plain, *visible* text a browser
+// would display for one raw HTML block's lines (see the package-section
+// doc comment above), returning one htmlVisibleLine per physical source
+// line. Comments, processing instructions, declarations, CDATA sections,
+// tag markup, and attribute values are dropped; <script>/<style> content is
+// dropped too; everything else is kept, with HTML character references
+// decoded the same narrow way decodeEntities does for ordinary prose
+// (backslash escapes are deliberately *not* decoded here: CommonMark never
+// Markdown-processes raw HTML block content, only a browser's own HTML
+// entity resolution applies to it).
+func flattenHTMLBlockVisibleText(lines []string, startLineNo int) []htmlVisibleLine {
+	raw := strings.Join(lines, "\n")
+
+	out := make([]htmlVisibleLine, len(lines))
+	for i := range out {
+		out[i] = htmlVisibleLine{lineNo: startLineNo + i}
+	}
+
+	// lineStarts[k] is the byte offset in raw where lines[k] begins.
+	lineStarts := make([]int, len(lines))
+	pos := 0
+	for k, l := range lines {
+		lineStarts[k] = pos
+		pos += len(l) + 1 // +1 for the "\n" strings.Join inserted
+	}
+	lineIndexAt := func(offset int) int {
+		idx := 0
+		for idx+1 < len(lineStarts) && lineStarts[idx+1] <= offset {
+			idx++
+		}
+		return idx
+	}
+
+	// appendVisible attributes raw[from:to] (never containing a "<" that
+	// starts a recognized construct) to its original line(s), splitting on
+	// any embedded "\n" so a long run of plain text spanning several
+	// physical lines still lands on the right ones, and marks each
+	// affected line verbatim if verbatimDepth > 0 at the time.
+	appendVisible := func(from, to int, verbatimDepth int) {
+		if from >= to {
+			return
+		}
+		segStart := from
+		for _, part := range strings.SplitAfter(raw[from:to], "\n") {
+			if part == "" {
+				continue
+			}
+			idx := lineIndexAt(segStart)
+			segStart += len(part)
+			if idx < 0 || idx >= len(out) {
+				continue
+			}
+			clean := strings.TrimSuffix(part, "\n")
+			out[idx].text += decodeEntities(clean)
+			if verbatimDepth > 0 {
+				out[idx].verbatim = true
+			}
+		}
+	}
+
+	verbatimDepth := 0
 	i := 0
 	for i < len(raw) {
 		if raw[i] != '<' {
@@ -64,10 +213,7 @@ func flattenHTMLBlockText(source []byte, block *ast.HTMLBlock) (text string, off
 			for j < len(raw) && raw[j] != '<' {
 				j++
 			}
-			sb.WriteString(raw[i:j])
-			for k := i; k < j; k++ {
-				offsets = append(offsets, start+k)
-			}
+			appendVisible(i, j, verbatimDepth)
 			i = j
 			continue
 		}
@@ -88,16 +234,22 @@ func flattenHTMLBlockText(source []byte, block *ast.HTMLBlock) (text string, off
 			i = end
 			continue
 		}
-		if tagEnd, tagName, isOpen, ok := skipHTMLTag(raw, i); ok {
-			if isOpen && htmlRawTextTags[strings.ToLower(tagName)] {
+		if tagEnd, tagName, isOpen, isClose, ok := skipHTMLTag(raw, i); ok {
+			lower := strings.ToLower(tagName)
+			if isOpen && htmlRawTextTags[lower] {
 				if bodyEnd, ok := skipRawTextContent(raw, tagEnd, tagName); ok {
 					i = bodyEnd
 					continue
 				}
 				// Unterminated <script>/<style>: fail closed toward
-				// scanning, not away from it. Keep the tag markup itself
-				// skipped (it is never visible either way) but fall
-				// through to scanning the remainder as ordinary text.
+				// scanning, not away from it.
+			}
+			if htmlVerbatimTags[lower] {
+				if isOpen {
+					verbatimDepth++
+				} else if isClose && verbatimDepth > 0 {
+					verbatimDepth--
+				}
 			}
 			i = tagEnd
 			continue
@@ -105,13 +257,12 @@ func flattenHTMLBlockText(source []byte, block *ast.HTMLBlock) (text string, off
 
 		// "<" not followed by a recognized construct at all, or a tag
 		// that never finds its closing ">": keep the "<" itself as
-		// literal visible text and continue scanning normally right
-		// after it, rather than silently dropping it.
-		sb.WriteByte('<')
-		offsets = append(offsets, start+i)
+		// literal visible text.
+		appendVisible(i, i+1, verbatimDepth)
 		i++
 	}
-	return sb.String(), offsets
+
+	return out
 }
 
 // skipHTMLComment, if raw[i:] begins with "<!--", returns the index just
@@ -172,12 +323,12 @@ func skipHTMLDeclaration(raw string, i int) (int, bool) {
 // attributes, and an optional trailing "/" -- through its closing ">",
 // correctly skipping over any ">" that appears inside a quoted attribute
 // value, and returns the index just past that ">", the tag's name, whether
-// it was an opening tag (neither a closing tag nor self-closing), and
-// ok=true. If raw[i:] is not a plausible tag opener at all, or no closing
-// ">" is found before the end of raw, it returns ok=false: the caller then
-// fails closed by treating the "<" as ordinary literal text instead of
-// risking silently skipping content that may not actually be a tag.
-func skipHTMLTag(raw string, i int) (end int, name string, isOpen bool, ok bool) {
+// it was an opening tag, whether it was a closing tag, and ok=true. If
+// raw[i:] is not a plausible tag opener at all, or no closing ">" is found
+// before the end of raw, it returns ok=false: the caller then fails closed
+// by treating the "<" as ordinary literal text instead of risking silently
+// skipping content that may not actually be a tag.
+func skipHTMLTag(raw string, i int) (end int, name string, isOpen bool, isClose bool, ok bool) {
 	j := i + 1
 	closing := false
 	if j < len(raw) && raw[j] == '/' {
@@ -189,7 +340,7 @@ func skipHTMLTag(raw string, i int) (end int, name string, isOpen bool, ok bool)
 		j++
 	}
 	if j == nameStart {
-		return 0, "", false, false
+		return 0, "", false, false, false
 	}
 	name = raw[nameStart:j]
 
@@ -197,13 +348,13 @@ func skipHTMLTag(raw string, i int) (end int, name string, isOpen bool, ok bool)
 	for j < len(raw) {
 		switch raw[j] {
 		case '>':
-			return j + 1, name, !closing && !selfClosing, true
+			return j + 1, name, !closing && !selfClosing, closing, true
 		case '"', '\'':
 			quote := raw[j]
 			j++
 			closeQuote := strings.IndexByte(raw[j:], quote)
 			if closeQuote < 0 {
-				return 0, "", false, false
+				return 0, "", false, false, false
 			}
 			j += closeQuote + 1
 		case '/':
@@ -213,7 +364,7 @@ func skipHTMLTag(raw string, i int) (end int, name string, isOpen bool, ok bool)
 			j++
 		}
 	}
-	return 0, "", false, false
+	return 0, "", false, false, false
 }
 
 // isHTMLTagNameByte reports whether b is a valid HTML tag-name byte: an
@@ -246,44 +397,4 @@ func skipRawTextContent(raw string, tagEnd int, tagName string) (int, bool) {
 		return 0, false
 	}
 	return tagEnd + idx + len(closer) + gt + 1, true
-}
-
-// scanHTMLBlock scans one raw HTML block's *visible* rendered text (see
-// flattenHTMLBlockText) for the same three violation kinds a paragraph or
-// heading gets: a credential-syntax match is reported at the precise
-// line(s) it was found on, even if the block spans several physical lines
-// (see parameterCredentialMatches/rawAuthorizationMatches), and a
-// recommendation-prose match is reported against the block's whole line
-// range, exactly like scanProseBlock.
-func scanHTMLBlock(source []byte, lines *lineIndex, block *ast.HTMLBlock) []Violation {
-	text, offsets := flattenHTMLBlockText(source, block)
-	if text == "" {
-		return nil
-	}
-
-	lineFor := func(textOffset int) int {
-		textOffset = clampIndex(textOffset, len(offsets)-1)
-		return lines.lineAt(offsets[textOffset])
-	}
-
-	var violations []Violation
-	for _, m := range parameterCredentialMatches(text) {
-		violations = append(violations, Violation{
-			StartLine: lineFor(m[0]),
-			EndLine:   lineFor(m[1] - 1),
-			Kind:      KindParameterCredential,
-		})
-	}
-	for _, m := range rawAuthorizationMatches(text) {
-		violations = append(violations, Violation{
-			StartLine: lineFor(m[0]),
-			EndLine:   lineFor(m[1] - 1),
-			Kind:      KindRawAuthorization,
-		})
-	}
-	if recommendationMention(text) {
-		startLine, endLine := blockLineRange(lines, source, block)
-		violations = append(violations, Violation{StartLine: startLine, EndLine: endLine, Kind: KindUndeprecatedParameterMention})
-	}
-	return violations
 }

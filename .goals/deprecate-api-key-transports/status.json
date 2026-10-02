@@ -1,7 +1,7 @@
 {
     "goal_id": "deprecate-api-key-transports",
     "status": "inspecting",
-    "iteration": 14,
+    "iteration": 15,
     "builder_model": "Claude:Sonnet-5",
     "inspector_model": "Claude:Haiku-4.5",
     "initial_sha": "99c9a50848e8a826360ea7585a57d7e6f753a34c",
@@ -612,6 +612,40 @@
                 "acceptance_criteria": "all 49+ original plus 3 closure requirements verified PASS"
             },
             "completed_at": "2026-10-02T14:19:11.204498+02:00"
+        },
+        {
+            "iteration": 14,
+            "role": "security-review",
+            "verdict": "FAIL",
+            "summary": "User-directed decision overrides the iteration-13 structured (goldmark v2 AST) approach and reaffirms the immutable goal: remove goldmark entirely, restore go.mod/go.sum to the pre-goldmark base byte-for-byte, add no new dependency, and do not build a full Markdown parser. Limit the gate to canonical documentation files and deterministic stdlib checks for actually forbidden patterns; if a security finding truly cannot be fixed cleanly under this constraint, the Builder must stop/report BLOCKED rather than add a dependency or silently weaken the gate. Required work carried into iteration 15: revert/remove github.com/yuin/goldmark/v2 and all AST-dependent implementation; design a bounded stdlib-only guard for canonical docs/files and prohibited rendered guidance, with explicit conservative rejection where necessary, documenting limitations and why the gate remains enforceable; fix the then-current security findings (HTML-block entity decoding; collapsible whitespace for visible raw HTML including Authorization across lines, with pre/code behavior explicit; deprecation context bound to the exact occurrence, same transport cannot cross-suppress) and code findings (exact canonical runtime header requires literal 'Bearer ' + a non-empty token, with tab/double-space noncanonical; line ranges accurate enough for multiline violations; retain redacted diagnostics); cover all prior high-confidence bypass fixtures (links, HTML tags/comments, emphasis, entities/escapes, code/fence/list/soft wrap/table/clause/version/transport occurrence) using deterministic source handling, with conservative false positives narrowly documented/tested rather than broad."
+        },
+        {
+            "iteration": 15,
+            "role": "builder",
+            "model": "Claude:Sonnet-5",
+            "commit_sha": "PENDING",
+            "commit_title": "fix(docs): [B] restore dependency-free docs guard",
+            "summary": "Reversed the iteration-13 goldmark v2 AST rewrite per explicit user decision: removed github.com/yuin/goldmark/v2 entirely and restored go.mod/go.sum to the pre-goldmark base byte-for-byte (verified via sha256sum match against the commit immediately preceding the first iteration of this goal; go mod verify passes). internal/docsguard is again dependency-free. Rebuilt the package from the proven iteration-12 pre-goldmark baseline (bufio.Scanner line-by-line, fenced/indented-code-aware escape/entity/markup normalization, paragraph grouping), reusing context.go's negation/adversative/clause/sentence-scoping, bare-version-construction, and directional transport-occurrence-binding logic unchanged (it was always pure stdlib string/regexp code, never goldmark-dependent). Added a new, explicitly bounded raw-HTML-block handler (html.go): a small, documented, linear state machine recognizing exactly CommonMark's HTML-block constructs (comments, processing instructions, declarations, CDATA, tag markup/attributes, <script>/<style> content) well enough to extract only the *visible* text a browser would render, with HTML entity decoding (narrow, explicit table, same one ordinary prose already used) applied -- fixing the entity-decoding gap the prior AST implementation had missed -- while backslash escapes are correctly left undecoded (never Markdown-processed inside raw HTML). Lines inside this package's own bounded, more-inclusive HTML-block-opener rule are grouped into joinable, whitespace-collapsing text runs exactly like an ordinary paragraph, except inside <pre>/<code>, where whitespace is explicitly, deliberately never collapsed across lines -- matching real rendering and documented as an explicit, tested design choice, the same one already applied to ordinary fenced/indented code blocks. Extended this same joinable-run mechanism to ordinary paragraphs too, fixing the soft-wrapped-Authorization gap (an ordinary Markdown soft line break between a header name and its value, 'Authorization:\\nTOKEN', collapses to a single rendered space and must be read together) with precise per-match line attribution via a byte-offset-to-line map, run as the one and only pass for that check (no duplicate diagnostics, no merging across unrelated block boundaries). Fixed the Bearer-exactness gap in credential.go: rawAuthorizationMatches now checks the real runtime's exact literal prefix (the scheme word, one space, a non-empty token) rather than merely the scheme word, correctly flagging a tab or a second space in place of that one space, and a scheme word with no token at all following it -- while a narrow, documented exemption (added after a real false positive surfaced against this repository's own docs/GROUP_IMPORT_LIMITS.md and docs/FRONTEND_VENDOR_INVENTORY.md) correctly leaves alone ordinary prose naming the header/scheme generically inside an inline code span, closed immediately by its own backtick with no attempted token at all, distinct from a genuinely broken worked example. Added TestScanTextBearerExactness, TestScanTextHTMLBlockVisibleText, TestScanTextSoftWrappedAuthorization, and TestScanTextHTMLPreCodeWhitespaceExplicit; restored and re-validated every pre-goldmark fixture (parameter credential, raw Authorization, undeprecated-parameter-mention/table-row, wrapped recommendation, negation/adversative/clause scoping, rendered escape normalization, rendered markup split, code-aware normalization) plus the iteration-13/14-era fixtures that remain architecture-independent (bare-version-construction, transport-mismatch, compact-mixed-transport-directional-with-ambiguity-fail-safe), adapting only the handful of fixtures that depended on real two-row GFM table syntax back to this package's single-line table-row rule. All 22 docsguard test functions and the full repository test suite pass. The docs gate re-run against all tracked Markdown: 0 violations across 28 files. No deterministic high-confidence finding was left unfixed under the stdlib-only constraint; nothing was blocked. No runtime auth/middleware/header/status/version change. VERSION unchanged (0.12.1).",
+            "validation": {
+                "verify_sh": "pass",
+                "go_build": "pass (go build ./...)",
+                "go_vet": "pass",
+                "gofmt": "clean",
+                "golangci_lint": "0 issues",
+                "go_test": "pass (internal/docsguard: 22 test functions; cmd/docsguard; full repository go test ./... -- all packages pass)",
+                "docsguard_gate": "pass (scripts/verify-docs-canonical-examples.sh: 0 violations across 28 scanned files)",
+                "go_mod_go_sum_identical_to_base": "confirmed byte-for-byte via sha256sum against the commit preceding the first iteration of this goal; no goldmark or other new dependency remains",
+                "go_mod_verify": "pass (all modules verified)",
+                "gosec": "12 findings (unchanged pre-existing baseline)",
+                "gitleaks": "1 finding (unchanged pre-existing baseline, unrelated file)",
+                "actionlint": "clean",
+                "zizmor": "clean (2 suppressed, unchanged baseline)",
+                "yarn_audit": "4 moderate (unchanged pre-existing baseline, transitive webpack/ajv/fast-uri)",
+                "browser_test": "pass (scripts/test-browser.sh)",
+                "docker_build": "pass",
+                "docker_config_no_log_test": "pass (scripts/test-docker-config-no-log.sh)",
+                "govulncheck": "pass (0 reachable vulnerabilities; 3 unreachable findings in required modules, unchanged baseline)"
+            }
         }
     ]
 }

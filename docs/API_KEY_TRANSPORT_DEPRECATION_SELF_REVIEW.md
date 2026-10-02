@@ -1116,6 +1116,217 @@ is empty). `VERSION` unchanged (`0.12.1`).
 `scripts/verify-docs-canonical-examples.sh` re-run against every tracked
 Markdown file: 0 violations across 28 files, no doc wording changed.
 
+## Iteration 15: user-directed reversal to a dependency-free guard
+
+A later, explicit **user decision overrode** the iteration-13 structured
+(goldmark v2 AST) approach and reaffirmed the immutable goal's original
+constraint: `internal/docsguard` must not depend on a Markdown parser at
+all. The user required: remove `github.com/yuin/goldmark/v2` and every
+AST-dependent line of implementation; restore `go.mod`/`go.sum` to the
+pre-goldmark base **byte-for-byte**; add no new dependency; do not build a
+full Markdown parser; limit the gate to canonical documentation files and
+deterministic stdlib checks; and, if any high-confidence finding truly
+could not be fixed cleanly under that constraint, stop and report
+**BLOCKED** naming it precisely, rather than silently weaken the gate or
+reach for a dependency. See
+`.goals/deprecate-api-key-transports/review-feedback-14.md` for the full
+decision record.
+
+### Dependency removal
+
+`github.com/yuin/goldmark/v2 v2.1.6` was removed from `go.mod`/`go.sum`,
+restored to the exact state of the commit immediately preceding this
+goal's first iteration (`git show 3431add^:go.mod`/`go.sum`), verified
+**byte-for-byte identical** via `sha256sum` (not merely `git diff`
+reporting no changes) and `go mod verify`. `internal/docsguard/docsguard.go`,
+`scan.go`, `credential.go`, `context.go`, and `html.go` (the AST-based
+versions) were deleted; `docsguard_test.go` was rewritten. No finding in
+this iteration required a new dependency or a BLOCKED report: every one
+was closed with deterministic, bounded, stdlib-only code.
+
+### Architecture: back to line-based scanning, with the AST's genuinely stdlib-only logic kept
+
+`internal/docsguard` is rebuilt from the proven iteration-12 pre-goldmark
+baseline: `bufio.Scanner` reads physical lines, tracking fenced/indented
+code-block state so code content is scanned completely literally, never
+normalized (`normalize.go`, ported unchanged: `decodeRenderedMarkup` for
+backslash escapes, a narrow named/numeric HTML-entity table, a short
+allow-listed safe-inline-tag stripper, and a narrow emphasis/strikethrough-
+delimiter-wrapping-one-protected-character stripper, all applied outside
+inline code spans via a small manual code-span scanner, since Go's
+`regexp` has no backreferences to express "closing run of the same length
+as the opening run"). Crucially, `context.go`'s entire deprecation-context
+engine -- negation/adversative/sentence/clause scoping, the bare-version-
+requires-a-construction-word rule, and directional, occurrence-specific
+transport binding with ambiguity failing safe -- was **never
+goldmark-dependent in the first place**: it only ever operated on plain
+Go strings produced by whatever flattening mechanism fed it, so it carries
+over to this iteration completely unchanged, preserving every behavior
+improvement from iterations 9-14 without re-deriving any of it.
+
+### Why the gate remains enforceable at this scope
+
+This package does not attempt to be a general Markdown/HTML parser, and
+says so in its own package doc comment: it only has to correctly read
+*this repository's own, first-party, canonical Markdown* -- a bounded,
+known, reviewed corpus -- not arbitrary Markdown from the wild. Each
+normalization or detection mechanism is a narrow, explicitly documented
+approximation of one specific CommonMark/HTML rendering rule a real
+review found exploitable, not an attempt at completeness; where a
+construct is genuinely ambiguous to a bounded scanner (a malformed tag,
+an HTML-block opener CommonMark's own "interrupts a paragraph" rule might
+or might not actually recognize), the chosen behavior is documented at its
+own definition and consistently **fails closed toward scanning more text**
+rather than silently excluding content that might be a real forbidden
+example.
+
+### Finding 1 (security) — raw HTML blocks: entity decoding, and collapsible whitespace with pre/code explicit
+
+A new file, `html.go`, documents and implements this iteration's bounded
+approximation of CommonMark's HTML-block grammar: a line (allowing up to
+three leading spaces) starting with a syntactically valid tag opener is
+treated as starting a raw HTML block -- a deliberately more *inclusive*
+rule than CommonMark's own (which additionally restricts a bare tag opener
+to not "interrupt a paragraph"); this is a documented, safe trade-off,
+since treating a borderline case as an HTML block only adds this
+package's HTML-specific checks on top of what ordinary prose already
+gets, never removes a check. The block's extent follows CommonMark's own
+per-kind closing rule (a comment ends at `-->`, a processing instruction
+at `?>`, a declaration at `>`, a CDATA section at `]]>`, a `<script>`/
+`<style>`/`<pre>`/`<textarea>` element at its matching closing tag, and
+everything else at the next blank line).
+
+`flattenHTMLBlockVisibleText` extracts only the *visible* text a browser
+would display: comments, processing instructions, declarations, CDATA
+sections, tag markup, and attribute values are all dropped (none is ever
+visible), `<script>`/`<style>` element content is dropped too (neither
+ever displays as readable prose), and everything else -- including a
+`<div>`'s or `<pre>`'s inner text -- is kept, with HTML character
+references **decoded** the same narrow way ordinary prose's
+`decodeEntities` already does (`&#95;`, `&amp;`, and the rest of the
+existing narrow table) -- this is the entity-decoding gap the prior
+goldmark-based `html.go` had missed entirely (it extracted raw, undecoded
+visible text). Backslash escapes are deliberately **not** decoded here:
+CommonMark never Markdown-processes raw HTML block content; only a
+browser's own HTML entity resolution applies to it, a distinction this
+package's doc comment states explicitly. An unterminated comment/CDATA/
+processing-instruction/declaration/`<script>`/`<style>` element consumes
+the rest of the block the same conservative way a real browser's
+tokenizer does (matching reality, not a gap); anything this scanner
+cannot otherwise confidently classify (an unterminated tag) fails closed
+the *other* way, keeping it as ordinary visible text rather than risking
+silently hiding a real credential behind malformed markup.
+
+Lines of one HTML block's visible, non-`<pre>`/`<code>` text are grouped
+into a joinable run exactly like an ordinary paragraph (see Finding 2),
+with their whitespace collapsed across lines for soft-wrap detection --
+matching how a browser collapses ordinary HTML text's whitespace when
+rendering it. `<pre>`/`<code>` content is visible text like any other
+element's (a credential example inside one is still caught, per physical
+line), but its whitespace is **explicitly, deliberately never collapsed**
+across lines, documented at `htmlVerbatimTags`' definition and exercised
+by a dedicated test: a real browser preserves `<pre>`/`<code>`'s own line
+breaks visually instead of collapsing them, so an Authorization header
+split across *its own* line breaks is correctly not read as if it were on
+one line -- the same explicit choice this package already makes for an
+ordinary fenced/indented code block.
+
+New fixtures (`TestScanTextHTMLBlockVisibleText`): a block `<div>`/`<p>`
+credential/recommendation, `<pre>` (visible), multi-line nested tags, an
+HTML entity decoding inside a block, and an unterminated attribute value
+failing closed toward scanning -- all violate. An HTML comment, an
+attribute value, `<script>`/`<style>` content (plain and case-insensitive
+with an attribute), a processing instruction, a declaration, a CDATA
+section, an unrelated entity, and ordinary unrelated text correctly do
+not. (`TestScanTextHTMLPreCodeWhitespaceExplicit`): a credential wholly on
+one `<pre>` line still violates; an Authorization header split across
+`<pre>`'s (or `<code>`'s) own line breaks correctly does not.
+
+### Finding 2 (code) — soft-wrapped Authorization, with accurate multiline line ranges
+
+An ordinary Markdown soft line break between a header name and its value
+(`Authorization:\nTOKEN`, which renders as `Authorization: TOKEN`, a
+single collapsed space) was not detected by the restored per-line
+scanning loop alone, the same gap iteration 14 fixed for the (since
+removed) AST design. Fixed in `docsguard.go` with `joinableTextRuns`: it
+groups consecutive, non-blank `scannedLine`s that are either ordinary
+prose or one HTML block's non-`<pre>`/`<code>` visible text into a single,
+space-joined `textRun`, with a parallel byte-offset-to-line array so a
+match spanning more than one physical line is still reported with an
+**accurate** `[StartLine, EndLine]` (not merely the whole run's bounds
+when the match itself is shorter). `rawAuthorizationMatches` and
+`recommendationMention` run over these joined runs as their *only* pass
+(parameter-credential and table-row checks remain per physical line,
+where they belong), so an unwrapped single-line header is still reported
+exactly once, and a fenced/indented code line or a `<pre>`/`<code>` HTML
+line -- never joined with its neighbors -- still gets its own independent
+per-line Authorization check, exactly matching how neither ever collapses
+whitespace when actually rendered.
+
+New fixtures (`TestScanTextSoftWrappedAuthorization`): a soft line break
+and the same break inside an HTML block's visible text both violate; an
+unwrapped header is reported exactly once; two unrelated paragraphs
+separated by a blank line are not wrongly merged; an ordinary multi-line
+form/query example inside a fenced code block is unaffected.
+
+### Finding 3 (security) — deprecation context bound to the exact occurrence; same transport cannot cross-suppress
+
+`context.go`'s directional, occurrence-specific transport-binding logic
+(`transportKindNear`, with ambiguity failing safe rather than defaulting
+to suppression) is carried over from iteration 14 completely unchanged --
+it was always pure stdlib string/regexp code operating on plain Go
+strings, never on a goldmark AST. The same `TestScanTextTransportMismatchDoesNotSuppress`
+and `TestScanTextCompactMixedTransportDirectional` fixtures (the latter's
+single table-row-style case adapted to this package's single-physical-
+line table-row rule, since real two-row GFM table parsing no longer
+exists) continue to pass unchanged, including the constructed genuine-tie
+case proving an ambiguous classification still never suppresses.
+
+### Code finding — exact canonical runtime header requires `Bearer ` + a non-empty token
+
+`credential.go`'s `rawAuthorizationMatches` previously only checked
+whether a value's *first word* case-insensitively matched the canonical
+scheme name, never whether the separator and token after it actually
+matched the real runtime's exact literal prefix check
+(`strings.TrimPrefix(authorization, "Bearer ")` -- the scheme word, one
+literal space, nothing else). Fixed to require the real extractor's exact
+byte sequence followed by a genuinely non-empty credential token: a tab or
+a second space in place of that one canonical space, or the scheme word
+with nothing following it at all, is now correctly flagged as raw/legacy
+(none of those ever actually isolates a working credential at runtime,
+even though each superficially resembles a canonical example).
+
+Running the corrected check against this repository's own real
+documentation surfaced a genuine **false positive**: `docs/GROUP_IMPORT_LIMITS.md`
+and `docs/FRONTEND_VENDOR_INVENTORY.md` both describe "the canonical
+`` `Authorization: Bearer` `` header" as ordinary prose naming the
+scheme generically, with the scheme word immediately closed by its own
+code-span backtick and no attempted token at all -- a different thing
+entirely from a worked-but-broken example. Fixed with a narrow,
+documented exemption: the scheme word immediately closed by a code-span
+backtick, with nothing at all in between, is not flagged; a genuine
+worked example inside a code span still has a real token before that
+backtick and is caught exactly as before, unaffected by this exemption.
+
+New fixtures (`TestScanTextBearerExactness`): a tab separator, a double
+space, "Bearer" alone, and "Bearer " with nothing after all violate; the
+canonical "Bearer" + one space + a non-empty token does not, and neither
+does the real-world header-naming-in-prose pattern the fix above was
+built to exempt.
+
+All prior fixtures (iterations 1-12, and the architecture-independent
+ones from 13-14: bare-version-construction, transport-mismatch,
+compact-mixed-transport-directional) pass unchanged under the rebuilt
+engine, adapting only the handful that depended on real two-row GFM table
+syntax back to this package's single-line table-row rule. The full
+repository test suite (`go test ./...`) passes. `go.mod`/`go.sum` are
+byte-for-byte identical to the pre-goldmark base (verified via
+`sha256sum`, not merely an empty `git diff`); `go mod verify` passes.
+`scripts/verify-docs-canonical-examples.sh` re-run against every tracked
+Markdown file: 0 violations across 28 files, no doc wording changed. No
+runtime authentication/middleware/header/status/version change. `VERSION`
+unchanged (`0.12.1`).
+
 ## Acceptance criteria evidence
 
 | Area | Result | Evidence |
@@ -1406,6 +1617,42 @@ Markdown file: 0 violations across 28 files, no doc wording changed.
   tracked Markdown file after the iteration-14 fixes: 0 violations across
   28 shipped Markdown files, no doc wording changed. `go.mod`/`go.sum`
   diff is empty.
+- Iteration 15 (user-directed reversal to a dependency-free guard):
+  `github.com/yuin/goldmark/v2` removed; `go.mod`/`go.sum` restored
+  byte-for-byte to the pre-goldmark base (verified via `sha256sum`, not
+  merely `git diff`); `go mod verify` passes. `TestScanTextBearerExactness`
+  (new) covers a tab separator, a double space, a bare scheme word, and a
+  scheme word followed by nothing all violating, the canonical scheme
+  word + one space + a non-empty token not violating, and the real-world
+  "naming the header/scheme generically in a code span with no attempted
+  token" pattern (surfaced as a genuine false positive against this
+  repository's own `docs/GROUP_IMPORT_LIMITS.md` and
+  `docs/FRONTEND_VENDOR_INVENTORY.md`) correctly not violating either.
+  `TestScanTextHTMLBlockVisibleText` (new) covers a block `<div>`/`<p>`
+  credential/recommendation, `<pre>` (visible), multi-line nested tags,
+  an HTML entity decoding inside a block, and an unterminated attribute
+  value failing closed toward scanning, all violating; an HTML comment,
+  an attribute value, `<script>`/`<style>` content (plain and
+  case-insensitive with an attribute), a processing instruction, a
+  declaration, a CDATA section, an unrelated entity, and unrelated text
+  correctly not violating. `TestScanTextSoftWrappedAuthorization` (new)
+  covers a soft line break between an Authorization header name and its
+  value both in ordinary prose and inside an HTML block's visible text,
+  both violating with an accurate multi-line range; an unwrapped header
+  reported exactly once; two unrelated paragraphs across a blank line not
+  wrongly merged; an ordinary multi-line form/query example inside a
+  fenced code block unaffected. `TestScanTextHTMLPreCodeWhitespaceExplicit`
+  (new) covers a credential wholly on one `<pre>` line still violating,
+  while an Authorization header split across `<pre>`'s (or `<code>`'s)
+  own line breaks correctly does not, proving whitespace is never
+  collapsed across lines there. All prior `internal/docsguard` fixtures
+  (iterations 1-12, and the architecture-independent ones from 13-14:
+  bare-version-construction, transport-mismatch,
+  compact-mixed-transport-directional) and the full repository test suite
+  (`go test ./...`) pass unchanged under the rebuilt, dependency-free
+  engine. `./scripts/verify-docs-canonical-examples.sh` re-run against
+  every tracked Markdown file: 0 violations across 28 shipped Markdown
+  files, no doc wording changed.
 
 ## Why a bounded deprecation window instead of immediate removal
 

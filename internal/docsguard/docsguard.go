@@ -4,72 +4,44 @@
 // exist so a future documentation change cannot silently reintroduce a
 // `?api_key=`/form `api_key` example, a raw (non-scheme) Authorization
 // header example, or ordinary prose recommending a deprecated transport
-// (a table cell, an "or an api_key" alternative, or a sentence like "use the
+// (a table row, an "or an api_key" alternative, or a sentence like "use the
 // api_key query parameter", even one wrapped across several Markdown lines)
 // as if it were a canonical, recommended transport.
 //
-// # Why a real Markdown/GFM parser
+// # Why this package does not parse Markdown
 //
-// Earlier iterations of this package scanned plain text with an ever-growing
-// set of hand-written regular expressions approximating Markdown rendering:
-// backslash escapes, HTML character references, inline HTML tags, emphasis
-// delimiters, code-span/fence boundaries, and indented-code detection were
-// each bolted on as rendering-bypass findings were discovered one at a time.
-// That approach is fundamentally unable to keep up: CommonMark/GFM rendering
-// has real, interacting structural rules (delimiter-run flanking for
-// emphasis, matching fence character/length, list-continuation indentation
-// versus a genuine indented code block, variable-length code-span
-// delimiters) that a flat set of regexes cannot soundly approximate without
-// either missing real bypasses or inventing false ones.
+// An earlier iteration of this package parsed documents with a real
+// CommonMark/GFM AST library. A later, explicit user decision reversed
+// that: this repository's dependency policy (see CLAUDE.md) requires every
+// new dependency to be justified by need, alternative, security impact,
+// and maintenance impact, and the maintenance impact of an AST dependency
+// for one internal documentation-linting tool was judged not worth it. This
+// package is therefore, again, dependency-free: go.mod/go.sum carry no
+// Markdown parser.
 //
-// This package instead parses each document with goldmark
-// (github.com/yuin/goldmark/v2), a tested, widely used, actively maintained
-// CommonMark/GFM-compliant parser, and analyzes the resulting syntax tree.
-// goldmark's AST nodes already carry the *decoded* text a renderer would
-// actually display (backslash escapes and HTML character references are
-// resolved once, at parse time, by a pluggable text.Decoder -- see
-// flattenInline) and already encode every one of the structural rules above
-// correctly, so this package no longer needs to reimplement any of them.
-//
-// # What is scanned, and how
-//
-// Three kinds of block are scanned, each according to how it actually
-// renders:
-//
-//   - A code block (indented or fenced, backtick or tilde, with or without
-//     an info string) renders every line completely literally: no
-//     backslash escape, character reference, emphasis, or raw HTML is ever
-//     processed inside one. Its lines are matched against
-//     hasParameterCredential/rawAuthorization verbatim, with no decoding.
-//   - A paragraph, heading, or GFM table cell's inline content is flattened
-//     into the plain text it would actually render as (see flattenInline),
-//     then checked for both credential syntax
-//     (hasParameterCredential/rawAuthorization) and documentation-accuracy
-//     recommendation prose (recommendationMention, tableCellMention),
-//     exactly as it would read to a person or a client copying the example.
-//   - An inline code span's content, even though it sits inside a
-//     paragraph's otherwise-decoded text, renders literally (same rule as a
-//     code block) and is included in the flattened text unmodified, so a
-//     literal forbidden example inside one is still caught while a
-//     backslash-escaped or character-referenced one -- which never actually
-//     decodes there -- is not.
-//   - A raw HTML block's content is flattened into the *visible* text a
-//     browser would actually render for it (see flattenHTMLBlockText):
-//     comments, processing instructions, declarations, CDATA sections, tag
-//     markup, and attribute values are all dropped (none is ever visible
-//     text), a <script>/<style> element's entire content is dropped too
-//     (neither ever displays as readable prose), and everything else --
-//     including a <div>'s or <pre>'s inner text -- is kept and checked the
-//     same way a paragraph's flattened text is.
-//
-// A raw inline HTML tag or comment, and a Markdown link's destination, never
-// contribute visible text and are dropped entirely during flattening; an
-// emphasis/strong/strikethrough delimiter that does not actually form valid
-// emphasis per CommonMark's own delimiter-run rules (for example a single
-// punctuation character wrapped in intraword asterisks) is never parsed as
-// one in the first place, and so already appears in the flattened text as
-// the literal, un-rendered source -- no special-case handling is needed for
-// either of these: they fall directly out of using a real parser.
+// This is a real, accepted trade-off, not a claim of completeness. This
+// package scans plain text for the literal substrings that would make an
+// example authenticate against the real credential extractor in
+// middleware.extractExplicitAPICredential (see the "Credential-syntax
+// contract" section below), plus a small number of bounded, explicitly
+// documented, deterministic approximations of specific CommonMark rendering
+// rules that past reviews found a canonical-looking example could hide
+// behind: a backslash escape or HTML character reference (see
+// normalizeRenderedEscapes), a safe inline HTML tag or narrow emphasis
+// delimiter wrapping exactly one protected character (same), a fenced or
+// indented code block (which renders every one of those completely
+// literally, and so is deliberately never normalized -- see ScanText), and
+// a raw HTML block (see html.go, which documents its own, separate, bounded
+// approximation of CommonMark's HTML-block grammar). Each approximation is
+// narrow and documented at its own definition; none of them is a general
+// Markdown or HTML parser, and this package does not attempt to handle
+// every construct CommonMark/GFM defines -- only the ones a real
+// documentation page in this repository has actually used, or a real
+// review has actually found exploitable. The canonical-documentation gate
+// this package enforces (see scripts/verify-docs-canonical-examples.sh)
+// remains enforceable specifically because its scope is this narrow: it
+// only has to correctly read this repository's own first-party Markdown,
+// not render arbitrary Markdown from the wild.
 //
 // # Credential-syntax contract
 //
@@ -78,9 +50,13 @@
 // middleware.extractExplicitAPICredential uses: the parameter name is
 // exactly "api_key" (percent-decoded, since Go's URL/form parsing
 // percent-decodes parameter names before comparing them), and the
-// Authorization header's value is matched against the runtime's exact,
-// case-sensitive "Bearer " prefix (the header *name* stays case-insensitive,
-// per RFC 9110).
+// Authorization header's value is matched against the runtime's exact
+// prefix, `strings.TrimPrefix(authorization, "Bearer ")` -- the literal
+// word "Bearer", one literal space, and nothing else; anything else (wrong
+// casing, a tab or two spaces instead of that one space, or no credential
+// token following it at all) never actually extracts a working canonical
+// credential, so it is flagged as raw/legacy too (see
+// rawAuthorizationMatches).
 //
 // # Diagnostics
 //
@@ -88,19 +64,17 @@
 // Kind; it never carries the matched text, so a forbidden example that
 // happens to contain a real secret is never echoed by a caller that prints
 // violations (see Kind.Explanation, which returns a fixed, generic
-// description instead). If the document fails to parse (which the
-// underlying parser does not do for any input in practice, but this package
-// still checks defensively), ScanText returns an error and callers must fail
-// closed rather than trust an empty violation list.
+// description instead). If the scanner itself fails -- most importantly
+// bufio.ErrTooLong on a line that exceeds its internal buffer -- ScanText
+// returns a non-nil error, and callers must fail closed rather than trust
+// the returned violations as "no violations found".
 package docsguard
 
 import (
+	"bufio"
 	"fmt"
-
-	"github.com/yuin/goldmark/v2/ast"
-	"github.com/yuin/goldmark/v2/extension"
-	extast "github.com/yuin/goldmark/v2/extension/ast"
-	"github.com/yuin/goldmark/v2/parser"
+	"regexp"
+	"strings"
 )
 
 // Kind identifies which deprecated transport a Violation demonstrates.
@@ -120,36 +94,33 @@ const (
 
 	// KindRawAuthorization covers an `Authorization` header (any
 	// letter-casing, since HTTP header names are case-insensitive) whose
-	// value is not the runtime's exact, case-sensitive canonical form. The
-	// real extractor only strips a literal "Bearer " prefix
-	// (strings.TrimPrefix is case-sensitive); any other casing of the word
-	// "bearer" is therefore not recognized as canonical at runtime and falls
-	// into the same raw/legacy bucket as a bare token, so it is flagged
-	// here too. Other real schemes such as `Authorization: Basic ...` are
-	// matched case-insensitively, per RFC 7235, and are not flagged.
+	// value does not have the runtime's exact, case-sensitive "Bearer "
+	// prefix followed by a non-empty credential token. See the package
+	// doc comment's "Credential-syntax contract" section.
 	KindRawAuthorization Kind = "raw_authorization"
 
-	// KindUndeprecatedParameterMention covers a GFM table cell, a
+	// KindUndeprecatedParameterMention covers a Markdown table row, a
 	// "presented as an alternative" sentence, or ordinary recommendation
 	// prose (e.g. "use the api_key query parameter", "authenticate via
 	// api_key") -- including one wrapped across several physical lines --
 	// that presents `api_key` as an ordinary, currently supported
 	// authentication option with no *affirmative* deprecation context that
-	// (a) is in the same sentence/clause, (b) is not separated from it by an
-	// adversative connector, (c) is close enough to an actual `api_key`
+	// (a) is in the same sentence/clause, (b) is not separated from it by
+	// an adversative connector, (c) is close enough to an actual `api_key`
 	// mention to describe that transport specifically, (d) describes the
-	// same specific transport (query/form/raw) rather than a different one,
-	// and (e) if the only context is the bare removal version number, is
-	// accompanied by an explicit deprecation/removal construction word
-	// rather than standing alone. A negated context ("not deprecated", "no
-	// longer legacy") where the negation directly governs it does not
-	// suppress this: it means the surrounding text is actively asserting the
-	// opposite of the real contract, which is itself the violation. A
-	// negation that instead governs the recommendation verb -- "do NOT use
-	// the api_key parameter; it is deprecated" -- is a legitimate warning
-	// and does not violate. Unlike KindParameterCredential, this has no `=`
-	// sign and would never authenticate anything -- it is a
-	// documentation-accuracy check, not a credential-syntax check.
+	// same specific transport (query/form/raw) rather than a different
+	// one, and (e) if the only context is the bare removal version
+	// number, is accompanied by an explicit deprecation/removal
+	// construction word rather than standing alone. A negated context
+	// ("not deprecated", "no longer legacy") where the negation directly
+	// governs it does not suppress this: it means the surrounding text is
+	// actively asserting the opposite of the real contract, which is
+	// itself the violation. A negation that instead governs the
+	// recommendation verb -- "do NOT use the api_key parameter; it is
+	// deprecated" -- is a legitimate warning and does not violate. Unlike
+	// KindParameterCredential, this has no `=` sign and would never
+	// authenticate anything -- it is a documentation-accuracy check, not
+	// a credential-syntax check.
 	KindUndeprecatedParameterMention Kind = "undeprecated_parameter_mention"
 )
 
@@ -164,7 +135,7 @@ func (k Kind) Explanation() string {
 	case KindParameterCredential:
 		return "a query or form parameter here decodes to exactly \"api_key\", the deprecated credential parameter name"
 	case KindRawAuthorization:
-		return "the Authorization header value here is not the runtime's exact canonical \"Bearer\" scheme (or another recognized scheme), so it is a raw/legacy credential"
+		return "the Authorization header value here is not the runtime's exact canonical \"Bearer \" + token form (or another recognized scheme), so it is a raw/legacy credential"
 	case KindUndeprecatedParameterMention:
 		return "this text presents the deprecated api_key parameter as an ordinary, currently supported option without clear affirmative deprecation context"
 	default:
@@ -180,106 +151,198 @@ func (k Kind) Explanation() string {
 type Violation struct {
 	// StartLine and EndLine are the 1-indexed, inclusive line range the
 	// violation was found in. For a single-line violation (parameter
-	// credential, raw Authorization, a table cell occupying one line) they
-	// are equal; a recommendation-prose violation spanning a wrapped
-	// Markdown paragraph reports that paragraph's full line range.
+	// credential, raw Authorization, a table row) they are equal; a
+	// recommendation-prose or soft-wrapped-header violation spanning
+	// several physical lines reports that span's full line range.
 	StartLine int
 	EndLine   int
 	Kind      Kind
 }
 
-// mdParser is this package's single, shared CommonMark+GFM parser instance.
-// It is stateless and safe for concurrent use across calls to ScanText.
-var mdParser = parser.New(parser.WithExtensions(extension.GFMParser))
+// tableRowPattern matches a Markdown table row: a line whose first
+// non-whitespace character is a pipe.
+var tableRowPattern = regexp.MustCompile(`^\s*\|`)
 
-// maxLineLength bounds the length of any single physical line this package
-// will scan. The previous, bufio.Scanner-based implementation failed closed
-// on bufio.ErrTooLong for a line exceeding its internal buffer; this
-// explicit check preserves the exact same fail-closed guarantee under the
-// new AST-based implementation, which has no equivalent built-in limit of
-// its own.
-const maxLineLength = 1024 * 1024
+// lineKind classifies one physical source line for ScanText's scanning
+// loop.
+type lineKind int
 
-// oversizedLine reports the 1-indexed line number of the first physical
-// line in source exceeding maxLineLength, or -1 if none does.
-func oversizedLine(source []byte) int {
-	lineNo := 1
-	start := 0
-	for i, b := range source {
-		if b == '\n' {
-			if i-start > maxLineLength {
-				return lineNo
-			}
-			lineNo++
-			start = i + 1
-		}
-	}
-	if len(source)-start > maxLineLength {
-		return lineNo
-	}
-	return -1
+const (
+	// kindPlain is an ordinary Markdown prose line: escape/entity/
+	// markup-normalized before any check runs (see
+	// normalizeRenderedEscapes).
+	kindPlain lineKind = iota
+	// kindCode is a fenced or indented code-block line: scanned
+	// completely literally, never joined with neighbors, and never
+	// checked for a recommendation mention (code is an example, not
+	// prose).
+	kindCode
+	// kindHTML is a line inside a raw HTML block: its checkText is that
+	// line's extracted *visible* text (see flattenHTMLBlockVisibleText),
+	// already entity-decoded but never backslash-escape-decoded.
+	// verbatim additionally marks a line that fell inside a <pre>/<code>
+	// element, which (like kindCode) is never joined with neighbors.
+	kindHTML
+)
+
+// scannedLine is one physical source line after ScanText's first pass:
+// classified, and with its checkText already normalized appropriately for
+// its kind.
+type scannedLine struct {
+	lineNo    int
+	checkText string
+	kind      lineKind
+	verbatim  bool
 }
 
 // ScanText scans arbitrary text (typically one Markdown file's contents) and
-// returns every deprecated-transport example it finds. It parses the text
-// with mdParser and walks the resulting syntax tree; it returns a non-nil
-// error if any line exceeds maxLineLength or if parsing/walking fails, in
-// which case the returned violations are necessarily incomplete and callers
-// must fail closed rather than trust them as "no violations found".
-func ScanText(text string) (violations []Violation, err error) {
-	source := []byte(text)
+// returns every deprecated-transport example it finds. It returns a non-nil
+// error if the scanner itself failed -- most importantly bufio.ErrTooLong on
+// a line that exceeds the internal buffer -- in which case the returned
+// violations are necessarily incomplete and callers must fail closed rather
+// than trust them as "no violations found".
+func ScanText(text string) ([]Violation, error) {
+	var violations []Violation
+	var scannedLines []scannedLine
 
-	if lineNo := oversizedLine(source); lineNo != -1 {
-		return nil, fmt.Errorf("scanning line %d: line exceeds maximum length of %d bytes", lineNo, maxLineLength)
+	scanner := bufio.NewScanner(strings.NewReader(text))
+	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
+
+	var inFence bool
+	var fenceChar byte
+	var fenceLen int
+
+	var inHTML bool
+	var htmlKind string
+	var htmlBlockLines []string
+	var htmlBlockStartLine int
+
+	flushHTMLBlock := func() {
+		if len(htmlBlockLines) == 0 {
+			return
+		}
+		for _, vl := range flattenHTMLBlockVisibleText(htmlBlockLines, htmlBlockStartLine) {
+			scannedLines = append(scannedLines, scannedLine{
+				lineNo:    vl.lineNo,
+				checkText: vl.text,
+				kind:      kindHTML,
+				verbatim:  vl.verbatim,
+			})
+		}
+		htmlBlockLines = nil
 	}
 
-	lines := newLineIndex(source)
+	lineNo := 0
+	for scanner.Scan() {
+		lineNo++
+		raw := scanner.Text()
 
-	// goldmark's parser does not itself return errors for malformed input
-	// (CommonMark has no concept of a syntactically invalid document), but
-	// this package fails closed defensively against a panic in the parser
-	// or walker -- for example from an unexpectedly deep or malformed tree
-	// -- rather than silently reporting "no violations found".
-	defer func() {
-		if r := recover(); r != nil {
-			violations = nil
-			err = fmt.Errorf("parsing document: %v", r)
+		if inHTML {
+			htmlBlockLines = append(htmlBlockLines, raw)
+			if htmlBlockCloses(raw, htmlKind) {
+				inHTML = false
+				flushHTMLBlock()
+			}
+			continue
 		}
-	}()
 
-	doc := mdParser.Parse(source)
+		if inFence {
+			if ch, length, ok := matchCodeFence(raw); ok && ch == fenceChar && length >= fenceLen {
+				inFence = false
+			}
+			scannedLines = append(scannedLines, scannedLine{lineNo: lineNo, checkText: raw, kind: kindCode})
+			continue
+		}
 
-	walkErr := ast.Walk(doc, func(n ast.Node, entering bool) (ast.WalkStatus, error) {
-		if !entering {
-			return ast.WalkContinue, nil
+		if ch, length, ok := matchCodeFence(raw); ok {
+			fenceChar, fenceLen = ch, length
+			inFence = true
+			scannedLines = append(scannedLines, scannedLine{lineNo: lineNo, checkText: raw, kind: kindCode})
+			continue
 		}
-		switch v := n.(type) {
-		case *ast.CodeBlock:
-			violations = append(violations, scanCodeBlock(source, lines, v)...)
-			return ast.WalkSkipChildren, nil
-		case *ast.HTMLBlock:
-			violations = append(violations, scanHTMLBlock(source, lines, v)...)
-			return ast.WalkSkipChildren, nil
-		case *extast.TableCell:
-			violations = append(violations, scanTableCell(source, lines, n)...)
-			return ast.WalkSkipChildren, nil
-		case *ast.Paragraph, *ast.Heading:
-			violations = append(violations, scanProseBlock(source, lines, n)...)
-			return ast.WalkSkipChildren, nil
+		if indentedCodeLinePattern.MatchString(raw) {
+			scannedLines = append(scannedLines, scannedLine{lineNo: lineNo, checkText: raw, kind: kindCode})
+			continue
 		}
-		return ast.WalkContinue, nil
-	})
-	if walkErr != nil {
-		return violations, fmt.Errorf("walking document: %w", walkErr)
+		if kind, closedSameLine, ok := detectHTMLBlockOpen(raw); ok {
+			htmlKind = kind
+			htmlBlockStartLine = lineNo
+			htmlBlockLines = []string{raw}
+			if closedSameLine {
+				flushHTMLBlock()
+			} else {
+				inHTML = true
+			}
+			continue
+		}
+
+		scannedLines = append(scannedLines, scannedLine{lineNo: lineNo, checkText: normalizeRenderedEscapes(raw), kind: kindPlain})
+	}
+	if err := scanner.Err(); err != nil {
+		return violations, fmt.Errorf("scanning line %d: %w", lineNo+1, err)
+	}
+	if inHTML {
+		// The file ended while still inside an open HTML block that never
+		// reached its specific closing marker (or, for the "generic"
+		// kind, a blank line): CommonMark itself still treats this as one
+		// HTML block running to the end of the document, so flush what
+		// was collected rather than silently dropping it.
+		flushHTMLBlock()
+	}
+
+	// Parameter-credential and table-row checks always run per physical
+	// line, for every kind: a credential or a Markdown table row is
+	// always meant to be read on its own line regardless of surrounding
+	// context, and neither is ever split across an ordinary soft line
+	// break the way an Authorization header's value can be (see below).
+	for _, sl := range scannedLines {
+		if hasParameterCredential(sl.checkText) {
+			violations = append(violations, Violation{StartLine: sl.lineNo, EndLine: sl.lineNo, Kind: KindParameterCredential})
+		}
+		if tableRowMention(sl.checkText) {
+			violations = append(violations, Violation{StartLine: sl.lineNo, EndLine: sl.lineNo, Kind: KindUndeprecatedParameterMention})
+		}
+	}
+
+	// A fenced/indented code-block line, or an HTML line that fell inside
+	// a <pre>/<code> element, is never joined with its neighbors (see
+	// joinableTextRuns): neither ever collapses whitespace when actually
+	// rendered, so each such line still needs its own, independent raw-
+	// Authorization check.
+	for _, sl := range scannedLines {
+		if (sl.kind == kindCode || sl.verbatim) && rawAuthorization(sl.checkText) {
+			violations = append(violations, Violation{StartLine: sl.lineNo, EndLine: sl.lineNo, Kind: KindRawAuthorization})
+		}
+	}
+
+	// Raw-Authorization and recommendation-prose checks otherwise run
+	// over *joined* text runs -- consecutive ordinary prose lines, or
+	// consecutive non-verbatim lines of one HTML block -- instead of one
+	// physical line at a time, so an ordinary soft line break between a
+	// header name and its value, or a recommendation sentence wrapped
+	// across several lines, is still caught. This is the only place
+	// either check runs over more than one physical line, so a
+	// single-line header or a one-line paragraph is still reported
+	// exactly once, and two unrelated runs are never joined together.
+	for _, run := range joinableTextRuns(scannedLines) {
+		for _, m := range rawAuthorizationMatches(run.text) {
+			violations = append(violations, Violation{
+				StartLine: run.lineAt(m[0]),
+				EndLine:   run.lineAt(m[1] - 1),
+				Kind:      KindRawAuthorization,
+			})
+		}
+		if recommendationMention(run.text) {
+			violations = append(violations, Violation{StartLine: run.startLine, EndLine: run.endLine, Kind: KindUndeprecatedParameterMention})
+		}
 	}
 
 	return dedupeViolations(violations), nil
 }
 
 // dedupeViolations removes exact (StartLine, EndLine, Kind) duplicates,
-// which can occur when a block independently matches more than one
-// documentation-accuracy check (for example both tableCellMention and
-// recommendationMention on the same short table cell).
+// which can occur when a single-line run independently matches more than
+// one documentation-accuracy check.
 func dedupeViolations(violations []Violation) []Violation {
 	seen := make(map[Violation]bool, len(violations))
 	deduped := violations[:0]
@@ -293,65 +356,91 @@ func dedupeViolations(violations []Violation) []Violation {
 	return deduped
 }
 
-// lineIndex maps a byte offset into a source document to its 1-indexed line
-// number, so block nodes (whose positions are byte offsets) can be reported
-// in the Violation{StartLine, EndLine} contract this package has always
-// used.
-type lineIndex struct {
-	// starts[i] is the byte offset at which line i+1 begins. starts[0] is
-	// always 0 (line 1 begins at the start of the document).
-	starts []int
+// textRun is one group of consecutive, joinable scannedLines (see
+// joinableTextRuns), combined into a single whitespace-joined string for
+// the raw-Authorization and recommendation-prose checks, together with a
+// way to map a byte offset in that combined string back to the physical
+// source line it came from.
+type textRun struct {
+	startLine int
+	endLine   int
+	text      string
+	lineAt    func(offset int) int
 }
 
-// newLineIndex builds a lineIndex for source.
-func newLineIndex(source []byte) *lineIndex {
-	starts := make([]int, 1, 64)
-	starts[0] = 0
-	for i, b := range source {
-		if b == '\n' {
-			starts = append(starts, i+1)
+// joinableTextRuns groups scannedLines into textRuns: consecutive lines
+// that are either ordinary prose (kindPlain) or a raw HTML block's visible,
+// non-verbatim text (kindHTML, verbatim=false), each non-blank after
+// normalization, joined by a single space -- mirroring the single space an
+// ordinary Markdown soft line break, or a browser's own whitespace
+// collapsing of ordinary (non-<pre>/<code>) HTML text, both render as. A
+// run ends at a blank line, a kind change, a code line, or a verbatim HTML
+// line, so two unrelated runs (different paragraphs, different HTML
+// blocks, or prose on either side of a code block) are never joined
+// together.
+func joinableTextRuns(lines []scannedLine) []textRun {
+	var runs []textRun
+	var group []scannedLine
+
+	flush := func() {
+		if len(group) == 0 {
+			return
+		}
+		var sb strings.Builder
+		var lineAtByte []int
+		for i, sl := range group {
+			if i > 0 {
+				lineAtByte = append(lineAtByte, group[i-1].lineNo)
+				sb.WriteByte(' ')
+			}
+			for range len(sl.checkText) {
+				lineAtByte = append(lineAtByte, sl.lineNo)
+			}
+			sb.WriteString(sl.checkText)
+		}
+		first, last := group[0].lineNo, group[len(group)-1].lineNo
+		runs = append(runs, textRun{
+			startLine: first,
+			endLine:   last,
+			text:      sb.String(),
+			lineAt: func(offset int) int {
+				if len(lineAtByte) == 0 {
+					return first
+				}
+				return lineAtByte[clampIndex(offset, len(lineAtByte)-1)]
+			},
+		})
+		group = nil
+	}
+
+	for _, sl := range lines {
+		joinable := (sl.kind == kindPlain || (sl.kind == kindHTML && !sl.verbatim)) && strings.TrimSpace(sl.checkText) != ""
+		sameKind := len(group) == 0 || group[len(group)-1].kind == sl.kind
+		if !joinable || !sameKind {
+			flush()
+		}
+		if joinable {
+			group = append(group, sl)
 		}
 	}
-	return &lineIndex{starts: starts}
+	flush()
+	return runs
 }
 
-// lineAt returns the 1-indexed line number containing byte offset.
-func (li *lineIndex) lineAt(offset int) int {
-	lo, hi := 0, len(li.starts)-1
-	for lo < hi {
-		mid := (lo + hi + 1) / 2
-		if li.starts[mid] <= offset {
-			lo = mid
-		} else {
-			hi = mid - 1
-		}
+// tableRowMention reports whether a single physical line is a Markdown
+// table row presenting `api_key` with no affirmative deprecation context.
+// Table rows stay a per-line check (unlike recommendationMention) because a
+// Markdown table row is always exactly one physical line by construction.
+// recommendationPos is set to len(line): the row itself is the thing being
+// judged, not a verb at a particular position, so any affirmative context
+// anywhere in the row counts (subject to the usual negation, adversative-
+// boundary, proximity, bare-version, and transport-matching rules).
+func tableRowMention(line string) bool {
+	if !strings.Contains(strings.ToLower(line), "api_key") {
+		return false
 	}
-	return lo + 1
-}
-
-// blockLineRange returns the 1-indexed, inclusive [startLine, endLine] range
-// of the given block node's source, falling back to a single line at offset
-// 0 if the node reports no source segments at all (which should not happen
-// for a parsed Paragraph/Heading/TableCell/CodeBlock, but is handled
-// defensively rather than risking a panic or a silently wrong line number).
-func blockLineRange(lines *lineIndex, source []byte, block ast.BlockNode) (start, end int) {
-	segs := block.Source()
-	if len(segs) == 0 {
-		return 1, 1
+	if !tableRowPattern.MatchString(line) {
+		return false
 	}
-	first := segs[0]
-	last := segs[len(segs)-1]
-	start = lines.lineAt(first.Start)
-	stop := last.Stop
-	if stop > len(source) {
-		stop = len(source)
-	}
-	if stop > first.Start {
-		stop--
-	}
-	end = lines.lineAt(stop)
-	if end < start {
-		end = start
-	}
-	return start, end
+	return !hasAffirmativeDeprecationContext(line, len(line))
 }

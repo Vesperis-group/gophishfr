@@ -505,23 +505,6 @@ var weakRecommendationVerbPattern = regexp.MustCompile(
 // name) that happens to share the text with one of those common verbs.
 var recommendationAnchorPattern = regexp.MustCompile(`(?i)\b(parameter|param|query|field|header|credential)\b`)
 
-// tableCellMention reports whether a GFM table cell's flattened text
-// presents `api_key` with no affirmative deprecation context, with no
-// recommendation verb required: a table cell listing `api_key` presents it
-// as a normal, current option merely by listing it (this is the same
-// lenient rule a whole Markdown table row always got; it is now scoped to
-// the specific cell that contains the mention). recommendationPos is set to
-// len(cellText): the cell itself is the thing being judged, not a verb at a
-// particular position, so any affirmative context anywhere in the cell
-// counts (subject to the usual negation, adversative-boundary, proximity,
-// bare-version, and transport-matching rules).
-func tableCellMention(cellText string) bool {
-	if !strings.Contains(strings.ToLower(cellText), "api_key") {
-		return false
-	}
-	return !hasAffirmativeDeprecationContext(cellText, len(cellText))
-}
-
 // recommendationMention reports whether blockText (a flattened paragraph,
 // heading, or table cell) presents `api_key` as an alternative or
 // recommended authentication option -- "or an api_key parameter", "use the
