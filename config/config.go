@@ -5,6 +5,7 @@ import (
 	"os"
 
 	log "github.com/Vesperis-group/gophishfr/logger"
+	"github.com/Vesperis-group/gophishfr/middleware/clientip"
 )
 
 // AdminServer represents the Admin server configuration details
@@ -16,6 +17,12 @@ type AdminServer struct {
 	CSRFKey              string   `json:"csrf_key"`
 	AllowedInternalHosts []string `json:"allowed_internal_hosts"`
 	TrustedOrigins       []string `json:"trusted_origins"`
+	// TrustedProxies lists the proxy networks (single IPs or CIDR blocks)
+	// permitted to set X-Forwarded-For/X-Real-IP for this server. Absent or
+	// empty means trust no proxy: those headers are always ignored and the
+	// resolved client IP is always the direct socket peer. See
+	// docs/TRUSTED_PROXY_RESOLUTION.md.
+	TrustedProxies clientip.TrustedProxies `json:"trusted_proxies"`
 }
 
 // PhishServer represents the Phish server configuration details
@@ -24,6 +31,10 @@ type PhishServer struct {
 	UseTLS    bool   `json:"use_tls"`
 	CertPath  string `json:"cert_path"`
 	KeyPath   string `json:"key_path"`
+	// TrustedProxies has the same semantics as AdminServer.TrustedProxies,
+	// configured independently because the admin and phishing servers are
+	// commonly exposed through different (or no) reverse proxies.
+	TrustedProxies clientip.TrustedProxies `json:"trusted_proxies"`
 }
 
 // Config represents the configuration information.

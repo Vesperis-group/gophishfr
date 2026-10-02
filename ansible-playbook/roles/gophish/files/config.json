@@ -9,7 +9,8 @@
 		"listen_url": "127.0.0.1:8080",
 		"use_tls": true,
 		"cert_path": "/etc/ssl/crt/gophish.crt",
-		"key_path": "/etc/ssl/private/gophish.pem"
+		"key_path": "/etc/ssl/private/gophish.pem",
+		"trusted_proxies": ["127.0.0.1/32"]
 	},
 	"db_name": "sqlite3",
 	"db_path": "gophish.db",
