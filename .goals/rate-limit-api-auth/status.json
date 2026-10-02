@@ -1,0 +1,18 @@
+{
+  "goal_id": "rate-limit-api-auth",
+  "status": "building",
+  "iteration": 1,
+  "builder_model": "Claude:Sonnet-5",
+  "inspector_model": "Claude:Haiku-4.5",
+  "initial_sha": "00305ef0dc60b705c32b5d4e4d6b21b0c7d43196",
+  "created_at": "2026-10-02T19:10:00+02:00",
+  "history": [
+    {
+      "iteration": 1,
+      "role": "builder",
+      "model": "Claude:Sonnet-5",
+      "commit_sha": "d476649826acd7136910868dab02cc13b16c573b",
+      "summary": "Added a failure-budget rate limiter (middleware/ratelimit.FailureLimiter: burst 20, refill 20/min, IP-only bucket key via middleware/clientip, pre-check-before-HMAC/DB ordering, 429 JSON + Retry-After) protecting RequireAPIKey's explicit-credential branch uniformly for Bearer/raw/query/form. Only models.ErrInvalidAPICredential counts as a client-attributable failure; verifier-unavailable/ambiguous-candidate/raw-DB errors, RBAC/view-only denials, and all successes never touch the limiter. Session-only requests have zero limiter interaction. Boundary convention: the failure that exhausts the budget still gets its historical status; the next request is blocked. Added docs/API_AUTH_RATE_LIMITING.md and unit+integration test coverage (including -race concurrency and XFF-bypass proofs). go.mod/go.sum/package.json/yarn.lock untouched."
+    }
+  ]
+}
