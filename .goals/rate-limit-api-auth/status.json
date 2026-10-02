@@ -11,8 +11,16 @@
       "iteration": 1,
       "role": "builder",
       "model": "Claude:Sonnet-5",
-      "commit_sha": "d476649826acd7136910868dab02cc13b16c573b",
+      "commit_sha": "4a00cb85b41f5dee98e6888155303ffc28cdf5c8",
       "summary": "Added a failure-budget rate limiter (middleware/ratelimit.FailureLimiter: burst 20, refill 20/min, IP-only bucket key via middleware/clientip, pre-check-before-HMAC/DB ordering, 429 JSON + Retry-After) protecting RequireAPIKey's explicit-credential branch uniformly for Bearer/raw/query/form. Only models.ErrInvalidAPICredential counts as a client-attributable failure; verifier-unavailable/ambiguous-candidate/raw-DB errors, RBAC/view-only denials, and all successes never touch the limiter. Session-only requests have zero limiter interaction. Boundary convention: the failure that exhausts the budget still gets its historical status; the next request is blocked. Added docs/API_AUTH_RATE_LIMITING.md and unit+integration test coverage (including -race concurrency and XFF-bypass proofs). go.mod/go.sum/package.json/yarn.lock untouched."
+    },
+    {
+      "iteration": 1,
+      "role": "inspector",
+      "model": "Claude:Haiku-4.5",
+      "commit_sha": "pending",
+      "verdict": "FAIL",
+      "summary": "Code implementation is technically sound and comprehensive (correct semantics, proper pre-check ordering, exclusive clientip use, 13+ integrated tests covering all cases, accurate documentation). All 20 acceptance criteria are either PASS or have been addressed in code. However, the environment (Windows/WSL Go toolchain) prevents running the full verification suite (go test -race, govulncheck, full lint), blocking a definitive PASS verdict. Recommend: (1) Run full suite in a clean environment to prove no races, no vulns, all tests pass; (2) Re-verify GPG signature once environment is configured. Code-level review is sound; this is an environmental blocker, not a code issue."
     }
   ]
 }
