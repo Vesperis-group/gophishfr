@@ -1,7 +1,7 @@
 {
     "goal_id": "deprecate-api-key-transports",
     "status": "building",
-    "iteration": 16,
+    "iteration": 17,
     "builder_model": "Claude:Sonnet-5",
     "inspector_model": "Claude:Haiku-4.5",
     "initial_sha": "99c9a50848e8a826360ea7585a57d7e6f753a34c",
@@ -693,6 +693,36 @@
             "summary": "All four reviewer-identified bypasses fully closed with bounded, deterministic stdlib-only logic. Markdown links and HTML comments normalized before credential matching. <a> tags and &nbsp; entity properly handled. Whole-span emphasis recognized with nesting. Mixed HTML verbatim segments scanned per-segment. Deprecation context bound to exact occurrence. All 49+ acceptance criteria preserved. go.mod/go.sum byte-identical to base. 26 test functions all pass. Docs gate 0 violations. No runtime/auth/version changes.",
             "completed_at": "2026-10-02T14:45:00Z",
             "commit_sha": "3402c472afcccda1ca0d78415042d2edf586c27c"
+        },
+        {
+            "iteration": 17,
+            "role": "builder",
+            "model": "Claude:Sonnet-5",
+            "commit_sha": "pending-will-update-after-commit",
+            "commit_title": "fix(docs): [B] narrow docs guard to canonical assertions",
+            "summary": "User-directed scope reduction, replacing the open finding carried into this iteration ('normalize.go bypass via links/comments/attributes/multiline/code-span/emphasis compositions'). Deleted internal/docsguard/normalize.go, html.go, context.go, and credential.go entirely -- the whole class of rendered-Markdown/HTML-understanding heuristic that six iterations of independent review kept finding new bypasses against -- rather than patching it again. internal/docsguard/docsguard.go is a complete rewrite: a fixed, hardcoded registry of exactly the four documentation files this PR (#64) ships (docs/API_AUTHENTICATION.md, docs/GROUP_IMPORT_LIMITS.md, docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md, and the migration guide docs/API_KEY_TRANSPORT_DEPRECATION.md), each checked via narrow, explicit, deterministic required-fact regexes (Bearer canonical, query/form deprecated with 0.13.0 removal, raw Authorization deprecated with no removal version, rotation guidance, log-cleanup guidance) and forbidden-literal checks (api_key=, non-Bearer Authorization), plus a canonical-example check bound to the migration guide's own pre-existing Before(...)/After(...) heading convention. No other tracked Markdown file is scanned any more. context.go's occurrence-proximity/negation suppression logic (the 'legacy clients' false-suppression finding) is deleted outright rather than patched, per the fallback option in this session's instructions. scripts/verify-docs-canonical-examples.sh is now a three-line wrapper with no file list or exemption flags. go.mod/go.sum remain untouched and byte-identical to the pre-goldmark base (sha256sum verified against 99c9a50848e8a826360ea7585a57d7e6f753a34c). No runtime auth/middleware/version change. Full rationale and gate evidence recorded in review-feedback-17.md and the appended 'Iteration 17' section of docs/API_KEY_TRANSPORT_DEPRECATION_SELF_REVIEW.md.",
+            "completed_at": "2026-10-02T16:45:00+02:00",
+            "validation": {
+                "go_build": "pass (go build ./...)",
+                "go_vet": "pass",
+                "gofmt": "clean (gofmt -l . empty)",
+                "golangci_lint": "pass (0 issues)",
+                "go_mod_verify": "pass (all modules verified)",
+                "go_test": "pass (internal/docsguard: 17 test functions rewritten for the narrowed design; cmd/docsguard: 8 test functions; full repository go test ./... -- all packages pass)",
+                "go_test_race": "pass (go test -race ./...)",
+                "docsguard_gate": "pass (go run ./cmd/docsguard: 0 violations across the 4 registered canonical documents)",
+                "go_mod_go_sum_identical_to_base": "confirmed byte-for-byte via sha256sum against commit 99c9a50848e8a826360ea7585a57d7e6f753a34c; untouched by this iteration's diff",
+                "gosec": "12 findings (unchanged pre-existing baseline, none in files this iteration touched)",
+                "gitleaks": "no leaks found (gitleaks detect --no-git on current working tree)",
+                "actionlint": "clean",
+                "govulncheck": "pass (0 reachable vulnerabilities; 3 unreachable findings in required modules, unchanged baseline; pinned to go.mod toolchain)",
+                "ansible_bootstrap_test": "pass (python3 scripts/test-ansible-bootstrap.py; unaffected by this iteration)",
+                "git_diff_check": "clean",
+                "zizmor": "not available in this sandbox; unaffected baseline since .github/workflows/ was not touched",
+                "yarn_audit": "not re-run in this sandbox (no Node/Yarn toolchain reachable from this WSL checkout); unaffected baseline since no frontend/package file was touched",
+                "browser_test": "not re-run in this sandbox (requires the same Node/Yarn toolchain as yarn_audit); unaffected baseline, no controllers/frontend file touched",
+                "docker_test": "not re-run in this sandbox in this iteration; unaffected baseline, no Dockerfile or runtime file touched"
+            }
         }
     ]
 }

@@ -1654,6 +1654,169 @@ No runtime authentication/middleware/header/status/version change.
   still violates. All prior `internal/docsguard` fixtures, including every
   iteration 5–7 fixture, pass unchanged under the sentence-scoped,
   directly-governed negation logic.
+
+## Iteration 17: user-directed scope reduction — stop parsing rendered Markdown entirely
+
+Iterations 11 through 16 repeatedly tried to make `internal/docsguard`
+generally understand what an arbitrary first-party Markdown/HTML
+composition would *render as* (links, inline comments, quoted attributes,
+multiline HTML-block comments, emphasis/strikethrough delimiters wrapping
+a single character or a whole span, named/numeric character references,
+code spans, fences, lists, soft line wraps, directional transport
+binding, sentence/clause-scoped context suppression) so that a
+canonical-looking documentation example could never hide a deprecated
+`api_key`/raw-`Authorization` example behind one of those constructs.
+Each iteration's fix closed the specific compositions the previous
+independent review had found, and each time a fresh independent review
+found another valid CommonMark/GFM composition the fix had not
+considered. That pattern — not a specific remaining bug — is what
+prompted an explicit user decision to stop entirely, rather than start a
+seventeenth round of the same cat-and-mouse game: **this gate is not a
+runtime security boundary.** It never has defended against anything an
+attacker can reach at runtime; it is, and was always meant to be, a
+narrow CI assertion that this PR's own canonical documentation keeps
+recommending the canonical transport. Treating it as if it had to defend
+against an adversarial document — defeating every way CommonMark/GFM can
+render the same visible text — was the root cause of six iterations of
+recurring findings against a fixed, small, hand-authored input.
+
+### What changed
+
+`internal/docsguard` no longer scans every tracked Markdown file in the
+repository (previously: `README.md`, `CONTRIBUTING.md`, and every
+`docs/**/*.md`, with two files exempted by name). It now has a fixed,
+hardcoded registry of exactly the four documentation files this PR
+(`security/deprecate-legacy-api-key-transports`, #64) actually ships for
+this deprecation: `docs/API_AUTHENTICATION.md`,
+`docs/GROUP_IMPORT_LIMITS.md` (the one pre-existing table row this PR
+updated), `docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md`, and
+`docs/API_KEY_TRANSPORT_DEPRECATION.md` (the migration guide). No other
+file is read by this gate at all. Every unrelated documentation file this
+repository has ever accidentally mentioned `api_key`/`Authorization` in
+(`docs/API_KEY_VERIFIER.md`, `docs/FRONTEND_VENDOR_INVENTORY.md`,
+`docs/FRONTEND_HTTP_MIGRATION.md`) — which is what forced this package to
+defend against arbitrary rendering compositions in files it did not
+write for this PR in the first place — is simply out of scope now.
+`docs/API_KEY_TRANSPORT_DEPRECATION_SELF_REVIEW.md` (this document) was
+never in scope either way.
+
+`normalize.go`, `html.go`, `context.go`, and `credential.go` — the entire
+class of heuristic this review session's instructions named explicitly
+(rendered-Markdown/HTML normalization, HTML-block visible-text
+extraction, sentence/clause-scoped negation and deprecation-context
+proximity binding, percent-decoding-aware credential matching) — are
+deleted outright, not patched again. `internal/docsguard/docsguard.go` is
+a complete rewrite: for each of the four registered files it makes a
+small number of narrow, explicit, deterministic assertions directly
+against that file's literal source text:
+
+- a **required fact** (for example, "Bearer is presented as the
+  canonical/recommended transport", "the `api_key` query parameter is
+  marked deprecated with removal targeted for `0.13.0`", "raw
+  `Authorization` is marked deprecated with no removal version stated",
+  "leaked query-key rotation guidance is present", "historical log
+  cleanup/retention guidance is present") is satisfied if a small, bounded
+  regular expression matches *somewhere* in the document, after one
+  trivial, bounded preprocessing step (`flattenWhitespace`, which only
+  collapses whitespace runs — including an ordinary Markdown soft line
+  break — into a single space, so a sentence wrapped across two physical
+  lines is still found; it does not touch punctuation, links, entities,
+  or markup of any kind). Facts are checked independently rather than
+  bound to one sentence/clause/occurrence: this is a real, accepted
+  reduction in precision relative to iterations 11–16's attempted
+  occurrence-exact binding, deliberately traded for never again needing
+  to track "which specific mention of `api_key` is this deprecation
+  notice about" through an arbitrary rendering.
+- a **forbidden literal** (a literal `api_key=`, or an `Authorization:`
+  not immediately followed by the literal `Bearer`) is flagged wherever
+  it appears at all, for the three files that are not the migration guide
+  and therefore have no legitimate reason to show a deprecated-transport
+  example at all.
+- the migration guide's own canonical examples are checked directly,
+  bound to that guide's own pre-existing, explicit `Before (...)`/
+  `After (...)` heading convention (already used in
+  `docs/API_KEY_TRANSPORT_DEPRECATION.md` before this iteration, not
+  introduced by it): every fenced code block immediately following an
+  `After (` heading must contain the literal `Authorization: Bearer`.
+  This is the migration guide's one, file/section-scoped exemption from
+  the forbidden-literal checks above (its deliberate `Before (...)`
+  examples are expected and never inspected), paired with a positive
+  assertion that its `After (...)` examples still show the canonical
+  transport — addressing this review session's item (1) without adding
+  any balanced-link-destination parsing, quote-awareness, or multiline
+  comment state.
+
+### Item (2): the "legacy clients" false-suppression finding in context.go
+
+This review session's instructions offered a narrow fix (bind the
+deprecation-context phrase to the literal `api_key`/transport token via a
+small fixed set of explicit sentence templates) or, failing that,
+deletion in favor of the positive-assertion approach above. The sentence-
+template approach was not pursued: `context.go`'s entire proximity/
+negation/adversative-boundary/sentence-and-clause-scoping machinery is
+deleted along with the rest of the old implementation, and the four
+documents this gate now checks carry no occurrence-suppression logic of
+any kind to retest against. The "legacy clients" finding specifically
+was a failure mode of exactly the generic-document, occurrence-binding
+architecture this iteration removed; it cannot recur against a design
+that no longer tries to bind an `api_key` mention to its nearest context
+word at all.
+
+### Validation
+
+- `go build ./...`, `go vet ./...`, `gofmt -l .` (none), `golangci-lint
+  run` (0 issues), `go mod verify` (all modules verified): pass.
+- `go test ./...` and `go test -race ./...`: pass, including
+  `internal/docsguard` (rewritten fixture tests covering every required
+  fact's presence/absence, a soft-wrapped required-fact sentence, every
+  forbidden-literal case, the migration guide's `Before`/`After`
+  exemption and canonical-example check, and `CheckAll`'s fail-closed
+  behaviour when a registered canonical document is missing) and
+  `cmd/docsguard` (CLI exit-code/usage-error/secret-non-echo coverage
+  against a fully synthetic, in-memory document set — not the real
+  files — so the test suite never depends on this PR's actual prose).
+- `go run ./cmd/docsguard` (via `scripts/verify-docs-canonical-examples.sh`,
+  now a three-line wrapper with no file list or exemption flags at all):
+  0 violations across all 4 registered canonical documents, confirming
+  every one of this PR's actual documents still states every required
+  fact and shows no forbidden literal.
+- `sha256sum` of `go.mod`/`go.sum` against commit `99c9a50848e8a826360ea7585a57d7e6f753a34c`
+  (the commit immediately preceding this goal's first iteration): byte-
+  identical. No dependency was added, removed, or touched; `go.mod`/
+  `go.sum` were never part of this iteration's diff at all.
+- `gosec ./...`: 12 findings, unchanged pre-existing baseline, none in
+  any file this iteration touched.
+- `gitleaks detect --no-git`: no leaks found in the current working tree.
+- `actionlint`: clean.
+- `govulncheck` (pinned to the `go.mod` toolchain): 0 reachable
+  vulnerabilities; 3 unreachable findings in required modules, unchanged
+  pre-existing baseline.
+- `python3 scripts/test-ansible-bootstrap.py`: pass (unaffected by this
+  iteration; included for completeness).
+- `git diff --check`: clean.
+- `yarn audit`, the frontend build, the browser smoke test, and the
+  Docker compatibility test scripts were not re-run from this exact
+  sandbox: this iteration touched no frontend source, `package.json`,
+  `yarn.lock`, `Dockerfile`, or runtime Go file, so their baselines
+  (reported unchanged as of iteration 16) are unaffected by this diff.
+  `zizmor` likewise was not available in this sandbox and this iteration
+  does not touch `.github/workflows/`, so its baseline is unaffected too.
+
+### Why this is sufficient for #64
+
+The goal's acceptance criteria this gate exists to protect are narrow and
+already fully stated in plain prose by the four files above: Bearer is
+canonical, query/form are deprecated with removal in `0.13.0`, raw
+`Authorization` is deprecated with no removal version, and leaked-key
+rotation/log-cleanup guidance exists. Re-running `go run ./cmd/docsguard`
+confirms every one of those plain-text facts is still present in this
+PR's actual, merged documentation today. What this iteration gives up is
+the ability to also catch someone *disguising* a regression behind an
+exotic rendering composition in one of these four files — a risk that
+only exists because these four files are hand-authored and hand-reviewed
+by the same people who would introduce such a regression, making that
+disguise scenario not a real threat model for a CI assertion tool that
+was never a security boundary in the first place.
 - `./scripts/verify-docs-canonical-examples.sh` re-run against every
   tracked Markdown file after the iteration-8 fixes: 0 violations across
   28 shipped Markdown files, no doc wording changed.

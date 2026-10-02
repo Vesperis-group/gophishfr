@@ -1,452 +1,465 @@
-// Package docsguard finds deprecated API-key transport examples in
-// first-party Markdown documentation. It backs
-// scripts/verify-docs-canonical-examples.sh and the "docs-guard" CI job: both
-// exist so a future documentation change cannot silently reintroduce a
-// `?api_key=`/form `api_key` example, a raw (non-scheme) Authorization
-// header example, or ordinary prose recommending a deprecated transport
-// (a table row, an "or an api_key" alternative, or a sentence like "use the
-// api_key query parameter", even one wrapped across several Markdown lines)
-// as if it were a canonical, recommended transport.
+// Package docsguard asserts that a fixed, small set of first-party
+// documentation files this repository actually ships for the API-key
+// transport deprecation (`security/deprecate-legacy-api-key-transports`,
+// PR #64) still state the facts that PR requires, and that the two of
+// those files which are not migration/compatibility guides have not
+// silently regressed back toward recommending a deprecated transport. It
+// backs scripts/verify-docs-canonical-examples.sh and the "docs-guard" CI
+// job.
 //
-// # Why this package does not parse Markdown
+// # Why this package stopped trying to understand rendered Markdown
 //
-// An earlier iteration of this package parsed documents with a real
-// CommonMark/GFM AST library. A later, explicit user decision reversed
-// that: this repository's dependency policy (see CLAUDE.md) requires every
-// new dependency to be justified by need, alternative, security impact,
-// and maintenance impact, and the maintenance impact of an AST dependency
-// for one internal documentation-linting tool was judged not worth it. This
-// package is therefore, again, dependency-free: go.mod/go.sum carry no
-// Markdown parser.
+// Earlier iterations of this package tried to generally defeat every
+// Markdown/HTML composition (links, comments, quoted attributes, multiline
+// comments, emphasis, entities, code spans, fences, lists, soft wraps,
+// transport binding, context proximity) that a canonical-looking
+// documentation example could hide a deprecated transport behind.
+// Independent review repeatedly found another valid composition that
+// bypassed the previous one: that is an unbounded cat-and-mouse game
+// against the full space of CommonMark/GFM rendering, not a problem a
+// bounded, dependency-free, stdlib-only scanner can ever finish winning.
 //
-// This is a real, accepted trade-off, not a claim of completeness. This
-// package scans plain text for the literal substrings that would make an
-// example authenticate against the real credential extractor in
-// middleware.extractExplicitAPICredential (see the "Credential-syntax
-// contract" section below), plus a small number of bounded, explicitly
-// documented, deterministic approximations of specific CommonMark rendering
-// rules that past reviews found a canonical-looking example could hide
-// behind: a backslash escape or HTML character reference (see
-// normalizeRenderedEscapes), a safe inline HTML tag or narrow emphasis
-// delimiter wrapping exactly one protected character (same), a fenced or
-// indented code block (which renders every one of those completely
-// literally, and so is deliberately never normalized -- see ScanText), and
-// a raw HTML block (see html.go, which documents its own, separate, bounded
-// approximation of CommonMark's HTML-block grammar). Each approximation is
-// narrow and documented at its own definition; none of them is a general
-// Markdown or HTML parser, and this package does not attempt to handle
-// every construct CommonMark/GFM defines -- only the ones a real
-// documentation page in this repository has actually used, or a real
-// review has actually found exploitable. The canonical-documentation gate
-// this package enforces (see scripts/verify-docs-canonical-examples.sh)
-// remains enforceable specifically because its scope is this narrow: it
-// only has to correctly read this repository's own first-party Markdown,
-// not render arbitrary Markdown from the wild.
+// An explicit user decision (iteration 17 of this goal) stopped that
+// approach entirely: this package is **not** a runtime security boundary,
+// and the documents it checks are not adversarial input -- they are four
+// specific files this same PR authors, reviews, and merges by hand. Given
+// that, this package no longer tries to understand what an arbitrary
+// Markdown/HTML composition would *render as*. It instead makes a small
+// number of narrow, explicit, deterministic assertions directly against
+// each named file's literal source text:
 //
-// # Credential-syntax contract
+//   - a required fact is satisfied if a small, explicit, bounded regular
+//     expression matches *somewhere* in the document (see requiredFact).
+//     Facts are checked independently rather than bound to one sentence or
+//     clause: this package does not track which specific occurrence of
+//     "api_key" or "Authorization" a given deprecation notice is "about".
+//     That is a real, accepted reduction in precision, not an oversight --
+//     see the package-level doc comment in the parent goal's review
+//     evidence for the full rationale.
+//   - a forbidden literal is flagged wherever it appears at all (see
+//     forbiddenLiteral), for the two files that are not migration guides
+//     and therefore have no legitimate reason to show a deprecated
+//     transport example at all.
+//   - the migration guide's own canonical ("After (...)") examples are
+//     checked directly, bound to that guide's own pre-existing, explicit
+//     "Before (...)"/"After (...)" heading convention (see
+//     checkCanonicalExamples) -- not inferred from generic surrounding
+//     prose.
 //
-// The query/form parameter name and the Authorization scheme are matched
-// against the same literal contract the real credential extractor in
-// middleware.extractExplicitAPICredential uses: the parameter name is
-// exactly "api_key" (percent-decoded, since Go's URL/form parsing
-// percent-decodes parameter names before comparing them), and the
-// Authorization header's value is matched against the runtime's exact
-// prefix, `strings.TrimPrefix(authorization, "Bearer ")` -- the literal
-// word "Bearer", one literal space, and nothing else; anything else (wrong
-// casing, a tab or two spaces instead of that one space, or no credential
-// token following it at all) never actually extracts a working canonical
-// credential, so it is flagged as raw/legacy too (see
-// rawAuthorizationMatches).
+// None of this is a Markdown or HTML parser, a link-destination parser, an
+// entity decoder, or an emphasis-delimiter matcher: every check here is a
+// plain regular expression or literal substring search over the document's
+// raw bytes, after at most one trivial, bounded preprocessing step
+// (flattenWhitespace, which only collapses runs of whitespace -- including
+// a Markdown soft line break -- into a single space, the same way a
+// browser's own whitespace collapsing does for ordinary flowed text; it
+// does not touch punctuation, links, entities, or markup of any kind).
 //
-// # Diagnostics
+// # The canonical documents this PR ships
 //
-// Every reported Violation carries only a file-relative line range and a
-// Kind; it never carries the matched text, so a forbidden example that
-// happens to contain a real secret is never echoed by a caller that prints
-// violations (see Kind.Explanation, which returns a fixed, generic
-// description instead). If the scanner itself fails -- most importantly
-// bufio.ErrTooLong on a line that exceeds its internal buffer -- ScanText
-// returns a non-nil error, and callers must fail closed rather than trust
-// the returned violations as "no violations found".
+// See canonicalDocs for the authoritative, maintained list. As of this
+// writing: docs/API_AUTHENTICATION.md (the primary contract description),
+// docs/GROUP_IMPORT_LIMITS.md (one pre-existing table row this PR updated
+// to describe the same contract), docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md
+// (the draft release-note artifact), and docs/API_KEY_TRANSPORT_DEPRECATION.md
+// (the migration guide, whose deliberate "Before" examples are the one
+// explicit, file/section-scoped exemption from the forbidden-literal
+// checks). docs/API_KEY_TRANSPORT_DEPRECATION_SELF_REVIEW.md -- which
+// necessarily quotes and discusses these same deprecated-transport examples
+// and this package's own prior/current detection rules while recording
+// review history -- is not part of this list at all: it is an internal
+// review record, not first-party guidance aimed at an external API client.
+//
+// No other tracked Markdown file is scanned. Earlier iterations scanned
+// every tracked Markdown file in the repository, which is what forced this
+// package to defend against arbitrary rendering compositions in files it
+// does not own and did not write for this PR. Narrowing the scan to just
+// the files this PR actually ships removes that need entirely.
 package docsguard
 
 import (
-	"bufio"
 	"fmt"
+	"os"
+	"path/filepath"
 	"regexp"
 	"strings"
 )
 
-// Kind identifies which deprecated transport a Violation demonstrates.
-type Kind string
-
-const (
-	// KindParameterCredential covers every `api_key=` syntax: a query
-	// parameter (`?api_key=`/`&api_key=`), a form body (`curl -d`/`--data`/
-	// `--data-raw`/`--data-urlencode`), and a multipart form field
-	// (`curl -F`/`--form`). The real extractor reads the exact key
-	// "api_key" from both the URL query and application/x-www-form-urlencoded
-	// POST bodies -- after percent-decoding, exactly like Go's net/url and
-	// net/http do -- so a literal `api_key=` and a percent-encoded
-	// equivalent such as `api%5Fkey=` are both working examples of one of
-	// those two deprecated transports.
-	KindParameterCredential Kind = "parameter_credential" // #nosec G101 -- a label string, not a credential value.
-
-	// KindRawAuthorization covers an `Authorization` header (any
-	// letter-casing, since HTTP header names are case-insensitive) whose
-	// value does not have the runtime's exact, case-sensitive "Bearer "
-	// prefix followed by a non-empty credential token. See the package
-	// doc comment's "Credential-syntax contract" section.
-	KindRawAuthorization Kind = "raw_authorization"
-
-	// KindUndeprecatedParameterMention covers a Markdown table row, a
-	// "presented as an alternative" sentence, or ordinary recommendation
-	// prose (e.g. "use the api_key query parameter", "authenticate via
-	// api_key") -- including one wrapped across several physical lines --
-	// that presents `api_key` as an ordinary, currently supported
-	// authentication option with no *affirmative* deprecation context that
-	// (a) is in the same sentence/clause, (b) is not separated from it by
-	// an adversative connector, (c) is close enough to an actual `api_key`
-	// mention to describe that transport specifically, (d) describes the
-	// same specific transport (query/form/raw) rather than a different
-	// one, and (e) if the only context is the bare removal version
-	// number, is accompanied by an explicit deprecation/removal
-	// construction word rather than standing alone. A negated context
-	// ("not deprecated", "no longer legacy") where the negation directly
-	// governs it does not suppress this: it means the surrounding text is
-	// actively asserting the opposite of the real contract, which is
-	// itself the violation. A negation that instead governs the
-	// recommendation verb -- "do NOT use the api_key parameter; it is
-	// deprecated" -- is a legitimate warning and does not violate. Unlike
-	// KindParameterCredential, this has no `=` sign and would never
-	// authenticate anything -- it is a documentation-accuracy check, not
-	// a credential-syntax check.
-	KindUndeprecatedParameterMention Kind = "undeprecated_parameter_mention"
-)
-
-// Explanation returns a fixed, non-sensitive description of what this kind
-// of violation means. It deliberately never includes any text from the
-// document being scanned: callers must report only a Violation's file, line
-// range, Kind, and this Explanation -- never source text, so a forbidden
-// example that happens to contain a real secret is never echoed into a CI
-// log.
-func (k Kind) Explanation() string {
-	switch k {
-	case KindParameterCredential:
-		return "a query or form parameter here decodes to exactly \"api_key\", the deprecated credential parameter name"
-	case KindRawAuthorization:
-		return "the Authorization header value here is not the runtime's exact canonical \"Bearer \" + token form (or another recognized scheme), so it is a raw/legacy credential"
-	case KindUndeprecatedParameterMention:
-		return "this text presents the deprecated api_key parameter as an ordinary, currently supported option without clear affirmative deprecation context"
-	default:
-		return "a deprecated API-key transport example"
-	}
-}
-
-// Violation is one deprecated-transport example found in a document. It
-// carries only its location and Kind -- never the matched text -- so a
-// caller can safely print every field of a Violation (see Kind.Explanation)
-// without risk of echoing a real secret a forbidden example happened to
-// contain.
+// Violation is one failed deterministic assertion against one canonical
+// document. Line is 1-indexed and set only for a line-attributable finding
+// (a forbidden literal, or a canonical-example check); it is 0 for a
+// document-wide required fact, which is not about any one line. Violation
+// never carries the matched source text, only File, Line, and a fixed
+// Message, so a forbidden example that happens to contain a real secret is
+// never echoed into a CI log.
 type Violation struct {
-	// StartLine and EndLine are the 1-indexed, inclusive line range the
-	// violation was found in. For a single-line violation (parameter
-	// credential, raw Authorization, a table row) they are equal; a
-	// recommendation-prose or soft-wrapped-header violation spanning
-	// several physical lines reports that span's full line range.
-	StartLine int
-	EndLine   int
-	Kind      Kind
+	File    string
+	Line    int
+	Message string
 }
 
-// tableRowPattern matches a Markdown table row: a line whose first
-// non-whitespace character is a pipe.
-var tableRowPattern = regexp.MustCompile(`^\s*\|`)
+// requiredFact is one named, document-wide fact a canonical document must
+// state somewhere in its text. All of Patterns must match (in any order,
+// anywhere in the document) for the fact to be considered satisfied; see
+// the package doc comment for why presence-anywhere, rather than binding
+// patterns to the same sentence/clause, is the deliberate scope here.
+type requiredFact struct {
+	name     string
+	patterns []*regexp.Regexp
+}
 
-// lineKind classifies one physical source line for ScanText's scanning
-// loop.
-type lineKind int
+func (f requiredFact) satisfiedBy(flattened string) bool {
+	for _, p := range f.patterns {
+		if !p.MatchString(flattened) {
+			return false
+		}
+	}
+	return true
+}
 
-const (
-	// kindPlain is an ordinary Markdown prose line: escape/entity/
-	// markup-normalized before any check runs (see
-	// normalizeRenderedEscapes).
-	kindPlain lineKind = iota
-	// kindCode is a fenced or indented code-block line: scanned
-	// completely literally, never joined with neighbors, and never
-	// checked for a recommendation mention (code is an example, not
-	// prose).
-	kindCode
-	// kindHTML is a line inside a raw HTML block: its checkText is that
-	// line's extracted *visible* text (see flattenHTMLBlockVisibleText),
-	// already entity-decoded but never backslash-escape-decoded.
-	// verbatim additionally marks a line that fell inside a <pre>/<code>
-	// element, which (like kindCode) is never joined with neighbors.
-	kindHTML
+// The required facts shared across the canonical documents below. Each is
+// a small, explicit, bounded regular expression -- never a link, entity,
+// HTML, or emphasis construct -- matched against flattenWhitespace(content).
+var (
+	factBearerCanonical = requiredFact{
+		name: "Authorization: Bearer must be presented as the canonical/recommended transport",
+		patterns: []*regexp.Regexp{
+			regexp.MustCompile(`Authorization:\s*Bearer\b`),
+			regexp.MustCompile(`(?i)\b(?:canonical|recommended)\b`),
+		},
+	}
+	factQueryDeprecated0130 = requiredFact{
+		name: "the api_key query parameter must be marked deprecated with removal targeted for 0.13.0",
+		patterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)query.{0,30}api_key.{0,20}parameter|api_key.{0,20}query.{0,10}parameter`),
+			regexp.MustCompile(`(?i)deprecat\w*`),
+			regexp.MustCompile(`0\.13\.0`),
+		},
+	}
+	factFormDeprecated0130 = requiredFact{
+		name: "the api_key form parameter must be marked deprecated with removal targeted for 0.13.0",
+		patterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)form.{0,30}api_key.{0,20}parameter|api_key.{0,20}form.{0,10}parameter`),
+			regexp.MustCompile(`(?i)deprecat\w*`),
+			regexp.MustCompile(`0\.13\.0`),
+		},
+	}
+	factRawDeprecatedNoRemovalVersion = requiredFact{
+		name: "raw Authorization (no Bearer prefix) must be marked deprecated legacy with no removal version stated",
+		patterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)raw.{0,30}Authorization`),
+			regexp.MustCompile(`(?i)deprecat\w*`),
+			regexp.MustCompile(`(?i)no.{0,30}removal version`),
+		},
+	}
+	factRotationGuidance = requiredFact{
+		name: "leaked query-key rotation guidance must be present",
+		patterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)rotat\w*`),
+			regexp.MustCompile(`(?i)query`),
+		},
+	}
+	factLogCleanupGuidance = requiredFact{
+		name: "historical log cleanup/retention guidance must be present",
+		patterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)log`),
+			regexp.MustCompile(`(?i)retent\w*|remov\w*.{0,20}log|review.{0,20}log`),
+		},
+	}
 )
 
-// scannedLine is one physical source line after ScanText's first pass:
-// classified, and with its checkText already normalized appropriately for
-// its kind.
-type scannedLine struct {
-	lineNo    int
-	checkText string
-	kind      lineKind
-	verbatim  bool
+// authorizationHeaderPattern finds every literal "Authorization:" header
+// name in a canonical document's raw text (case-sensitive: every one of
+// this PR's own canonical documents always spells it this way). It is used
+// only to locate where forbidNonBearerAuthorization must check what
+// immediately follows, never to decide whether some rendered composition
+// would also produce this text -- this package no longer tries to answer
+// that question at all (see the package doc comment).
+var authorizationHeaderPattern = regexp.MustCompile(`Authorization:`)
+
+// parameterCredentialLiteralPattern matches the literal, working
+// query/form credential syntax: "api_key=". It is intentionally only this
+// one literal substring (not a percent-decoding-aware matcher, as an
+// earlier iteration had): the two documents this is checked against today
+// contain no credential syntax of any kind, so this exists only to catch a
+// future regression reintroducing one, and a literal, undisguised
+// "api_key=" is exactly what a hand-authored regression would look like.
+var parameterCredentialLiteralPattern = regexp.MustCompile(`api_key=`)
+
+// canonicalExampleHeadingPattern matches this repository's own,
+// pre-existing "After (...)" heading convention in the migration guide
+// (docs/API_KEY_TRANSPORT_DEPRECATION.md): a line beginning with the
+// literal text "After (" introduces that guide's canonical, migrated
+// example, as opposed to a "Before (...)" line, which introduces the
+// deprecated example it replaces. This is the explicit, file-owned
+// section-marker convention checkCanonicalExamples binds to, rather than
+// inferring "this is a canonical example" from surrounding prose.
+var canonicalExampleHeadingPattern = regexp.MustCompile(`^After \(`)
+
+// fenceLinePattern matches a fenced code block delimiter line: this
+// package only needs to find the next complete ``` ... ``` block after a
+// canonicalExampleHeadingPattern match, never to parse an info string or
+// nested fences, so a plain three-backtick line match is sufficient.
+var fenceLinePattern = regexp.MustCompile("^```")
+
+// canonicalDoc describes one of the four documentation files this PR
+// ships and the deterministic checks that apply to it.
+type canonicalDoc struct {
+	// path is repository-root-relative.
+	path string
+	// requiredFacts must each be satisfied somewhere in the document.
+	requiredFacts []requiredFact
+	// forbidNonBearerAuthorization, if true, flags every
+	// "Authorization:" occurrence not immediately followed by the literal
+	// "Bearer": this document is not a migration guide, so it has no
+	// legitimate reason to show any other Authorization value.
+	forbidNonBearerAuthorization bool
+	// forbidParameterCredentialLiteral, if true, flags every literal
+	// "api_key=" occurrence, for the same reason.
+	forbidParameterCredentialLiteral bool
+	// checkCanonicalExamples, if true, additionally requires that every
+	// fenced code block following an "After (" heading (see
+	// canonicalExampleHeadingPattern) contains the literal
+	// "Authorization: Bearer". This is the migration guide's own
+	// exemption from the two forbid* checks above (its "Before (...)"
+	// examples are expected, explicit, and exempt by definition), paired
+	// with a positive assertion that its "After (...)" examples still
+	// show the canonical transport.
+	checkCanonicalExamples bool
 }
 
-// ScanText scans arbitrary text (typically one Markdown file's contents) and
-// returns every deprecated-transport example it finds. It returns a non-nil
-// error if the scanner itself failed -- most importantly bufio.ErrTooLong on
-// a line that exceeds the internal buffer -- in which case the returned
-// violations are necessarily incomplete and callers must fail closed rather
-// than trust them as "no violations found".
-func ScanText(text string) ([]Violation, error) {
+// canonicalDocs is the authoritative, maintained list of documentation
+// files this PR (security/deprecate-legacy-api-key-transports, #64) ships
+// for the API-key transport deprecation, and the deterministic facts each
+// one must state. See the package doc comment's "The canonical documents
+// this PR ships" section for why exactly these four, and no others.
+var canonicalDocs = []canonicalDoc{
+	{
+		path: "docs/API_AUTHENTICATION.md",
+		requiredFacts: []requiredFact{
+			factBearerCanonical,
+			factQueryDeprecated0130,
+			factFormDeprecated0130,
+			factRawDeprecatedNoRemovalVersion,
+		},
+		forbidNonBearerAuthorization:     true,
+		forbidParameterCredentialLiteral: true,
+	},
+	{
+		path: "docs/GROUP_IMPORT_LIMITS.md",
+		requiredFacts: []requiredFact{
+			factBearerCanonical,
+			factQueryDeprecated0130,
+		},
+		forbidNonBearerAuthorization:     true,
+		forbidParameterCredentialLiteral: true,
+	},
+	{
+		path: "docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md",
+		requiredFacts: []requiredFact{
+			factBearerCanonical,
+			factQueryDeprecated0130,
+			factFormDeprecated0130,
+			factRawDeprecatedNoRemovalVersion,
+			factRotationGuidance,
+			factLogCleanupGuidance,
+		},
+		forbidNonBearerAuthorization:     true,
+		forbidParameterCredentialLiteral: true,
+	},
+	{
+		path: "docs/API_KEY_TRANSPORT_DEPRECATION.md",
+		requiredFacts: []requiredFact{
+			factBearerCanonical,
+			factQueryDeprecated0130,
+			factFormDeprecated0130,
+			factRawDeprecatedNoRemovalVersion,
+			factRotationGuidance,
+			factLogCleanupGuidance,
+		},
+		// The migration guide: deliberate "Before (...)" examples are
+		// expected, so the generic forbidden-literal checks do not apply
+		// (see checkCanonicalExamples instead).
+		checkCanonicalExamples: true,
+	},
+}
+
+// flattenWhitespace collapses every run of whitespace (including a
+// Markdown soft line break) into a single space, so a required fact whose
+// matching text happens to be wrapped across two physical source lines is
+// still found. This is the one, bounded, documented preprocessing step
+// this package applies before checking a requiredFact; it does not
+// decode, strip, or otherwise interpret any Markdown/HTML construct.
+func flattenWhitespace(s string) string {
+	return strings.Join(strings.Fields(s), " ")
+}
+
+// lineAt returns the 1-indexed line number containing byte offset in s.
+func lineAt(s string, offset int) int {
+	if offset < 0 {
+		offset = 0
+	}
+	if offset > len(s) {
+		offset = len(s)
+	}
+	return strings.Count(s[:offset], "\n") + 1
+}
+
+// checkRequiredFacts returns one Violation per requiredFact in doc that is
+// not satisfied somewhere in content.
+func checkRequiredFacts(doc canonicalDoc, content string) []Violation {
 	var violations []Violation
-	var scannedLines []scannedLine
-
-	scanner := bufio.NewScanner(strings.NewReader(text))
-	scanner.Buffer(make([]byte, 0, 64*1024), 1024*1024)
-
-	var inFence bool
-	var fenceChar byte
-	var fenceLen int
-
-	var inHTML bool
-	var htmlKind string
-	var htmlBlockLines []string
-	var htmlBlockStartLine int
-
-	flushHTMLBlock := func() {
-		if len(htmlBlockLines) == 0 {
-			return
-		}
-		// A single physical line can produce more than one segment when
-		// it mixes verbatim and non-verbatim content ("<code>x</code> Use
-		// the api_key query parameter..."); each becomes its own
-		// scannedLine sharing that line's lineNo, so the surrounding
-		// prose is still scanned/joinable independently of the code
-		// segment (see htmlVisibleSegment).
-		for _, seg := range flattenHTMLBlockVisibleText(htmlBlockLines, htmlBlockStartLine) {
-			scannedLines = append(scannedLines, scannedLine{
-				lineNo:    seg.lineNo,
-				checkText: seg.text,
-				kind:      kindHTML,
-				verbatim:  seg.verbatim,
-			})
-		}
-		htmlBlockLines = nil
-	}
-
-	lineNo := 0
-	for scanner.Scan() {
-		lineNo++
-		raw := scanner.Text()
-
-		if inHTML {
-			htmlBlockLines = append(htmlBlockLines, raw)
-			if htmlBlockCloses(raw, htmlKind) {
-				inHTML = false
-				flushHTMLBlock()
-			}
-			continue
-		}
-
-		if inFence {
-			if ch, length, ok := matchCodeFence(raw); ok && ch == fenceChar && length >= fenceLen {
-				inFence = false
-			}
-			scannedLines = append(scannedLines, scannedLine{lineNo: lineNo, checkText: raw, kind: kindCode})
-			continue
-		}
-
-		if ch, length, ok := matchCodeFence(raw); ok {
-			fenceChar, fenceLen = ch, length
-			inFence = true
-			scannedLines = append(scannedLines, scannedLine{lineNo: lineNo, checkText: raw, kind: kindCode})
-			continue
-		}
-		if indentedCodeLinePattern.MatchString(raw) {
-			scannedLines = append(scannedLines, scannedLine{lineNo: lineNo, checkText: raw, kind: kindCode})
-			continue
-		}
-		if kind, closedSameLine, ok := detectHTMLBlockOpen(raw); ok {
-			htmlKind = kind
-			htmlBlockStartLine = lineNo
-			htmlBlockLines = []string{raw}
-			if closedSameLine {
-				flushHTMLBlock()
-			} else {
-				inHTML = true
-			}
-			continue
-		}
-
-		scannedLines = append(scannedLines, scannedLine{lineNo: lineNo, checkText: normalizeRenderedEscapes(raw), kind: kindPlain})
-	}
-	if err := scanner.Err(); err != nil {
-		return violations, fmt.Errorf("scanning line %d: %w", lineNo+1, err)
-	}
-	if inHTML {
-		// The file ended while still inside an open HTML block that never
-		// reached its specific closing marker (or, for the "generic"
-		// kind, a blank line): CommonMark itself still treats this as one
-		// HTML block running to the end of the document, so flush what
-		// was collected rather than silently dropping it.
-		flushHTMLBlock()
-	}
-
-	// Parameter-credential and table-row checks always run per physical
-	// line, for every kind: a credential or a Markdown table row is
-	// always meant to be read on its own line regardless of surrounding
-	// context, and neither is ever split across an ordinary soft line
-	// break the way an Authorization header's value can be (see below).
-	for _, sl := range scannedLines {
-		if hasParameterCredential(sl.checkText) {
-			violations = append(violations, Violation{StartLine: sl.lineNo, EndLine: sl.lineNo, Kind: KindParameterCredential})
-		}
-		if tableRowMention(sl.checkText) {
-			violations = append(violations, Violation{StartLine: sl.lineNo, EndLine: sl.lineNo, Kind: KindUndeprecatedParameterMention})
-		}
-	}
-
-	// A fenced/indented code-block line, or an HTML line that fell inside
-	// a <pre>/<code> element, is never joined with its neighbors (see
-	// joinableTextRuns): neither ever collapses whitespace when actually
-	// rendered, so each such line still needs its own, independent raw-
-	// Authorization check.
-	for _, sl := range scannedLines {
-		if (sl.kind == kindCode || sl.verbatim) && rawAuthorization(sl.checkText) {
-			violations = append(violations, Violation{StartLine: sl.lineNo, EndLine: sl.lineNo, Kind: KindRawAuthorization})
-		}
-	}
-
-	// Raw-Authorization and recommendation-prose checks otherwise run
-	// over *joined* text runs -- consecutive ordinary prose lines, or
-	// consecutive non-verbatim lines of one HTML block -- instead of one
-	// physical line at a time, so an ordinary soft line break between a
-	// header name and its value, or a recommendation sentence wrapped
-	// across several lines, is still caught. This is the only place
-	// either check runs over more than one physical line, so a
-	// single-line header or a one-line paragraph is still reported
-	// exactly once, and two unrelated runs are never joined together.
-	for _, run := range joinableTextRuns(scannedLines) {
-		for _, m := range rawAuthorizationMatches(run.text) {
+	flattened := flattenWhitespace(content)
+	for _, fact := range doc.requiredFacts {
+		if !fact.satisfiedBy(flattened) {
 			violations = append(violations, Violation{
-				StartLine: run.lineAt(m[0]),
-				EndLine:   run.lineAt(m[1] - 1),
-				Kind:      KindRawAuthorization,
+				File:    doc.path,
+				Message: "missing required fact: " + fact.name,
 			})
 		}
-		if recommendationMention(run.text) {
-			violations = append(violations, Violation{StartLine: run.startLine, EndLine: run.endLine, Kind: KindUndeprecatedParameterMention})
-		}
 	}
-
-	return dedupeViolations(violations), nil
+	return violations
 }
 
-// dedupeViolations removes exact (StartLine, EndLine, Kind) duplicates,
-// which can occur when a single-line run independently matches more than
-// one documentation-accuracy check.
-func dedupeViolations(violations []Violation) []Violation {
-	seen := make(map[Violation]bool, len(violations))
-	deduped := violations[:0]
-	for _, v := range violations {
-		if seen[v] {
+// checkForbiddenAuthorization flags every literal "Authorization:" in
+// content not immediately (after optional whitespace/quote/backtick
+// wrapper characters) followed by the literal "Bearer".
+func checkForbiddenAuthorization(doc canonicalDoc, content string) []Violation {
+	if !doc.forbidNonBearerAuthorization {
+		return nil
+	}
+	var violations []Violation
+	for _, loc := range authorizationHeaderPattern.FindAllStringIndex(content, -1) {
+		rest := content[loc[1]:]
+		trimmed := strings.TrimLeft(rest, " \t")
+		if strings.HasPrefix(trimmed, "Bearer") {
 			continue
 		}
-		seen[v] = true
-		deduped = append(deduped, v)
-	}
-	return deduped
-}
-
-// textRun is one group of consecutive, joinable scannedLines (see
-// joinableTextRuns), combined into a single whitespace-joined string for
-// the raw-Authorization and recommendation-prose checks, together with a
-// way to map a byte offset in that combined string back to the physical
-// source line it came from.
-type textRun struct {
-	startLine int
-	endLine   int
-	text      string
-	lineAt    func(offset int) int
-}
-
-// joinableTextRuns groups scannedLines into textRuns: consecutive lines
-// that are either ordinary prose (kindPlain) or a raw HTML block's visible,
-// non-verbatim text (kindHTML, verbatim=false), each non-blank after
-// normalization, joined by a single space -- mirroring the single space an
-// ordinary Markdown soft line break, or a browser's own whitespace
-// collapsing of ordinary (non-<pre>/<code>) HTML text, both render as. A
-// run ends at a blank line, a kind change, a code line, or a verbatim HTML
-// line, so two unrelated runs (different paragraphs, different HTML
-// blocks, or prose on either side of a code block) are never joined
-// together.
-func joinableTextRuns(lines []scannedLine) []textRun {
-	var runs []textRun
-	var group []scannedLine
-
-	flush := func() {
-		if len(group) == 0 {
-			return
-		}
-		var sb strings.Builder
-		var lineAtByte []int
-		for i, sl := range group {
-			if i > 0 {
-				lineAtByte = append(lineAtByte, group[i-1].lineNo)
-				sb.WriteByte(' ')
-			}
-			for range len(sl.checkText) {
-				lineAtByte = append(lineAtByte, sl.lineNo)
-			}
-			sb.WriteString(sl.checkText)
-		}
-		first, last := group[0].lineNo, group[len(group)-1].lineNo
-		runs = append(runs, textRun{
-			startLine: first,
-			endLine:   last,
-			text:      sb.String(),
-			lineAt: func(offset int) int {
-				if len(lineAtByte) == 0 {
-					return first
-				}
-				return lineAtByte[clampIndex(offset, len(lineAtByte)-1)]
-			},
+		violations = append(violations, Violation{
+			File:    doc.path,
+			Line:    lineAt(content, loc[0]),
+			Message: "Authorization: here is not immediately followed by the literal \"Bearer\"; this document is not the migration guide and must not show any other Authorization value",
 		})
-		group = nil
 	}
-
-	for _, sl := range lines {
-		joinable := (sl.kind == kindPlain || (sl.kind == kindHTML && !sl.verbatim)) && strings.TrimSpace(sl.checkText) != ""
-		sameKind := len(group) == 0 || group[len(group)-1].kind == sl.kind
-		if !joinable || !sameKind {
-			flush()
-		}
-		if joinable {
-			group = append(group, sl)
-		}
-	}
-	flush()
-	return runs
+	return violations
 }
 
-// tableRowMention reports whether a single physical line is a Markdown
-// table row presenting `api_key` with no affirmative deprecation context.
-// Table rows stay a per-line check (unlike recommendationMention) because a
-// Markdown table row is always exactly one physical line by construction.
-// recommendationPos is set to len(line): the row itself is the thing being
-// judged, not a verb at a particular position, so any affirmative context
-// anywhere in the row counts (subject to the usual negation, adversative-
-// boundary, proximity, bare-version, and transport-matching rules).
-func tableRowMention(line string) bool {
-	if !strings.Contains(strings.ToLower(line), "api_key") {
-		return false
+// checkForbiddenParameterCredential flags every literal "api_key=" in
+// content.
+func checkForbiddenParameterCredential(doc canonicalDoc, content string) []Violation {
+	if !doc.forbidParameterCredentialLiteral {
+		return nil
 	}
-	if !tableRowPattern.MatchString(line) {
-		return false
+	var violations []Violation
+	for _, loc := range parameterCredentialLiteralPattern.FindAllStringIndex(content, -1) {
+		violations = append(violations, Violation{
+			File:    doc.path,
+			Line:    lineAt(content, loc[0]),
+			Message: "literal \"api_key=\" here is a working deprecated-transport example; this document is not the migration guide and must not show one",
+		})
 	}
-	return !hasAffirmativeDeprecationContext(line, len(line))
+	return violations
+}
+
+// checkCanonicalExamples requires that every fenced code block following
+// this file's own "After (" heading convention (see
+// canonicalExampleHeadingPattern) contains the literal
+// "Authorization: Bearer". It intentionally does not inspect any "Before
+// (...)" block at all: those are the migration guide's expected, explicit,
+// deprecated examples.
+func checkCanonicalExamples(doc canonicalDoc, content string) []Violation {
+	if !doc.checkCanonicalExamples {
+		return nil
+	}
+	var violations []Violation
+	lines := strings.Split(content, "\n")
+	for i := 0; i < len(lines); i++ {
+		if !canonicalExampleHeadingPattern.MatchString(lines[i]) {
+			continue
+		}
+		headingLine := i + 1
+
+		// Find the next fenced code block (open then close), within the
+		// rest of the document.
+		openAt := -1
+		for j := i + 1; j < len(lines); j++ {
+			if fenceLinePattern.MatchString(lines[j]) {
+				openAt = j
+				break
+			}
+		}
+		if openAt == -1 {
+			violations = append(violations, Violation{
+				File:    doc.path,
+				Line:    headingLine,
+				Message: "an \"After (\" canonical-example heading here is not followed by any fenced code block",
+			})
+			continue
+		}
+		closeAt := -1
+		for j := openAt + 1; j < len(lines); j++ {
+			if fenceLinePattern.MatchString(lines[j]) {
+				closeAt = j
+				break
+			}
+		}
+		if closeAt == -1 {
+			violations = append(violations, Violation{
+				File:    doc.path,
+				Line:    headingLine,
+				Message: "an \"After (\" canonical-example heading here is followed by an unterminated fenced code block",
+			})
+			continue
+		}
+		block := strings.Join(lines[openAt+1:closeAt], "\n")
+		if !strings.Contains(block, "Authorization: Bearer") {
+			violations = append(violations, Violation{
+				File:    doc.path,
+				Line:    headingLine,
+				Message: "the canonical example fenced code block here does not contain the literal \"Authorization: Bearer\"",
+			})
+		}
+	}
+	return violations
+}
+
+// CheckFile runs every check canonicalDocs registers for path against
+// content, returning every Violation found. It returns nil, nil if path is
+// not a registered canonical document (CheckAll is the usual entry point;
+// this is exported separately so a caller -- most importantly this
+// package's own tests -- can check one in-memory fixture directly).
+func CheckFile(path, content string) []Violation {
+	for _, doc := range canonicalDocs {
+		if doc.path != path {
+			continue
+		}
+		var violations []Violation
+		violations = append(violations, checkRequiredFacts(doc, content)...)
+		violations = append(violations, checkForbiddenAuthorization(doc, content)...)
+		violations = append(violations, checkForbiddenParameterCredential(doc, content)...)
+		violations = append(violations, checkCanonicalExamples(doc, content)...)
+		return violations
+	}
+	return nil
+}
+
+// CheckAll reads every file in canonicalDocs from root and returns every
+// Violation found across all of them, plus the number of files
+// successfully scanned. It returns a non-nil error, and callers must fail
+// closed, if any registered canonical document cannot be read at all (most
+// importantly: it was renamed or deleted) -- a missing canonical document
+// is itself the kind of regression this gate exists to catch.
+func CheckAll(root string) ([]Violation, int, error) {
+	var violations []Violation
+	scanned := 0
+	for _, doc := range canonicalDocs {
+		full := filepath.Join(root, doc.path)
+		contents, err := os.ReadFile(full) // #nosec G304 -- path is this package's own fixed, hardcoded registry (canonicalDocs), never external input.
+		if err != nil {
+			return violations, scanned, fmt.Errorf("reading canonical document %s: %w", doc.path, err)
+		}
+		scanned++
+		violations = append(violations, CheckFile(doc.path, string(contents))...)
+	}
+	return violations, scanned, nil
 }

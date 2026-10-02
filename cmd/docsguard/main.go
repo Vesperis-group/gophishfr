@@ -1,14 +1,14 @@
-// Command docsguard fails if a tracked Markdown file shows a deprecated
-// API-key transport example outside an explicit, narrow exemption list. It
-// backs scripts/verify-docs-canonical-examples.sh (local verify.sh gate) and
-// the "docs-guard" CI job, so canonical documentation cannot silently drift
-// back toward recommending a query/form api_key parameter or a raw
-// Authorization header. Its diagnostics never print the matched document
-// text: only the file, line range, violation kind, and a fixed, generic
-// explanation (see internal/docsguard.Kind.Explanation), so a forbidden
-// example that happens to contain a real secret is never echoed into a CI
-// log. See internal/docsguard for the detection rules and their fixture
-// tests.
+// Command docsguard fails if one of this PR's fixed set of canonical
+// API-key transport documentation files is missing a required fact, shows
+// a forbidden literal deprecated-transport example, or shows a canonical
+// example that does not use ****** It backs
+// scripts/verify-docs-canonical-examples.sh (the local verify.sh gate) and
+// the "docs-guard" CI job. Its diagnostics never print matched document
+// text: only the file, an optional line, and a fixed Violation.Message, so
+// a forbidden example that happens to contain a real secret is never
+// echoed into a CI log. See internal/docsguard for the fixed list of
+// documents and their checks, and its package doc comment for why this is
+// a narrow, explicit assertion tool rather than a Markdown/HTML parser.
 package main
 
 import (
@@ -27,70 +27,34 @@ func main() {
 func run(args []string, stdout, stderr io.Writer) int {
 	fs := flag.NewFlagSet("docsguard", flag.ContinueOnError)
 	fs.SetOutput(stderr)
-	var exempt stringSliceFlag
-	fs.Var(&exempt, "exempt", "path to exempt from scanning (repeatable)")
+	root := fs.String("root", ".", "repository root the canonical documents are read relative to")
 	if err := fs.Parse(args); err != nil {
 		return 2
 	}
-
-	exemptSet := make(map[string]bool, len(exempt))
-	for _, path := range exempt {
-		exemptSet[path] = true
-	}
-
-	files := fs.Args()
-	if len(files) == 0 {
-		_, _ = fmt.Fprintln(stderr, "docsguard: no files given")
+	if extra := fs.Args(); len(extra) != 0 {
+		_, _ = fmt.Fprintf(stderr, "docsguard: unexpected argument(s) %v: this command checks a fixed, internal list of canonical documents and takes no file arguments\n", extra)
 		return 2
 	}
 
-	totalViolations := 0
-	scanned := 0
-	for _, path := range files {
-		if exemptSet[path] {
-			continue
-		}
-		contents, err := os.ReadFile(path) // #nosec G304 -- path comes from this CLI's own argv/-exempt flags (git-tracked repo files chosen by the invoking script), not untrusted network input.
-		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "docsguard: reading %s: %v\n", path, err)
-			return 2
-		}
-		scanned++
-		violations, err := docsguard.ScanText(string(contents))
-		if err != nil {
-			_, _ = fmt.Fprintf(stderr, "docsguard: scanning %s: %v\n", path, err)
-			return 2
-		}
-		for _, violation := range violations {
-			totalViolations++
-			location := fmt.Sprintf("%s:%d", path, violation.StartLine)
-			if violation.EndLine != violation.StartLine {
-				location = fmt.Sprintf("%s:%d-%d", path, violation.StartLine, violation.EndLine)
-			}
-			_, _ = fmt.Fprintf(stdout, "FORBIDDEN (%s): %s: %s\n", violation.Kind, location, violation.Kind.Explanation())
+	violations, scanned, err := docsguard.CheckAll(*root)
+	if err != nil {
+		_, _ = fmt.Fprintf(stderr, "docsguard: %v\n", err)
+		return 2
+	}
+
+	for _, v := range violations {
+		if v.Line != 0 {
+			_, _ = fmt.Fprintf(stdout, "FORBIDDEN: %s:%d: %s\n", v.File, v.Line, v.Message)
+		} else {
+			_, _ = fmt.Fprintf(stdout, "FORBIDDEN: %s: %s\n", v.File, v.Message)
 		}
 	}
 
 	_, _ = fmt.Fprintln(stdout)
-	if totalViolations != 0 {
-		_, _ = fmt.Fprintf(stderr, "docsguard: %d deprecated API-key transport example(s) found across %d scanned file(s)\n", totalViolations, scanned)
+	if len(violations) != 0 {
+		_, _ = fmt.Fprintf(stderr, "docsguard: %d violation(s) found across %d canonical document(s)\n", len(violations), scanned)
 		return 1
 	}
-	_, _ = fmt.Fprintf(stdout, "docsguard: no deprecated API-key transport example found across %d scanned file(s)\n", scanned)
+	_, _ = fmt.Fprintf(stdout, "docsguard: no violations found across %d canonical document(s)\n", scanned)
 	return 0
-}
-
-// stringSliceFlag collects a repeatable -exempt flag into a slice.
-type stringSliceFlag []string
-
-func (s *stringSliceFlag) String() string {
-	if s == nil {
-		return ""
-	}
-	return fmt.Sprint([]string(*s))
-}
-
-func (s *stringSliceFlag) Set(value string) error {
-	*s = append(*s, value)
-	return nil
 }
