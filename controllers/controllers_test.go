@@ -11,6 +11,7 @@ import (
 	"github.com/Vesperis-group/gophishfr/auth"
 	"github.com/Vesperis-group/gophishfr/config"
 	"github.com/Vesperis-group/gophishfr/internal/apikey"
+	"github.com/Vesperis-group/gophishfr/internal/credentials"
 	"github.com/Vesperis-group/gophishfr/models"
 )
 
@@ -27,6 +28,7 @@ func setupTest(t *testing.T) *testContext {
 	t.Setenv(models.InitialAdminPassword, "synthetic-controller-test-password")
 	t.Setenv(models.InitialAdminApiToken, "synthetic-controller-api-token")
 	installTestAPIKeyVerifier(t)
+	installTestEventDetailsCipher(t)
 	wd, _ := os.Getwd()
 	fmt.Println(wd)
 	conf := &config.Config{
@@ -99,6 +101,29 @@ func installTestAPIKeyVerifier(t *testing.T) {
 		t.Fatal(err)
 	}
 	models.SetAPIKeyVerifier(verifier)
+}
+
+// installTestEventDetailsCipher installs a synthetic cipher for the whole
+// controllers test suite: like the pre-existing IMAP/SMTP/webhook credential
+// paths, AddEvent now requires a configured cipher for any event with
+// non-empty Details, so every end-to-end phishing-server test that records
+// a click/open/submit event needs one, exactly as a real deployment needs
+// GOPHISHFR_CREDENTIAL_KEYRING_FILE configured.
+func installTestEventDetailsCipher(t *testing.T) {
+	t.Helper()
+	key := make([]byte, 32)
+	if _, err := rand.Read(key); err != nil {
+		t.Fatal(err)
+	}
+	keyring, err := credentials.NewKeyring("controller-test-active", map[string][]byte{"controller-test-active": key})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cipher, err := credentials.New(keyring)
+	if err != nil {
+		t.Fatal(err)
+	}
+	models.SetEventDetailsCipher(cipher)
 }
 
 func tearDown(t *testing.T, ctx *testContext) {

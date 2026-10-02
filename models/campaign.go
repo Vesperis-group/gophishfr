@@ -73,6 +73,18 @@ type CampaignStats struct {
 
 // Event contains the fields for an event
 // that occurs during the campaign
+//
+// CampaignId is set exactly once, in AddEvent, at the moment an Event is
+// first (and, per the exhaustive repository search backing this comment,
+// only ever) inserted: no code path anywhere in this repository issues an
+// UPDATE against the events table, and AddEvent always receives a freshly
+// constructed *Event (Id's Go zero value), which guarantees db.Save/Create
+// performs an INSERT rather than an UPDATE every time it is called. Details
+// is populated by the same single write and is equally never mutated
+// afterward. This immutability is what allows event_details_credentials.go
+// to bind CampaignId into the encryption AAD as OwnerID: see
+// docs/event-details-encryption.md and acceptance criterion 20 in
+// .goals/encrypt-event-details/goal.md.
 type Event struct {
 	Id         int64     `json:"-"`
 	CampaignId int64     `json:"campaign_id"`
@@ -80,6 +92,14 @@ type Event struct {
 	Time       time.Time `json:"time"`
 	Message    string    `json:"message"`
 	Details    string    `json:"details"`
+
+	// DetailsCiphertext is the AES-256-GCM envelope produced by
+	// event_details_credentials.go. It is never serialized to JSON (the API
+	// response shape must stay byte-for-byte identical, see goal.md) and is
+	// never populated by any code path with new plaintext duplicated into
+	// Details at the same time -- see AddEvent and the transition-state
+	// taxonomy documented in event_details_credentials.go.
+	DetailsCiphertext []byte `json:"-" gorm:"column:details_ciphertext"`
 }
 
 // EventDetails is a struct that wraps common attributes we want to store
@@ -154,7 +174,14 @@ func (c *Campaign) UpdateStatus(s string) error {
 	return db.Table("campaigns").Where("id=?", c.Id).Update("status", s).Error
 }
 
-// AddEvent creates a new campaign event in the database
+// AddEvent creates a new campaign event in the database. Every Event with
+// non-empty Details is encrypted before it is durably persisted -- see
+// persistEventWithEncryptedDetails in event_details_credentials.go for the
+// exact two-phase (insert shell, then encrypt-and-verify) write sequence
+// this delegates to. This function is the sole caller of that path and the
+// sole place AddEvent ever writes to the events table, which is what makes
+// it the single, provable enforcement point for "no new plaintext details
+// is ever persisted" (acceptance criterion NEW_WRITE_PLAINTEXT = NONE).
 func AddEvent(e *Event, campaignID int64) error {
 	e.CampaignId = campaignID
 	e.Time = time.Now().UTC()
@@ -163,6 +190,13 @@ func AddEvent(e *Event, campaignID int64) error {
 	// immediately before delivery and silently excludes (logging once) any
 	// webhook whose credential cannot be authenticated, so a bad ciphertext
 	// never reaches http.Client.Do and never blocks other active webhooks.
+	//
+	// This call happens before persistEventWithEncryptedDetails below, and
+	// webhook.SendAll still receives the exact same plaintext *Event as
+	// before this feature existed: webhook delivery ordering, payload shape,
+	// and the fact that it transmits Details in plaintext over HTTPS are
+	// pre-existing, separate, explicitly out-of-scope decisions (see
+	// goal.md) that this change does not alter in any way.
 	whEndPoints, err := ActiveWebhookEndpoints(webhookCredentialCipherForDelivery())
 	if err == nil {
 		webhook.SendAll(whEndPoints, e)
@@ -170,7 +204,7 @@ func AddEvent(e *Event, campaignID int64) error {
 		log.Errorf("error getting active webhooks: %v", err)
 	}
 
-	return db.Save(e).Error
+	return persistEventWithEncryptedDetails(e)
 }
 
 // getDetails retrieves the related attributes of the campaign
@@ -188,6 +222,7 @@ func (c *Campaign) getDetails() error {
 		log.Warnf("%s: events not found for campaign", err)
 		return err
 	}
+	decryptEventsInPlace(c.Events)
 	err = db.Table("templates").Where("id=?", c.TemplateId).Find(&c.Template).Error
 	if err != nil {
 		if err != gorm.ErrRecordNotFound {
@@ -424,6 +459,7 @@ func GetCampaignResults(id int64, uid int64) (CampaignResults, error) {
 		log.Errorf("%s: events not found for campaign", err)
 		return cr, err
 	}
+	decryptEventsInPlace(cr.Events)
 	return cr, err
 }
 

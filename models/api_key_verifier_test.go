@@ -596,6 +596,13 @@ func TestOfflineAPIKeyMigrationAtomicIdempotentAndIrreversible(t *testing.T) {
 	if err := goose.SetDialect("sqlite3"); err != nil {
 		t.Fatal(err)
 	}
+	// Land exactly on the API-key verifier migration's own version first,
+	// regardless of any later migration (such as event details encryption)
+	// now sitting on top of it, so the guarded Down attempted next actually
+	// targets this migration instead of whichever is newest.
+	if err := goose.DownTo(db.DB(), conf.MigrationsPath, 20260903030000); err != nil {
+		t.Fatalf("remove later migrations: %v", err)
+	}
 	if err := goose.Down(db.DB(), conf.MigrationsPath); err == nil {
 		t.Fatal("schema Down discarded irreversible verifier-only state")
 	}
