@@ -181,8 +181,21 @@ if [ "$(curl --silent --output /dev/null --write-out '%{http_code}' \
     echo "old token remained valid after reset" >&2
     exit 1
 fi
-curl --silent --fail "${base}/api/users/?api_key=${reset_token}" >/dev/null
-curl --silent --fail --request POST --data-urlencode "api_key=${reset_token}" "${base}/api/reset" >/dev/null
+# Query/form api_key transports were removed for 0.13.0 (see
+# docs/API_KEY_TRANSPORT_DEPRECATION.md). Prove the rotated token works via
+# the canonical Authorization header, and that query/form are now rejected
+# rather than silently accepted.
+curl --silent --fail --header "Authorization: ${reset_token}" "${base}/api/users/" >/dev/null
+if [ "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+    "${base}/api/users/?api_key=${reset_token}")" != "401" ]; then
+    echo "query api_key transport was unexpectedly accepted" >&2
+    exit 1
+fi
+if [ "$(curl --silent --output /dev/null --write-out '%{http_code}' \
+    --request POST --data-urlencode "api_key=${reset_token}" "${base}/api/reset")" != "401" ]; then
+    echo "form api_key transport was unexpectedly accepted" >&2
+    exit 1
+fi
 docker rm --force "${runtime}" >/dev/null
 
 # Put a verifier under the retained old pepper, then prove runtime lazy-upgrades
