@@ -39,44 +39,63 @@ compatibility.
 `Authorization: Bearer <token>` is the **only recommended and canonical**
 transport. Use it for every new integration and every first-party example.
 
-External clients also continue to authenticate, unchanged, with three
-deprecated legacy transports that remain accepted during this release:
+External clients also continue to authenticate, unchanged, with one
+deprecated legacy transport that remains accepted during this release:
 
 - a raw `Authorization` header carrying only the token, with no `Bearer`
-  prefix — deprecated, with **no removal version announced**;
-- the `api_key` query parameter — deprecated, **removal targeted for
-  `0.13.0`**; and
-- the `api_key` form parameter — deprecated, **removal targeted for
-  `0.13.0`**.
+  prefix — deprecated, with **no removal version announced**.
 
-These three were already documented here as legacy compatibility transports;
-this release does not change what they accept, only how they are documented.
-See [API-key transport deprecation](API_KEY_TRANSPORT_DEPRECATION.md) for
-migration examples, the exact `0.13.0` removal behaviour, leaked-key rotation
-and log-review guidance, and why no runtime deprecation signal (header or
-otherwise) was added. Query credentials can be exposed by URL, browser, and
-reverse-proxy access logging; migrating to the Bearer header and rotating any
-key ever sent in a query string removes that exposure going forward, but does
-not erase a copy already written to a log before migration.
+This was already documented here as a legacy compatibility transport; this
+release does not change what it accepts, only how it is documented.
+
+## Removed in `0.13.0`: query and form `api_key`
+
+The `api_key` query parameter and the `api_key` form parameter were **removed
+in `0.13.0`**, as announced in a prior release (see
+[API-key transport deprecation](API_KEY_TRANSPORT_DEPRECATION.md) for the
+full migration history, leaked-key rotation and log-review guidance, and why
+no runtime deprecation signal was ever added for either transport). A request
+carrying either — including an **empty** value, and including one that also
+carries a valid session cookie or a valid `Authorization` (Bearer or raw)
+credential — now receives the existing API JSON `401` response, with **no
+fallback** to another credential or to the session. Their presence is still
+explicitly detected so such a request can never be silently treated as
+carrying no credential at all; only their *values* are no longer accepted for
+authentication. Query credentials could previously be exposed by URL,
+browser, and reverse-proxy access logging; this removal prevents any *future*
+request from using that exposed transport, but it cannot retroactively erase
+a copy already written to a log before this change — that remains an
+operator-side log/rotation decision, exactly as the prior deprecation
+guidance already said.
 
 Authentication mechanism selection happens **before** credential validation.
-The presence of any Authorization header, query `api_key`, or form `api_key` —
-including an empty value — selects API-key-only authentication. An invalid or
-empty explicit credential never falls back to a valid web session. Multiple
-explicit values are accepted when every value is identical; distinct values
-are rejected as ambiguous rather than using the former form/query/header
-precedence.
+The presence of any Authorization header — including an empty value —
+selects API-key-only authentication; an invalid or empty explicit credential
+never falls back to a valid web session. Multiple Authorization header
+values are accepted when every value is identical; distinct values are
+rejected as ambiguous rather than using the former header precedence. The
+presence of a removed (query or form) `api_key` — by key, regardless of
+value, and regardless of any other transport present in the same request —
+is, on its own, sufficient to select API-key-only authentication and to fail
+that authentication: it is never merged into the Bearer/raw credential value
+used for lookup, and a simultaneously valid Authorization header never
+"rescues" it, even when the removed transport's value happens to be
+identical to that header's token.
 
 Explicit API credentials remain exempt from browser CSRF checks because they
 are non-ambient authority. Authentication and RBAC still validate them, so an
-empty, invalid, or conflicting attempt cannot gain access. Existing CORS,
-OPTIONS, status, response, and unsafe-method compatibility remains unchanged.
+empty, invalid, conflicting, or removed-transport attempt cannot gain access.
+Existing CORS, OPTIONS, status, response, and unsafe-method compatibility
+remains unchanged.
 
-Every explicit-credential authentication attempt (regardless of transport) is
-also subject to a per-client-IP failure-budget rate limiter: repeated
-client-attributable authentication failures from one IP eventually receive a
-generic `429` response, while successful authentications, authorization
-(RBAC) failures, and server-side failures never count against it. See
+Every explicit-credential authentication attempt (regardless of transport,
+including a removed-transport attempt) is also subject to a per-client-IP
+failure-budget rate limiter: repeated client-attributable authentication
+failures from one IP eventually receive a generic `429` response, while
+successful authentications, authorization (RBAC) failures, and server-side
+failures never count against it. A removed-transport attempt always counts as
+exactly one failure per HTTP request, even when both removed transports are
+present simultaneously. See
 [API-key authentication rate limiting](API_AUTH_RATE_LIMITING.md) for the
 exact semantics, parameters, and caveats.
 

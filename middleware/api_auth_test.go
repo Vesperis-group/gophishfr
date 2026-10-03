@@ -40,13 +40,17 @@ func TestExplicitAPICredentialExtraction(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
+			// Removed in 0.13.0 (docs/API_KEY_TRANSPORT_DEPRECATION.md):
+			// query api_key is still detected (so it can never silently
+			// fall back to session) but is no longer an accepted transport.
 			name: "query parameter",
 			makeRequest: func() *http.Request {
 				return httptest.NewRequest(http.MethodGet, "/api/test?api_key="+url.QueryEscape(testCtx.apiKey), nil)
 			},
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusUnauthorized,
 		},
 		{
+			// Removed in 0.13.0: same rule as query, for the form transport.
 			name: "form parameter",
 			makeRequest: func() *http.Request {
 				request := httptest.NewRequest(
@@ -57,15 +61,16 @@ func TestExplicitAPICredentialExtraction(t *testing.T) {
 				request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 				return request
 			},
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusUnauthorized,
 		},
 		{
+			// Removed transport: identical repeated values do not rescue it.
 			name: "identical repeated query parameters",
 			makeRequest: func() *http.Request {
 				values := url.Values{"api_key": {testCtx.apiKey, testCtx.apiKey}}
 				return httptest.NewRequest(http.MethodGet, "/api/test?"+values.Encode(), nil)
 			},
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusUnauthorized,
 		},
 		{
 			name: "identical repeated authorization headers",
@@ -78,6 +83,11 @@ func TestExplicitAPICredentialExtraction(t *testing.T) {
 			wantStatus: http.StatusOK,
 		},
 		{
+			// Removed transports (query and form) are present alongside a
+			// valid raw Authorization header carrying the identical value.
+			// The identical-value coincidence does not rescue the removed
+			// transports: their mere presence is disqualifying regardless
+			// of any value-equality with a supported transport.
 			name: "identical values across every source",
 			makeRequest: func() *http.Request {
 				values := url.Values{"api_key": {testCtx.apiKey, testCtx.apiKey}}
@@ -90,7 +100,7 @@ func TestExplicitAPICredentialExtraction(t *testing.T) {
 				request.Header.Add("Authorization", testCtx.apiKey)
 				return request
 			},
-			wantStatus: http.StatusOK,
+			wantStatus: http.StatusUnauthorized,
 		},
 		{
 			name: "distinct repeated query parameters",
@@ -142,6 +152,70 @@ func TestExplicitAPICredentialExtraction(t *testing.T) {
 					nil,
 				)
 				request.Header.Set("Authorization", "different-test-value")
+				return request
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			// Removed transport, empty value (`?api_key=`): still rejected,
+			// not treated as "no credential at all".
+			name: "query parameter empty value",
+			makeRequest: func() *http.Request {
+				return httptest.NewRequest(http.MethodGet, "/api/test?api_key=", nil)
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			// Removed transport, key present with no `=` at all: still
+			// rejected on presence alone.
+			name: "query parameter present without equals",
+			makeRequest: func() *http.Request {
+				return httptest.NewRequest(http.MethodGet, "/api/test?api_key", nil)
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			// Removed transport, empty form value: still rejected.
+			name: "form parameter empty value",
+			makeRequest: func() *http.Request {
+				request := httptest.NewRequest(
+					http.MethodPost,
+					"/api/test",
+					strings.NewReader(url.Values{"api_key": {""}}.Encode()),
+				)
+				request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				return request
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			// Removed transport present alongside a simultaneously valid
+			// raw Authorization header: the valid Authorization value must
+			// NOT "win" -- presence of the removed transport alone is
+			// disqualifying.
+			name: "query parameter present with a simultaneously valid authorization header",
+			makeRequest: func() *http.Request {
+				request := httptest.NewRequest(
+					http.MethodGet,
+					"/api/test?api_key=unrelated-removed-transport-value",
+					nil,
+				)
+				request.Header.Set("Authorization", testCtx.apiKey)
+				return request
+			},
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			// Same rule for the form transport.
+			name: "form parameter present with a simultaneously valid authorization header",
+			makeRequest: func() *http.Request {
+				request := httptest.NewRequest(
+					http.MethodPost,
+					"/api/test",
+					strings.NewReader(url.Values{"api_key": {"unrelated-removed-transport-value"}}.Encode()),
+				)
+				request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+				request.Header.Set("Authorization", testCtx.apiKey)
 				return request
 			},
 			wantStatus: http.StatusUnauthorized,
@@ -402,6 +476,22 @@ func TestAPIAuthenticationMechanismSelection(t *testing.T) {
 			session:    sessionUser,
 			wantStatus: http.StatusUnauthorized,
 		},
+		{
+			// Removed transport with a non-empty, valid-looking value and a
+			// valid session present: still 401, never session fallback.
+			name:       "valid-looking query with valid session cannot fall back",
+			target:     "/api/test?api_key=" + url.QueryEscape(testCtx.apiKey),
+			session:    sessionUser,
+			wantStatus: http.StatusUnauthorized,
+		},
+		{
+			// Same rule for the form transport.
+			name:       "valid-looking form with valid session cannot fall back",
+			target:     "/api/test",
+			form:       url.Values{"api_key": {testCtx.apiKey}},
+			session:    sessionUser,
+			wantStatus: http.StatusUnauthorized,
+		},
 	}
 
 	for _, test := range tests {
@@ -440,6 +530,9 @@ func TestAPIAuthenticationMechanismSelection(t *testing.T) {
 				}
 				if response.Header().Get("Location") != "" {
 					t.Fatal("API authentication failure redirected")
+				}
+				if IsSessionAuthentication(request) {
+					t.Fatal("a 401 explicit-credential rejection must never be marked as session authentication")
 				}
 			}
 		})
@@ -529,6 +622,46 @@ func TestCredentialAwareAPIProtection(t *testing.T) {
 			}
 		})
 	}
+}
+
+// TestCSRFExceptionsRemovedTransportStillExempt proves the removed (query
+// or form) api_key transport's mere presence -- on its own, with no
+// Authorization header at all -- still exempts the request from the
+// same-origin CSRF check, exactly as any other explicit API credential
+// does (see goal.md item 0/5: this is intentional, not a regression, since
+// a removed-transport attempt is still an explicit API-auth attempt, not a
+// browser page navigation; RequireAPIKey itself rejects the attempt with a
+// 401 further down the chain, which this test does not need to reach).
+func TestCSRFExceptionsRemovedTransportStillExempt(t *testing.T) {
+	protected := CSRFExceptions(csrf.Protect(
+		[]byte("ignored-by-cross-origin-protection"),
+		csrf.ErrorHandler(CSRFFailureHandler),
+	)(successHandler))
+
+	t.Run("query api_key alone retains the unsafe exemption", func(t *testing.T) {
+		request := httptest.NewRequest(http.MethodPost, "http://example.com/api/test?api_key=removed-transport-value", nil)
+		request.Header.Set("Sec-Fetch-Site", "cross-site")
+		response := httptest.NewRecorder()
+		protected.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("expected the removed query transport to retain the CSRF exemption, got %d", response.Code)
+		}
+	})
+
+	t.Run("form api_key alone retains the unsafe exemption", func(t *testing.T) {
+		request := httptest.NewRequest(
+			http.MethodPost,
+			"http://example.com/api/test",
+			strings.NewReader(url.Values{"api_key": {"removed-transport-value"}}.Encode()),
+		)
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		request.Header.Set("Sec-Fetch-Site", "cross-site")
+		response := httptest.NewRecorder()
+		protected.ServeHTTP(response, request)
+		if response.Code != http.StatusOK {
+			t.Fatalf("expected the removed form transport to retain the CSRF exemption, got %d", response.Code)
+		}
+	})
 }
 
 func TestSessionPasswordChangeRequired(t *testing.T) {

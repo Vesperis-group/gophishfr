@@ -216,6 +216,46 @@ func TestAPIAuthRateLimitSkipsHMACAndDBWhenBlocked(t *testing.T) {
 	}
 }
 
+// TestAPIAuthRateLimitBlockedIPRejectsRemovedTransportBeforeInspection
+// proves the blocked-IP pre-check still runs first, exactly as for every
+// other explicit-credential transport, for a request using a removed
+// (query or form) api_key transport: a blocked IP gets 429 directly,
+// without the removed transport's presence needing to be inspected at all
+// and without needing a valid-looking token.
+func TestAPIAuthRateLimitBlockedIPRejectsRemovedTransportBeforeInspection(t *testing.T) {
+	setupTest(t)
+	withFreshAPIAuthLimiter(t, ratelimit.WithFailureBurst(1), ratelimit.WithFailureRefillPerMinute(20))
+
+	const remoteAddr = "198.51.100.86:8886"
+	// Exhaust the burst of 1 using an ordinary bogus Authorization header.
+	response := httptest.NewRecorder()
+	RequireAPIKey(successHandler).ServeHTTP(response, explicitCredentialRequest(remoteAddr, "bogus-blocked-removed-transport-token"))
+	if response.Code != http.StatusUnauthorized {
+		t.Fatalf("expected the first (budget-exhausting) failure to still get historical 401, got %d", response.Code)
+	}
+
+	t.Run("query", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodGet, "/api/test?api_key=anything-at-all", nil)
+		r.RemoteAddr = remoteAddr
+		response := httptest.NewRecorder()
+		RequireAPIKey(successHandler).ServeHTTP(response, r)
+		if response.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected 429 for a blocked ip with a removed query transport, got %d", response.Code)
+		}
+	})
+
+	t.Run("form", func(t *testing.T) {
+		r := httptest.NewRequest(http.MethodPost, "/api/test", strings.NewReader("api_key=anything-at-all"))
+		r.RemoteAddr = remoteAddr
+		r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+		response := httptest.NewRecorder()
+		RequireAPIKey(successHandler).ServeHTTP(response, r)
+		if response.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected 429 for a blocked ip with a removed form transport, got %d", response.Code)
+		}
+	})
+}
+
 // TestAPIAuthRateLimitSuccessDoesNotConsumeOrResetBudget is the integration
 // proof: valid-key successes neither consume nor reset the budget.
 func TestAPIAuthRateLimitSuccessDoesNotConsumeOrResetBudget(t *testing.T) {
@@ -433,6 +473,116 @@ func TestAPIAuthRateLimitEmptyAndAmbiguousCountAsOneFailure(t *testing.T) {
 		RequireAPIKey(successHandler).ServeHTTP(response, makeAmbiguous())
 		if response.Code != http.StatusTooManyRequests {
 			t.Fatalf("expected 429 on the 21st ambiguous request, got %d", response.Code)
+		}
+	})
+}
+
+// TestAPIAuthRateLimitUnsupportedTransportCountsAsOneFailure proves the
+// 0.13.0 removal of the query/form api_key transports (see
+// docs/API_KEY_TRANSPORT_DEPRECATION.md) preserves the single-failure-per-
+// request invariant: a removed transport's mere presence is one explicit
+// API authentication failure, even when both removed transports are
+// present simultaneously in the same request, and even when a
+// simultaneously-present Authorization header would otherwise have been
+// valid.
+func TestAPIAuthRateLimitUnsupportedTransportCountsAsOneFailure(t *testing.T) {
+	testCtx := setupTest(t)
+	withFreshAPIAuthLimiter(t, ratelimit.WithFailureBurst(20), ratelimit.WithFailureRefillPerMinute(20))
+
+	t.Run("query and form both present count once per request, not twice", func(t *testing.T) {
+		const remoteAddr = "198.51.100.83:8883"
+		makeCombined := func() *http.Request {
+			r := httptest.NewRequest(
+				http.MethodPost,
+				"/api/test?api_key=query-removed-transport-value",
+				strings.NewReader("api_key=form-removed-transport-value"),
+			)
+			r.RemoteAddr = remoteAddr
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			return r
+		}
+		for i := 0; i < 19; i++ {
+			response := httptest.NewRecorder()
+			RequireAPIKey(successHandler).ServeHTTP(response, makeCombined())
+			if response.Code != http.StatusUnauthorized {
+				t.Fatalf("combined query+form failure %d: expected 401, got %d", i+1, response.Code)
+			}
+		}
+		// This 20th request carries BOTH removed transports at once; it
+		// must still count as exactly one failure, so it must still get
+		// the historical 401, not a 429.
+		response := httptest.NewRecorder()
+		RequireAPIKey(successHandler).ServeHTTP(response, makeCombined())
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("20th combined query+form request: expected historical 401, got %d", response.Code)
+		}
+		response = httptest.NewRecorder()
+		RequireAPIKey(successHandler).ServeHTTP(response, makeCombined())
+		if response.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected 429 on the 21st combined query+form request, got %d", response.Code)
+		}
+	})
+
+	t.Run("query present with a simultaneously valid authorization header counts once per request", func(t *testing.T) {
+		const remoteAddr = "198.51.100.84:8884"
+		makeRequest := func() *http.Request {
+			r := httptest.NewRequest(
+				http.MethodGet,
+				"/api/test?api_key=unrelated-removed-transport-value",
+				nil,
+			)
+			r.RemoteAddr = remoteAddr
+			r.Header.Set("Authorization", testCtx.apiKey)
+			return r
+		}
+		for i := 0; i < 19; i++ {
+			response := httptest.NewRecorder()
+			RequireAPIKey(successHandler).ServeHTTP(response, makeRequest())
+			if response.Code != http.StatusUnauthorized {
+				t.Fatalf("failure %d: expected 401 (the valid Authorization value must not \"win\"), got %d", i+1, response.Code)
+			}
+		}
+		response := httptest.NewRecorder()
+		RequireAPIKey(successHandler).ServeHTTP(response, makeRequest())
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("20th request: expected historical 401, got %d", response.Code)
+		}
+		response = httptest.NewRecorder()
+		RequireAPIKey(successHandler).ServeHTTP(response, makeRequest())
+		if response.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected 429 on the 21st request, got %d", response.Code)
+		}
+	})
+
+	t.Run("form present with a simultaneously valid authorization header counts once per request", func(t *testing.T) {
+		const remoteAddr = "198.51.100.85:8885"
+		makeRequest := func() *http.Request {
+			r := httptest.NewRequest(
+				http.MethodPost,
+				"/api/test",
+				strings.NewReader("api_key=unrelated-removed-transport-value"),
+			)
+			r.RemoteAddr = remoteAddr
+			r.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+			r.Header.Set("Authorization", testCtx.apiKey)
+			return r
+		}
+		for i := 0; i < 19; i++ {
+			response := httptest.NewRecorder()
+			RequireAPIKey(successHandler).ServeHTTP(response, makeRequest())
+			if response.Code != http.StatusUnauthorized {
+				t.Fatalf("failure %d: expected 401 (the valid Authorization value must not \"win\"), got %d", i+1, response.Code)
+			}
+		}
+		response := httptest.NewRecorder()
+		RequireAPIKey(successHandler).ServeHTTP(response, makeRequest())
+		if response.Code != http.StatusUnauthorized {
+			t.Fatalf("20th request: expected historical 401, got %d", response.Code)
+		}
+		response = httptest.NewRecorder()
+		RequireAPIKey(successHandler).ServeHTTP(response, makeRequest())
+		if response.Code != http.StatusTooManyRequests {
+			t.Fatalf("expected 429 on the 21st request, got %d", response.Code)
 		}
 	})
 }

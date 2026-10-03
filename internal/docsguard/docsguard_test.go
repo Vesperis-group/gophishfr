@@ -20,9 +20,9 @@ func messagesContain(violations []Violation, substr string) bool {
 // docs/API_AUTHENTICATION.md: it satisfies every required fact that
 // document is registered for and contains none of the forbidden literals.
 const goodAPIAuthentication = "" +
-	"Authorization: Bearer TESTTOKEN is the only recommended and canonical transport.\n" +
-	"- the api_key query parameter is deprecated, removal targeted for 0.13.0;\n" +
-	"- the api_key form parameter is deprecated, removal targeted for 0.13.0;\n" +
+	"Authorization: Bearer <token> is the only recommended and canonical transport.\n" +
+	"- the api_key query parameter was removed in 0.13.0;\n" +
+	"- the api_key form parameter was removed in 0.13.0;\n" +
 	"- a raw Authorization header with no Bearer prefix is deprecated, with no removal version announced.\n"
 
 func TestCheckFileAPIAuthenticationCompliant(t *testing.T) {
@@ -34,10 +34,10 @@ func TestCheckFileAPIAuthenticationCompliant(t *testing.T) {
 
 func TestCheckFileAPIAuthenticationMissingEachRequiredFact(t *testing.T) {
 	cases := map[string]string{
-		"bearer canonical":       "- the api_key query parameter is deprecated, removal targeted for 0.13.0;\n- the api_key form parameter is deprecated, removal targeted for 0.13.0;\n- a raw Authorization header with no Bearer prefix is deprecated, with no removal version announced.\n",
-		"query deprecated":       "Authorization: Bearer TESTTOKEN is the only recommended and canonical transport.\n- the api_key form parameter is deprecated, removal targeted for 0.13.0;\n- a raw Authorization header with no Bearer prefix is deprecated, with no removal version announced.\n",
-		"form deprecated":        "Authorization: Bearer TESTTOKEN is the only recommended and canonical transport.\n- the api_key query parameter is deprecated, removal targeted for 0.13.0;\n- a raw Authorization header with no Bearer prefix is deprecated, with no removal version announced.\n",
-		"raw no removal version": "Authorization: Bearer TESTTOKEN is the only recommended and canonical transport.\n- the api_key query parameter is deprecated, removal targeted for 0.13.0;\n- the api_key form parameter is deprecated, removal targeted for 0.13.0;\n",
+		"bearer canonical":       "- the api_key query parameter was removed in 0.13.0;\n- the api_key form parameter was removed in 0.13.0;\n- a raw Authorization header with no Bearer prefix is deprecated, with no removal version announced.\n",
+		"query removed":          "Authorization: Bearer <token> is the only recommended and canonical transport.\n- the api_key form parameter was removed in 0.13.0;\n- a raw Authorization header with no Bearer prefix is deprecated, with no removal version announced.\n",
+		"form removed":           "Authorization: Bearer <token> is the only recommended and canonical transport.\n- the api_key query parameter was removed in 0.13.0;\n- a raw Authorization header with no Bearer prefix is deprecated, with no removal version announced.\n",
+		"raw no removal version": "Authorization: Bearer <token> is the only recommended and canonical transport.\n- the api_key query parameter was removed in 0.13.0;\n- the api_key form parameter was removed in 0.13.0;\n",
 	}
 	for name, content := range cases {
 		t.Run(name, func(t *testing.T) {
@@ -56,9 +56,9 @@ func TestCheckFileAPIAuthenticationMissingEachRequiredFact(t *testing.T) {
 // whose matching text crosses a Markdown soft line break be found.
 func TestCheckFileRequiredFactAcrossSoftWrap(t *testing.T) {
 	content := "" +
-		"Authorization: Bearer TESTTOKEN is the only recommended\nand canonical transport.\n" +
-		"- the api_key query\nparameter is deprecated, removal targeted for\n0.13.0;\n" +
-		"- the api_key form\nparameter is deprecated, removal targeted for\n0.13.0;\n" +
+		"Authorization: Bearer <token> is the only recommended\nand canonical transport.\n" +
+		"- the api_key query\nparameter was removed in\n0.13.0;\n" +
+		"- the api_key form\nparameter was removed in\n0.13.0;\n" +
 		"- a raw\nAuthorization header with no Bearer prefix is deprecated, with no removal\nversion announced.\n"
 	violations := CheckFile("docs/API_AUTHENTICATION.md", content)
 	if len(violations) != 0 {
@@ -84,7 +84,7 @@ func TestCheckFileForbiddenNonBearerAuthorization(t *testing.T) {
 		t.Run(line, func(t *testing.T) {
 			violations := CheckFile("docs/API_AUTHENTICATION.md", goodAPIAuthentication+line)
 			if !messagesContain(violations, "not immediately followed by the literal") {
-				t.Fatalf("expected a forbidden non-Bearer Authorization violation for %q, got %v", line, violations)
+				t.Fatalf("expected a forbidden non-Bearer violation for %q, got %v", line, violations)
 			}
 		})
 	}
@@ -93,12 +93,12 @@ func TestCheckFileForbiddenNonBearerAuthorization(t *testing.T) {
 func TestCheckFileLegitimateBearerAuthorizationNotFlagged(t *testing.T) {
 	violations := CheckFile("docs/API_AUTHENTICATION.md", goodAPIAuthentication+"curl -H \"Authorization: Bearer TOKEN\" https://gophishfr.example/api/campaigns/42/complete\n")
 	if messagesContain(violations, "not immediately followed by the literal") {
-		t.Fatalf("did not expect a forbidden-Authorization violation for a legitimate Bearer example, got %v", violations)
+		t.Fatalf("did not expect a forbidden-Authorization violation for a legitimate Bearer header, got %v", violations)
 	}
 }
 
 func TestCheckFileGroupImportLimitsCompliant(t *testing.T) {
-	content := "| Authentication | API key, as the canonical Authorization: Bearer header (a deprecated api_key query parameter is also still accepted, targeted for removal in 0.13.0) |\n"
+	content := "| Authentication | API key, as the canonical Authorization: Bearer header (the api_key query parameter was removed in 0.13.0) |\n"
 	violations := CheckFile("docs/GROUP_IMPORT_LIMITS.md", content)
 	if len(violations) != 0 {
 		t.Fatalf("expected no violations for a compliant document, got %v", violations)
@@ -106,7 +106,7 @@ func TestCheckFileGroupImportLimitsCompliant(t *testing.T) {
 }
 
 func TestCheckFileGroupImportLimitsForbiddenExampleFails(t *testing.T) {
-	content := "| Authentication | API key, as the canonical Authorization: Bearer header (a deprecated api_key query parameter is also still accepted, targeted for removal in 0.13.0) |\n" +
+	content := "| Authentication | API key, as the canonical Authorization: Bearer header (the api_key query parameter was removed in 0.13.0) |\n" +
 		"curl \"https://gophishfr.example/api/import/group?api_key=TOKEN\"\n"
 	violations := CheckFile("docs/GROUP_IMPORT_LIMITS.md", content)
 	if !messagesContain(violations, "api_key=") {
@@ -116,9 +116,9 @@ func TestCheckFileGroupImportLimitsForbiddenExampleFails(t *testing.T) {
 
 func TestCheckFileReleaseNoteCompliant(t *testing.T) {
 	content := "" +
-		"Authorization: Bearer TESTTOKEN is, and remains, the only recommended and canonical transport.\n" +
-		"- the api_key query parameter is deprecated, removal targeted for 0.13.0.\n" +
-		"- the api_key form parameter is deprecated, removal targeted for 0.13.0.\n" +
+		"Authorization: Bearer <token> is, and remains, the only recommended and canonical transport.\n" +
+		"- the api_key query parameter was removed in 0.13.0.\n" +
+		"- the api_key form parameter was removed in 0.13.0.\n" +
 		"- a raw Authorization header is deprecated, with no removal version announced.\n" +
 		"Rotate any key ever sent as a query parameter.\n" +
 		"Review and remove historical copies of that key from access logs under your retention policy.\n"
@@ -130,9 +130,9 @@ func TestCheckFileReleaseNoteCompliant(t *testing.T) {
 
 func TestCheckFileReleaseNoteMissingRotationOrLogGuidanceFails(t *testing.T) {
 	content := "" +
-		"Authorization: Bearer TESTTOKEN is, and remains, the only recommended and canonical transport.\n" +
-		"- the api_key query parameter is deprecated, removal targeted for 0.13.0.\n" +
-		"- the api_key form parameter is deprecated, removal targeted for 0.13.0.\n" +
+		"Authorization: Bearer <token> is, and remains, the only recommended and canonical transport.\n" +
+		"- the api_key query parameter was removed in 0.13.0.\n" +
+		"- the api_key form parameter was removed in 0.13.0.\n" +
 		"- a raw Authorization header is deprecated, with no removal version announced.\n"
 	violations := CheckFile("docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md", content)
 	if !messagesContain(violations, "rotation") {
@@ -146,13 +146,13 @@ func TestCheckFileReleaseNoteMissingRotationOrLogGuidanceFails(t *testing.T) {
 // migrationGuideBase is a compliant fixture for
 // docs/API_KEY_TRANSPORT_DEPRECATION.md.
 const migrationGuideBase = "" +
-	"Authorization: Bearer TESTTOKEN is the only recommended and canonical transport.\n" +
-	"| api_key query parameter | Deprecated legacy | 0.13.0 |\n" +
-	"| api_key form parameter | Deprecated legacy | 0.13.0 |\n" +
+	"Authorization: Bearer <token> is the only recommended and canonical transport.\n" +
+	"| api_key query parameter | Removed | 0.13.0 |\n" +
+	"| api_key form parameter | Removed | 0.13.0 |\n" +
 	"A raw Authorization header is deprecated legacy, with no removal version announced.\n" +
 	"Rotate any key ever sent as a query parameter.\n" +
 	"Review and remove historical copies of that key from access logs under your retention policy.\n" +
-	"Before (deprecated):\n" +
+	"Before (removed in 0.13.0):\n" +
 	"```bash\n" +
 	"curl \"https://gophishfr.example/api/campaigns/42/complete?api_key=REPLACE_WITH_YOUR_TOKEN\"\n" +
 	"```\n" +
@@ -168,9 +168,11 @@ func TestCheckFileMigrationGuideCompliant(t *testing.T) {
 	}
 }
 
-// The migration guide's deliberate "Before (...)" deprecated examples must
-// never be flagged: it is explicitly exempt from the forbidden-literal
-// checks (see checkCanonicalExamples instead).
+// The migration guide's deliberate "Before (...)" examples -- now
+// describing a fully removed transport rather than a currently-still-
+// accepted deprecated one -- must never be flagged: it is explicitly
+// exempt from the forbidden-literal checks (see checkCanonicalExamples
+// instead).
 func TestCheckFileMigrationGuideBeforeExamplesNotFlagged(t *testing.T) {
 	violations := CheckFile("docs/API_KEY_TRANSPORT_DEPRECATION.md", migrationGuideBase)
 	if messagesContain(violations, "api_key=") {
@@ -209,7 +211,7 @@ func TestCheckFileUnregisteredPathReturnsNil(t *testing.T) {
 func TestCheckAllReadsEveryRegisteredCanonicalDocument(t *testing.T) {
 	docs := map[string]string{
 		"docs/API_AUTHENTICATION.md":                         goodAPIAuthentication,
-		"docs/GROUP_IMPORT_LIMITS.md":                        "the canonical Authorization: Bearer header (a deprecated api_key query parameter, removal in 0.13.0) |\n",
+		"docs/GROUP_IMPORT_LIMITS.md":                        "the canonical Authorization: Bearer header (the api_key query parameter, removed in 0.13.0) |\n",
 		"docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md": goodAPIAuthentication + "Rotate any key ever sent as a query parameter.\nReview and remove historical copies of that key from access logs under your retention policy.\n",
 		"docs/API_KEY_TRANSPORT_DEPRECATION.md":              migrationGuideBase,
 	}
