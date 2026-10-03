@@ -387,7 +387,7 @@ them in a fixed order, and emits their complete license texts in
 | chartjs-plugin-zoom / Hammer.JS | 2.2.0 / 2.0.8 | Timeline pan and zoom | MIT | `CLEAN` |
 | Bootstrap / Popper | 5.3.8 / 2.11.8 | Global layout, navbar, modal, tabs, dropdown, tooltip | MIT | `CLEAN`; exact Yarn dependencies replacing the manually vendored Bootstrap 3 JS/CSS above |
 | DataTables / Bootstrap 5 integration (`datatables.net-bs5`) | 3.0.3 | Admin tables | MIT | `CLEAN`; declares no dependencies at all, so it no longer pulls jQuery |
-| Moment.js | 2.30.1 | Date parsing and formatting | MIT | `CLEAN`, maintenance mode |
+| Moment.js | 2.31.0 | Date parsing and formatting | MIT | `CLEAN`, maintenance mode |
 | Papa Parse | 5.6.0 | CSV import and export | MIT | `CLEAN` |
 | Tom Select / `@orchidjs/sifter` / `@orchidjs/unicode-variants` | 2.6.2 / 1.1.0 / 1.1.2 | Campaign group multi-select only; framework-independent, no jQuery | Apache-2.0 | `CLEAN`; replaces Select2 4.0.13 |
 | UAParser.js | 0.7.41 | Recipient-controlled user-agent parsing | MIT | `CLEAN` |
