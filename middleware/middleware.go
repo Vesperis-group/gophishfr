@@ -19,6 +19,15 @@ type explicitAPICredential struct {
 	value     string
 	ambiguous bool
 	malformed bool
+	// unsupportedTransport is true when a query or form `api_key` was
+	// present (by key, regardless of value), per the 0.13.0 removal of
+	// those transports (see docs/API_KEY_TRANSPORT_DEPRECATION.md). Their
+	// mere presence is still detected -- so a request carrying one can
+	// never silently fall back to session authentication, and so
+	// CSRFExceptions' presence-based exemption still applies -- but their
+	// values are no longer folded into the Bearer/raw credential value set
+	// used for lookup/ambiguity.
+	unsupportedTransport bool
 }
 
 const apiFormParseErrorContextKey = "api_form_parse_error"
@@ -39,31 +48,42 @@ func IsSessionAuthentication(r *http.Request) bool {
 	return ok && mechanism == apiAuthenticationSession
 }
 
-// extractExplicitAPICredential collects every legacy API credential transport.
+// extractExplicitAPICredential collects every API credential transport.
 // Presence is deliberately independent from value: an empty Authorization
 // header or api_key parameter is still an explicit API-key authentication
 // attempt. Distinct values are ambiguous; identical duplicates are accepted.
+//
+// The query and form `api_key` transports were removed for 0.13.0 (see
+// docs/API_KEY_TRANSPORT_DEPRECATION.md): their presence is still detected
+// -- via unsupportedTransport -- so a request carrying one is never
+// silently treated as having no explicit credential at all, but their
+// values are no longer folded into values, the Bearer/raw credential set
+// used for lookup/ambiguity. RequireAPIKey rejects any unsupportedTransport
+// request through its existing single malformed/ambiguous/empty rejection
+// path, uniformly with every other kind of invalid explicit credential.
 func extractExplicitAPICredential(r *http.Request) explicitAPICredential {
 	// ParseForm is cached by net/http. GetContext normally called it already,
 	// while this call keeps the extractor correct in focused middleware tests.
 	parseErr := r.ParseForm()
 
+	_, queryPresent := r.URL.Query()["api_key"]
+	_, formPresent := r.PostForm["api_key"]
+	unsupportedTransport := queryPresent || formPresent
+
 	values := make([]string, 0)
-	if queryValues, ok := r.URL.Query()["api_key"]; ok {
-		values = append(values, queryValues...)
-	}
-	if formValues, ok := r.PostForm["api_key"]; ok {
-		values = append(values, formValues...)
-	}
 	for _, authorization := range r.Header.Values("Authorization") {
 		values = append(values, strings.TrimPrefix(authorization, "Bearer "))
 	}
 
 	malformed := parseErr != nil || ctx.Get(r, apiFormParseErrorContextKey) != nil
-	if len(values) == 0 && !malformed {
+	if len(values) == 0 && !malformed && !unsupportedTransport {
 		return explicitAPICredential{}
 	}
-	result := explicitAPICredential{present: true, malformed: malformed}
+	result := explicitAPICredential{
+		present:              true,
+		malformed:            malformed,
+		unsupportedTransport: unsupportedTransport,
+	}
 	if len(values) == 0 {
 		return result
 	}
@@ -206,11 +226,15 @@ func RequireAPIKey(handler http.Handler) http.Handler {
 			return
 		}
 
-		if credential.malformed || credential.ambiguous || credential.value == "" {
-			// A malformed, ambiguous, or empty explicit credential is one
+		if credential.malformed || credential.ambiguous || credential.value == "" || credential.unsupportedTransport {
+			// A malformed, ambiguous, or empty explicit credential -- or one
+			// using a removed (query/form) transport -- is one
 			// client-attributable authentication failure for this request,
 			// regardless of how many conflicting values or transports were
-			// involved.
+			// involved. A removed transport's mere presence is disqualifying
+			// even when a simultaneously-present Authorization header would
+			// otherwise have been valid: it never "wins" against an
+			// unsupported-transport attempt.
 			limiter.RecordFailure(clientIP)
 			JSONError(w, http.StatusUnauthorized, "Invalid API Key")
 			return

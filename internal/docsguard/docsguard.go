@@ -128,19 +128,19 @@ var (
 			regexp.MustCompile(`(?i)\b(?:canonical|recommended)\b`),
 		},
 	}
-	factQueryDeprecated0130 = requiredFact{
-		name: "the api_key query parameter must be marked deprecated with removal targeted for 0.13.0",
+	factQueryRemoved0130 = requiredFact{
+		name: "the api_key query parameter must be marked removed in 0.13.0 (not merely deprecated)",
 		patterns: []*regexp.Regexp{
 			regexp.MustCompile(`(?i)query.{0,30}api_key.{0,20}parameter|api_key.{0,20}query.{0,10}parameter`),
-			regexp.MustCompile(`(?i)deprecat\w*`),
+			regexp.MustCompile(`(?i)remov\w*`),
 			regexp.MustCompile(`0\.13\.0`),
 		},
 	}
-	factFormDeprecated0130 = requiredFact{
-		name: "the api_key form parameter must be marked deprecated with removal targeted for 0.13.0",
+	factFormRemoved0130 = requiredFact{
+		name: "the api_key form parameter must be marked removed in 0.13.0 (not merely deprecated)",
 		patterns: []*regexp.Regexp{
 			regexp.MustCompile(`(?i)form.{0,30}api_key.{0,20}parameter|api_key.{0,20}form.{0,10}parameter`),
-			regexp.MustCompile(`(?i)deprecat\w*`),
+			regexp.MustCompile(`(?i)remov\w*`),
 			regexp.MustCompile(`0\.13\.0`),
 		},
 	}
@@ -224,22 +224,32 @@ type canonicalDoc struct {
 	// exemption from the two forbid* checks above (its "Before (...)"
 	// examples are expected, explicit, and exempt by definition), paired
 	// with a positive assertion that its "After (...)" examples still
-	// show the canonical transport.
+	// show the canonical transport. As of 0.13.0
+	// (security/remove-legacy-api-key-transports), the migration guide's
+	// query/form "Before (...)" examples describe a fully removed
+	// transport rather than a currently still-accepted deprecated one;
+	// that is purely a documentation-prose change (the doc now says
+	// "removed" instead of "deprecated, removal targeted") and requires
+	// no change to this exemption's mechanics: it was never, and remains
+	// not, conditioned on whether the "Before" transport is deprecated or
+	// removed, only on its being explicitly introduced by that heading.
 	checkCanonicalExamples bool
 }
 
 // canonicalDocs is the authoritative, maintained list of documentation
-// files this PR (security/deprecate-legacy-api-key-transports, #64) ships
-// for the API-key transport deprecation, and the deterministic facts each
-// one must state. See the package doc comment's "The canonical documents
-// this PR ships" section for why exactly these four, and no others.
+// files this repository ships for the API-key transport deprecation
+// (security/deprecate-legacy-api-key-transports, #64) and its 0.13.0
+// removal (security/remove-legacy-api-key-transports), and the
+// deterministic facts each one must state. See the package doc comment's
+// "The canonical documents this PR ships" section for why exactly these
+// four, and no others.
 var canonicalDocs = []canonicalDoc{
 	{
 		path: "docs/API_AUTHENTICATION.md",
 		requiredFacts: []requiredFact{
 			factBearerCanonical,
-			factQueryDeprecated0130,
-			factFormDeprecated0130,
+			factQueryRemoved0130,
+			factFormRemoved0130,
 			factRawDeprecatedNoRemovalVersion,
 		},
 		forbidNonBearerAuthorization:     true,
@@ -249,7 +259,7 @@ var canonicalDocs = []canonicalDoc{
 		path: "docs/GROUP_IMPORT_LIMITS.md",
 		requiredFacts: []requiredFact{
 			factBearerCanonical,
-			factQueryDeprecated0130,
+			factQueryRemoved0130,
 		},
 		forbidNonBearerAuthorization:     true,
 		forbidParameterCredentialLiteral: true,
@@ -258,8 +268,8 @@ var canonicalDocs = []canonicalDoc{
 		path: "docs/RELEASE_NOTE_API_KEY_TRANSPORT_DEPRECATION.md",
 		requiredFacts: []requiredFact{
 			factBearerCanonical,
-			factQueryDeprecated0130,
-			factFormDeprecated0130,
+			factQueryRemoved0130,
+			factFormRemoved0130,
 			factRawDeprecatedNoRemovalVersion,
 			factRotationGuidance,
 			factLogCleanupGuidance,
@@ -271,8 +281,8 @@ var canonicalDocs = []canonicalDoc{
 		path: "docs/API_KEY_TRANSPORT_DEPRECATION.md",
 		requiredFacts: []requiredFact{
 			factBearerCanonical,
-			factQueryDeprecated0130,
-			factFormDeprecated0130,
+			factQueryRemoved0130,
+			factFormRemoved0130,
 			factRawDeprecatedNoRemovalVersion,
 			factRotationGuidance,
 			factLogCleanupGuidance,

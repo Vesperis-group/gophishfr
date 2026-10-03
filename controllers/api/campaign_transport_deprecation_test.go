@@ -98,31 +98,59 @@ func assertCampaignCompleted(t *testing.T, server *Server, campaignID int64, req
 	}
 }
 
+// assertCampaignRejected dispatches request through the real API router and
+// asserts the removed query/form api_key transport is rejected with the
+// existing API JSON 401 response, and that the targeted campaign was never
+// completed as a side effect of the rejected attempt.
+func assertCampaignRejected(t *testing.T, server *Server, campaignID int64, request *http.Request) {
+	t.Helper()
+	recorder := httptest.NewRecorder()
+	server.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnauthorized {
+		t.Fatalf("%s %s: expected 401 for a removed transport, got %d: %s",
+			request.Method, request.URL.String(), recorder.Code, recorder.Body.String())
+	}
+	if recorder.Header().Get("Content-Type") != "application/json" {
+		t.Fatalf("expected a JSON error response, got Content-Type %q", recorder.Header().Get("Content-Type"))
+	}
+	completed, err := models.GetCampaign(campaignID, 1)
+	if err != nil {
+		t.Fatalf("reload campaign %d: %v", campaignID, err)
+	}
+	if completed.Status == models.CampaignComplete {
+		t.Fatalf("a rejected removed-transport attempt must not have completed campaign %d", campaignID)
+	}
+}
+
 // TestCampaignCompleteTransportDeprecationEquivalence is the executable
 // regression required by the deprecation guide
 // (docs/API_KEY_TRANSPORT_DEPRECATION.md "Migrate to the canonical
-// transport"): every deprecated transport shown there, and its canonical
-// Bearer replacement, must authenticate against the real router and
-// perform the identical real business operation -- completing
-// POST /api/campaigns/{id}/complete, with no trailing slash -- during this
-// deprecation release.
+// transport"). The query and form api_key transports were removed in
+// 0.13.0 (security/remove-legacy-api-key-transports): a request using
+// either must be rejected rather than completing the campaign. Raw
+// Authorization (no Bearer prefix, still deprecated with no removal
+// version announced) and the canonical Authorization: Bearer header must
+// both continue to authenticate against the real router and perform the
+// identical real business operation -- completing
+// POST /api/campaigns/{id}/complete, with no trailing slash -- exactly as
+// before.
 func TestCampaignCompleteTransportDeprecationEquivalence(t *testing.T) {
 	ctx := setupTest(t)
 	completePath := func(id int64) string {
 		return fmt.Sprintf("/api/campaigns/%d/complete", id)
 	}
 
-	t.Run("query parameter (deprecated) completes the campaign", func(t *testing.T) {
+	t.Run("query parameter (removed in 0.13.0) does not complete the campaign", func(t *testing.T) {
 		id := campaignTransportFixture(t, "query-transport-campaign")
 		request := httptest.NewRequest(
 			http.MethodPost,
 			completePath(id)+"?api_key="+url.QueryEscape(ctx.apiKey),
 			nil,
 		)
-		assertCampaignCompleted(t, ctx.apiServer, id, request)
+		assertCampaignRejected(t, ctx.apiServer, id, request)
 	})
 
-	t.Run("form parameter (deprecated) completes the equivalent campaign", func(t *testing.T) {
+	t.Run("form parameter (removed in 0.13.0) does not complete the campaign", func(t *testing.T) {
 		id := campaignTransportFixture(t, "form-transport-campaign")
 		request := httptest.NewRequest(
 			http.MethodPost,
@@ -130,7 +158,7 @@ func TestCampaignCompleteTransportDeprecationEquivalence(t *testing.T) {
 			strings.NewReader(url.Values{"api_key": {ctx.apiKey}}.Encode()),
 		)
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-		assertCampaignCompleted(t, ctx.apiServer, id, request)
+		assertCampaignRejected(t, ctx.apiServer, id, request)
 	})
 
 	t.Run("raw Authorization (deprecated) completes the equivalent campaign", func(t *testing.T) {
@@ -150,14 +178,19 @@ func TestCampaignCompleteTransportDeprecationEquivalence(t *testing.T) {
 	// Guards the documentation's explicit "no trailing slash" claim: a
 	// trailing-slash request to the same path must not silently match the
 	// complete route, which is exactly the class of mistake that made the
-	// deprecation guide's original form example non-executable.
+	// deprecation guide's original form example non-executable. This uses
+	// the canonical Authorization: Bearer header (rather than the now
+	// removed query transport the original version of this test used) so a
+	// non-200 result here can only mean a route mismatch, never ambiguity
+	// with the removed-transport rejection proven above.
 	t.Run("trailing slash does not match the complete route", func(t *testing.T) {
 		id := campaignTransportFixture(t, "trailing-slash-campaign")
 		request := httptest.NewRequest(
 			http.MethodPost,
-			completePath(id)+"/?api_key="+url.QueryEscape(ctx.apiKey),
+			completePath(id)+"/",
 			nil,
 		)
+		request.Header.Set("Authorization", "Bearer "+ctx.apiKey)
 		recorder := httptest.NewRecorder()
 		ctx.apiServer.ServeHTTP(recorder, request)
 		if recorder.Code == http.StatusOK {
