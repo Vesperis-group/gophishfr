@@ -142,7 +142,7 @@ const managedVendorLicenses = [
     sourcePath: managedFile("datatables.net", "License.txt"),
   },
   {
-    component: "Moment.js 2.30.1",
+    component: `Moment.js ${managedVersion("moment")}`,
     sourcePath: managedFile("moment", "LICENSE"),
   },
   {

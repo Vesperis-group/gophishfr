@@ -444,7 +444,7 @@ test("Bootstrap 5 frontend smoke", async ({ context, page }) => {
       })),
     ).toEqual({
       dataTables: "3.0.3",
-      moment: "2.30.1",
+      moment: "2.31.0",
       parsedCsv: "Browser Fixture",
       uaParser: "0.7.41",
     });
